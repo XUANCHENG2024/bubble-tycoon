@@ -37,11 +37,15 @@ python -m http.server 8080
    cd bubble-tycoon
    node tools/build-minigame.js
    ```
-3. 开发者工具里「导入项目」，目录选 **`minigame/`**，`projectconfig.json` 中填自己的 AppID
+3. 开发者工具里「导入项目」，目录选 **`minigame/`**（注意是这一层，不是仓库根目录），
+   `project.config.json` 中填自己的 AppID
 4. 点击编译 / 预览
 
-> `minigame/bundle.js` 是构建产物，由 4 个源文件拼接而成。  
+> `minigame/bundle.js` 是构建产物，由 5 个源文件拼接而成。  
 > **改完源码必须重新打包**，否则工具里跑的还是旧代码。
+
+> ⚠️ 平台必需的三个文件是 `game.js` / `game.json` / `project.config.json`，
+> 文件名一个字都不能差（比如写成 `projectconfig.json` 工具是不认的）。
 
 ### 浏览器预览小游戏版（免工具调试）
 
@@ -62,10 +66,11 @@ bubble-tycoon/
 │   ├── engine.js              ├─ 两版共用（零 DOM 依赖）
 │   ├── ui.js                  ── H5 版 DOM 渲染层
 │   └── main.js                ── H5 版主控
-├── minigame/
+├── minigame/                  ← 抖音开发者工具要导入的就是这一层
 │   ├── game.js                ── 小游戏入口（平台必需）
 │   ├── game.json              ── 小游戏配置（平台必需）
-│   ├── projectconfig.json     ── 项目配置（填 AppID）
+│   ├── project.config.json    ── 工程配置（平台必需，AppID 与 setting 都在这）
+│   ├── code.fortify.config.json ── 代码加固配置（开发者工具生成）
 │   ├── bundle.js              ── 构建产物（由 tools 生成）
 │   ├── preview.html          ── 浏览器预览页
 │   └── src/                   ┐
@@ -230,12 +235,41 @@ var CFG = {
 ## 八、平台规范检查清单（提审前）
 
 - [ ] `game.json` 中 `deviceOrientation: "portrait"`（本作为竖屏）
-- [ ] `projectconfig.json` 已填真实 AppID
+- [ ] `project.config.json` 已填真实 AppID，**且含 `setting.es6`**（见下方排错）
 - [ ] **五项平台能力已按上表配置完毕**（③ 默认开；④⑤① 需要后台配置）
-- [ ] 已执行 `node tools/build-minigame.js`
+- [ ] 已执行 `node tools/build-minigame.js`（它现在会顺带校验平台配置）
 - [ ] `node tools/minigame-smoke.js` 全绿（含 21 项平台能力断言）
 - [ ] 开发者工具内编译无警告
 - [ ] 真机预览正常（见下方验证要点）
+
+### 上传失败排错
+
+**`TypeError: Cannot read properties of undefined (reading 'es6')`**
+
+打包器（`byted-tma-pack_v3`）在 `transform` 阶段读 `project.config.json` 的
+`setting.es6`，而该文件里**只有 `appid`、没有 `setting`** 就会直接崩 ——
+报错栈里完全不提是哪个文件，很难定位。
+
+`project.config.json` 的三个必需字段（缺一即崩）：
+
+```json
+{
+  "appid": "tt...",
+  "projectname": "bubble-tycoon",
+  "setting": {
+    "es6": true        ← 本作源码确实用了 ES6（箭头函数 / const / 展开运算符）
+  }
+}
+```
+
+两种修法，任选其一：
+
+1. 直接改 `minigame/project.config.json`（仓库里已给出完整版本）。
+2. 开发者工具右上角「详情 → 本地设置」里勾一次「ES6 转 ES5」，工具会自己写回 `setting`。
+   注意：工具重写文件时可能把它精简掉，改完最好再打开确认一次。
+
+`node tools/build-minigame.js` 现在会在打包前校验这三个文件与 `setting.es6`，
+缺了会直接报错退出，不用等上传到平台才发现。
 
 ---
 

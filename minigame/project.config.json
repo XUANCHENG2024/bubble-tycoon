@@ -1,3 +1,22 @@
 {
-    "appid": "tt9c4beaf602329a5a02"
+  "appid": "tt9c4beaf602329a5a02",
+  "projectname": "bubble-tycoon",
+  "description": "奶茶星球 · Bubble Tycoon —— 30 天街头奶茶帝国",
+  "compileType": "game",
+  "setting": {
+    "es6": true,
+    "urlCheck": false,
+    "autoCompile": false,
+    "mockUpdate": false,
+    "mockLogin": false,
+    "compileHotReLoad": false,
+    "nativeCompile": false
+  },
+  "packOptions": {
+    "ignore": [
+      { "type": "folder", "value": "src" },
+      { "type": "folder", "value": ".vscode" },
+      { "type": "file", "value": "preview.html" }
+    ]
+  }
 }

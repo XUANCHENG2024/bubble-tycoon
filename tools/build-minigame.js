@@ -37,6 +37,52 @@ if (typeof tt !== 'undefined'
 }
 `;
 
+/**
+ * 平台配置自检。
+ *
+ * 踩过的坑：project.config.json 里只写了 appid、没有 setting，
+ * 上传时打包器读 setting.es6 直接崩 ——
+ *     TypeError: Cannot read properties of undefined (reading 'es6')
+ *       at transform (byted-tma-pack_v3/dest/index.js)
+ * 报错信息完全没提是哪个文件，排查成本很高。
+ * 所以这里在打包前把三个必要文件与 setting 一并校验掉。
+ */
+function checkConfig() {
+  const need = [
+    ['game.js', '小游戏入口（平台必需）'],
+    ['game.json', '小游戏配置（平台必需）'],
+    ['project.config.json', '工程配置（平台必需）'],
+  ];
+  let bad = 0;
+  for (const [f, why] of need) {
+    if (!fs.existsSync(path.join(root, 'minigame', f))) {
+      console.error(`✘ 缺少 minigame/${f} —— ${why}`);
+      bad++;
+    }
+  }
+
+  const p = path.join(root, 'minigame', 'project.config.json');
+  if (fs.existsSync(p)) {
+    let c = null;
+    try { c = JSON.parse(fs.readFileSync(p, 'utf8')); }
+    catch (e) { console.error('✘ project.config.json 不是合法 JSON：' + e.message); bad++; }
+
+    if (c) {
+      if (!c.setting || typeof c.setting.es6 !== 'boolean') {
+        console.error('✘ project.config.json 缺少 setting.es6（布尔值）—— '
+          + '缺少它上传会报 "Cannot read properties of undefined (reading \'es6\')"');
+        bad++;
+      }
+      if (!c.appid) {
+        console.error('✘ project.config.json 未填 appid');
+        bad++;
+      }
+    }
+  }
+  if (bad) process.exit(1);
+  console.log('✔ 平台配置文件校验通过（game.js / game.json / project.config.json）');
+}
+
 function build() {
   let out = '';
   for (const [label, file] of PARTS) {
@@ -59,4 +105,5 @@ function build() {
   console.log('  未压缩体积对首屏包很关键：当前为纯文本 JS，gzip 后通常可压到 1/3 左右。');
 }
 
+checkConfig();
 build();
