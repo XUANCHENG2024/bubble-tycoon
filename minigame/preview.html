@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<!--
+  浏览器预览页：用 <canvas> 承载与抖音小游戏完全相同的 bundle。
+  目的只有一个 —— 让「改代码 → 看效果」不用每次都打开抖音开发者工具。
+  真实提交到平台时走的是 game.js + game.json，与本页无关。
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#170a2e">
+<title>奶茶星球 · Bubble Tycoon（小游戏预览）</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #170a2e;
+    touch-action: manipulation;
+    -webkit-user-select: none; user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+  }
+  #gc { display: block; width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script src="./bundle.js"></script>
+</body>
+</html>
