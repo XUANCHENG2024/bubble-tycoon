@@ -2,15 +2,13 @@
 
 30 天街头奶茶帝国 —— 策略经营类完整游戏。
 
-**在线试玩**：把本仓库部署到任意静态托管即可（见 [DEPLOY.md](DEPLOY.md)）。
-
 同一个游戏，两套渲染后端，**共用同一份数据层与引擎层**：
 
 | | H5 版 | 抖音小游戏版 |
 |---|---|---|
 | 目录 | 根目录（`index.html`） | `minigame/` |
 | 渲染 | DOM + CSS | Canvas 2D 全绘制 |
-| 打开方式 | 浏览器直接打开 `index.html` | 抖音开发者工具打开 `minigame/` |
+| 打开方式 | 浏览器直接双击 `index.html` | 抖音开发者工具打开 `minigame/` |
 | 共用源码 | `js/data.js`、`js/engine.js`（字节级相同） | 同左 |
 
 ---
@@ -55,8 +53,6 @@ python -m http.server 8080
 ```
 bubble-tycoon/
 ├── README.md                  ← 本文件
-├── DEPLOY.md                  ← 在线部署步骤
-├── 真机验证清单.md
 ├── index.html                 ── H5 版入口
 ├── styles.css                 ── H5 版样式
 ├── js/
@@ -68,8 +64,8 @@ bubble-tycoon/
 │   ├── game.js                ── 小游戏入口（平台必需）
 │   ├── game.json              ── 小游戏配置（平台必需）
 │   ├── projectconfig.json     ── 项目配置（填 AppID）
-│   ├── bundle.js              ── 构建产物（由 tools 生成，不入库）
-│   ├── preview.html           ── 浏览器预览页
+│   ├── bundle.js              ── 构建产物（由 tools 生成）
+│   ├── preview.html          ── 浏览器预览页
 │   └── src/                   ┐
 │       ├── platform.js        │ 平台适配层
 │       ├── gfx.js             │ Canvas 绘制基础
@@ -141,11 +137,11 @@ node tools/sim.js 40           # 数值平衡（40 局）
 | 音效 | WebAudio 实时合成（8 种） | **静音** | 小游戏无 AudioContext，`tt.createInnerAudioContext` 需真实音频文件，为控制首屏包体积暂未内置。接口已留好，放入音频文件即可启用 |
 | 存档码导入 | 可直接粘贴 | 从剪贴板读取 | 小游戏无文本输入框 |
 | 战绩卡片 | 可下载 PNG | 暂未实现 | 小游戏内无 `<a download>`；如需可改为调用 `tt.saveImageToPhotosAlbum` |
-| 跨设备同步 | 无 | 无 | 按需求范围，暂不实现 |
+| 跨设备同步 | 无 | 无 | 按需求第 5 条，暂不实现 |
 
 ---
 
-## 六、技术要点（为什么这么组织）
+## 六、技術要点（为什么这么组织）
 
 **1. 引擎层零 DOM 依赖**
 `js/data.js` 与 `js/engine.js` 从不碰 `document` / `window` / `localStorage`。
@@ -176,11 +172,12 @@ H5 下自动用 localStorage（隐私模式自动降级到内存）；
 - [ ] 已执行 `node tools/build-minigame.js`
 - [ ] `node tools/minigame-smoke.js` 全绿
 - [ ] 开发者工具内编译无警告
-- [ ] 真机预览正常（见 [真机验证清单.md](真机验证清单.md)）
+- [ ] 真机预览正常（见下方验证要点）
 
 ---
 
-## 八、部署与真机验证
+## 八、真机验证要点
 
-- 部署见 **[DEPLOY.md](DEPLOY.md)**
-- 真机验证见 **[真机验证清单.md](真机验证清单.md)**
+详见 **`真机验证清单.md`**。
+
+部署到线上见 **`DEPLOY.md`**（GitHub Pages / Netlify / 其它静态托管三套步骤）。
