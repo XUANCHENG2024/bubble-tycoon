@@ -59,8 +59,16 @@ python -m http.server 8080
 ```
 bubble-tycoon/
 ├── README.md                  ← 本文件
+├── 上线资料.md                 ── 名称 / 图标 / 文案 / 资质清单 / 提审核对
 ├── index.html                 ── H5 版入口
 ├── styles.css                 ── H5 版样式
+├── assets/
+│   ├── icon-512.png           ── 游戏图标（512×512 直角，上传这个）
+│   ├── icon-1024.png          ── 图标高清母版
+│   └── icon-192.png           ── 小尺寸预览 / favicon
+├── legal/
+│   ├── privacy.html           ── 隐私政策（提审必填链接）
+│   └── terms.html             ── 用户协议（提审必填链接）
 ├── js/
 │   ├── data.js                ┐
 │   ├── engine.js              ├─ 两版共用（零 DOM 依赖）
@@ -276,5 +284,7 @@ var CFG = {
 ## 九、真机验证要点
 
 详见 **`真机验证清单.md`**。
+
+上线要填的名称、图标、文案、资质清单见 **`上线资料.md`**。
 
 部署到线上见 **`DEPLOY.md`**（GitHub Pages / Netlify / 其它静态托管三套步骤）。
