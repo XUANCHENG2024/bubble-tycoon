@@ -247,6 +247,64 @@ function doAct(act, id, extra) {
   if (act === 'tab') { VIEW.tab = id; VIEW.scroll[id] = 0; beep('up', 560, 0.05); return; }
   if (act === 'help') { VIEW.modal = { type: 'help' }; return; }
   if (act === 'chart') { VIEW.modal = { type: 'report', day: s.day }; return; }
+
+  /* --- 抖音平台能力入口（实现见 minigame/src/caps.js） ---
+     这几项的回调全部由平台异步返回，所以统一用 toast 反馈结果。
+     注意 addShortcut / requestSubscribeMessage 必须由用户点击同步触发，
+     doAct 正是由 tt.onTouchEnd 直接驱动，中间不能插入任何异步包装。 */
+  if (act === 'gift') { VIEW.modal = { type: 'gift' }; return; }
+  if (act === 'sidebar') {
+    CAPS.gotoSidebar(function (ok) {
+      toast(ok ? '👉 已前往侧边栏，从那里再进来就能领补给' : '当前环境不支持侧边栏');
+    });
+    return;
+  }
+  if (act === 'sidebarclaim') {
+    if (!CAPS.claimSidebar()) { toast('今天的补给已经领过啦'); return; }
+    var gc = grantGift('sidebar');
+    VIEW.modal = null;
+    beep('up', 880, 0.16);
+    confetti(40);
+    toast('🎁 复访补给到账：+' + money(gc) + ' 现金，全原料 +30');
+    return;
+  }
+  if (act === 'shortcut') {
+    CAPS.addShortcut(function (ok) {
+      toast(ok ? '📱 已添加到桌面' : '添加未完成，可在系统设置里手动添加');
+    });
+    return;
+  }
+  if (act === 'subscribe') {
+    CAPS.subscribe(function (ok) {
+      toast(ok ? '🔔 已开启提醒' : '未开启，可在抖音「设置 - 订阅消息管理」里重新允许');
+    });
+    return;
+  }
+  if (act === 'adreward') {
+    CAPS.showRewarded(function (watched) {
+      if (!watched) { toast('广告未看完，奖励不发放'); return; }
+      CAPS.markAd();
+      var ac = grantGift('ad');
+      VIEW.modal = null;
+      confetti(24);
+      toast('📺 广告奖励到账：+' + money(ac) + ' 现金，全原料 +30');
+    });
+    return;
+  }
+  if (act === 'iapbuy') {
+    var gl = CAPS.iapList();
+    var gi = clamp(+id | 0, 0, gl.length - 1);
+    var goods = gl[gi];
+    if (!goods) return;
+    CAPS.pay(goods, function (ok) {
+      if (!ok) { toast('支付未完成'); return; }
+      grantIap(goods);
+      VIEW.modal = null;
+      confetti(40);
+      toast('💎 ' + (goods.name || '礼包') + ' 到账');
+    });
+    return;
+  }
   if (act === 'save') { autoSave(s); toast('💾 已保存到槽 ' + (getSlot() + 1)); return; }
   if (act === 'home') { autoSave(s); VIEW.screen = 'title'; VIEW.modal = null; return; }
   if (act === 'nextday') {
@@ -254,6 +312,9 @@ function doAct(act, id, extra) {
     nextDay(s);
     if (isFinished(s)) { finishRun('finish'); return; }
     autoSave(s);
+    /* 插屏广告只放在「打烊结算 → 进入下一天」这个自然断点上，
+       并带冷却（默认 120 秒）。营业中途弹广告会直接毁掉连点手感。 */
+    CAPS.showInterstitial();
     toast('🌅 Day ' + s.day + ' 开始 · ' + (s.weather ? s.weather.emoji + ' ' + s.weather.name : ''));
     return;
   }
@@ -413,6 +474,37 @@ function offText(o) {
   return '离线 ' + (o.hours || 0) + ' 小时，外卖带来 ' + money(o.income || 0) + ' 收入。';
 }
 
+/* ---------------- 平台奖励发放 ----------------
+   额度跟着天数涨（后期补给才跟得上开销），但都设了上限 ——
+   否则后期一次补给就能顶掉整局的经营压力，玩法就废了。 */
+function giftCashOf(kind, s) {
+  var d = num(s && s.day, 1);
+  var v = kind === 'ad' ? 300 + 80 * d : 200 + 60 * d;
+  return Math.round(Math.min(v, kind === 'ad' ? 4000 : 3000));
+}
+
+function grantGift(kind) {
+  var s = _S;
+  if (!s) return 0;
+  var c = giftCashOf(kind, s);
+  s.cash = num(s.cash) + c;
+  for (var i = 0; i < ING.length; i++) {
+    s.inv[ING[i].id] = num(s.inv[ING[i].id]) + 30;
+  }
+  autoSave(s);
+  return c;
+}
+
+function grantIap(g) {
+  var s = _S;
+  if (!s || !g) return;
+  s.cash = num(s.cash) + num(g.grantCash);
+  for (var i = 0; i < ING.length; i++) {
+    s.inv[ING[i].id] = num(s.inv[ING[i].id]) + num(g.grantIng);
+  }
+  autoSave(s);
+}
+
 /* ---------------- 流程 ---------------- */
 function startGame(diff, loaded, keepSeed) {
   if (!loaded && !keepSeed) RNG.clear();
@@ -555,6 +647,8 @@ function boot() {
     VIEW.sound = false;
   }
   PLAT.bindTouch(canvas, onDown, onMove, onUp);
+  /* 从侧边栏回来时给一句提示：入口在经营面板首屏，玩家得先开一局才看得到 */
+  if (CAPS.fromSidebar()) toast('🎁 欢迎回来，开局后可领复访补给');
   requestAnimationFrame(loop);
 }
 

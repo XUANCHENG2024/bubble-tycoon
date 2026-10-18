@@ -9,6 +9,7 @@
  *
  *  顺序有讲究：
  *    platform.js 必须先跑（它注入存储后端），engine.js 才能拿到它。
+ *    caps.js 放在 engine.js 之后 —— 它运行时要用 CFG / num / todayKey。
  * ============================================================ */
 const fs = require('fs'), path = require('path');
 
@@ -19,6 +20,7 @@ const PARTS = [
   ['minigame/src/platform.js', path.join(src, 'platform.js')],
   ['js/data.js（与 H5 版共用）', path.join(root, 'js', 'data.js')],
   ['js/engine.js（与 H5 版共用）', path.join(root, 'js', 'engine.js')],
+  ['minigame/src/caps.js', path.join(src, 'caps.js')],
   ['minigame/src/gfx.js', path.join(src, 'gfx.js')],
   ['minigame/src/ui.js', path.join(src, 'ui.js')],
   ['minigame/src/main.js', path.join(src, 'main.js')],

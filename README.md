@@ -2,16 +2,16 @@
 
 30 天街头奶茶帝国 —— 策略经营类完整游戏。
 
-**🔗 在线试玩：https://xuancheng2024.github.io/bubble-tycoon/**
+**🔗 在线试玩：<https://xuancheng2024.github.io/bubble-tycoon/>**
 
 同一个游戏，两套渲染后端，**共用同一份数据层与引擎层**：
 
-| | H5 版 | 抖音小游戏版 |
-|---|---|---|
-| 目录 | 根目录（`index.html`） | `minigame/` |
-| 渲染 | DOM + CSS | Canvas 2D 全绘制 |
-| 打开方式 | 浏览器直接双击 `index.html` | 抖音开发者工具打开 `minigame/` |
-| 共用源码 | `js/data.js`、`js/engine.js`（字节级相同） | 同左 |
+|      | H5 版                               | 抖音小游戏版                |
+| ---- | ---------------------------------- | --------------------- |
+| 目录   | 根目录（`index.html`）                  | `minigame/`           |
+| 渲染   | DOM + CSS                          | Canvas 2D 全绘制         |
+| 打开方式 | 浏览器直接双击 `index.html`               | 抖音开发者工具打开 `minigame/` |
+| 共用源码 | `js/data.js`、`js/engine.js`（字节级相同） | 同左                    |
 
 ---
 
@@ -40,12 +40,12 @@ python -m http.server 8080
 3. 开发者工具里「导入项目」，目录选 **`minigame/`**，`projectconfig.json` 中填自己的 AppID
 4. 点击编译 / 预览
 
-> `minigame/bundle.js` 是构建产物，由 4 个源文件拼接而成。
+> `minigame/bundle.js` 是构建产物，由 4 个源文件拼接而成。  
 > **改完源码必须重新打包**，否则工具里跑的还是旧代码。
 
 ### 浏览器预览小游戏版（免工具调试）
 
-打包后直接用浏览器打开 **`minigame/preview.html`**，即可用鼠标操作 Canvas 版。
+打包后直接用浏览器打开 **`minigame/preview.html`**，即可用鼠标操作 Canvas 版。  
 这样改代码 → 看效果不必每次都开抖音开发者工具。
 
 ---
@@ -69,7 +69,8 @@ bubble-tycoon/
 │   ├── bundle.js              ── 构建产物（由 tools 生成）
 │   ├── preview.html          ── 浏览器预览页
 │   └── src/                   ┐
-│       ├── platform.js        │ 平台适配层
+│       ├── platform.js        │ 平台适配层（画布 / 存储 / 触摸）
+│       ├── caps.js            │ 平台能力层（侧边栏 / 加桌 / 订阅 / 广告 / 内购）
 │       ├── gfx.js             │ Canvas 绘制基础
 │       ├── ui.js              ├─ 小游戏版源码
 │       └── main.js            │
@@ -110,14 +111,14 @@ node tools/sim.js 40           # 数值平衡（40 局）
 
 当前状态（全部通过）：
 
-| 套件 | 项数 | 结果 |
-|---|---|---|
-| dom-smoke | 24 | ✅ |
-| browser-smoke | 31 | ✅ |
-| mobile-smoke | 31 | ✅ |
-| minigame-smoke | 46~47 | ✅（随机事件那一项按当局是否触发而增减） |
-| xss-verify | — | ✅ 注入未得逞 |
-| sim 40 局 | — | ✅ easy 160% / normal 88% / hard 64% |
+| 套件             | 项数    | 结果                                  |
+| -------------- | ----- | ----------------------------------- |
+| dom-smoke      | 24    | ✅                                   |
+| browser-smoke  | 31    | ✅                                   |
+| mobile-smoke   | 31    | ✅                                   |
+| minigame-smoke | 46~47 | ✅（随机事件那一项按当局是否触发而增减）                |
+| xss-verify     | —     | ✅ 注入未得逞                             |
+| sim 40 局       | —     | ✅ easy 160% / normal 88% / hard 64% |
 
 ---
 
@@ -134,51 +135,111 @@ node tools/sim.js 40           # 数值平衡（40 局）
 
 ## 五、两版的已知差异
 
-| 项 | H5 版 | 小游戏版 | 说明 |
-|---|---|---|---|
-| 音效 | WebAudio 实时合成（8 种） | **静音** | 小游戏无 AudioContext，`tt.createInnerAudioContext` 需真实音频文件，为控制首屏包体积暂未内置。接口已留好，放入音频文件即可启用 |
-| 存档码导入 | 可直接粘贴 | 从剪贴板读取 | 小游戏无文本输入框 |
-| 战绩卡片 | 可下载 PNG | 暂未实现 | 小游戏内无 `<a download>`；如需可改为调用 `tt.saveImageToPhotosAlbum` |
-| 跨设备同步 | 无 | 无 | 按需求第 5 条，暂不实现 |
+| 项     | H5 版               | 小游戏版   | 说明                                                                                   |
+| ----- | ------------------ | ------ | ------------------------------------------------------------------------------------ |
+| 音效    | WebAudio 实时合成（8 种） | **静音** | 小游戏无 AudioContext，`tt.createInnerAudioContext` 需真实音频文件，为控制首屏包体积暂未内置。接口已留好，放入音频文件即可启用 |
+| 存档码导入 | 可直接粘贴              | 从剪贴板读取 | 小游戏无文本输入框                                                                            |
+| 战绩卡片  | 可下载 PNG            | 暂未实现   | 小游戏内无 `<a download>`；如需可改为调用 `tt.saveImageToPhotosAlbum`                             |
+| 跨设备同步 | 无                  | 无      | 按需求第 5 条，暂不实现                                                                        |
 
 ---
 
 ## 六、技術要点（为什么这么组织）
 
-**1. 引擎层零 DOM 依赖**
-`js/data.js` 与 `js/engine.js` 从不碰 `document` / `window` / `localStorage`。
-这是本作能做两个渲染后端的前提，也正因此才能在 Node 里跑无头数值模拟
+**1. 引擎层零 DOM 依赖**  
+`js/data.js` 与 `js/engine.js` 从不碰 `document` / `window` / `localStorage`。  
+这是本作能做两个渲染后端的前提，也正因此才能在 Node 里跑无头数值模拟  
 （`tools/sim.js` 直接把这两个文件丢进 `vm` 就能跑完整 30 天）。
 
-**2. 存储后端可插拔**
-`engine.js` 只认 `{ get / set / remove }` 形状的后端。
-H5 下自动用 localStorage（隐私模式自动降级到内存）；
-小游戏下由 `platform.js` 在加载时注入 `tt.getStorageSync` 实现。
+**2. 存储后端可插拔**  
+`engine.js` 只认 `{ get / set / remove }` 形状的后端。  
+H5 下自动用 localStorage（隐私模式自动降级到内存）；  
+小游戏下由 `platform.js` 在加载时注入 `tt.getStorageSync` 实现。  
 **注入必须发生在引擎首次读档之前** —— 否则后端会被锁成内存版，进度根本存不进去。
 
-**3. 打包成单文件而非分模块**
-`data.js` / `engine.js` 是浏览器经典脚本（顶层 `const` 属文件作用域）。
-拆成 CommonJS 模块就得把 H5 版也改成模块，两版逻辑会各自漂移。
+**3. 打包成单文件而非分模块**  
+`data.js` / `engine.js` 是浏览器经典脚本（顶层 `const` 属文件作用域）。  
+拆成 CommonJS 模块就得把 H5 版也改成模块，两版逻辑会各自漂移。  
 拼成单文件后，两版加载的是字节级相同的引擎代码。
 
-**4. Canvas 没有排版，所以自己造了最小一套**
-`gfx.js` 提供：中文可用的自动换行、圆角卡片 / 按钮 / 进度条、**命中区域登记 + 裁剪栈**。
+**4. Canvas 没有排版，所以自己造了最小一套**  
+`gfx.js` 提供：中文可用的自动换行、圆角卡片 / 按钮 / 进度条、**命中区域登记 + 裁剪栈**。  
 其中裁剪栈是关键 —— 没有它，滚动到屏幕外的按钮也会被登记，手指点在空白处就会误触。
 
 ---
 
-## 七、平台规范检查清单（提审前）
+## 七、抖音平台能力接入
+
+平台提审清单里的五项能力已全部接入，统一收在 **`minigame/src/caps.js`**。
+游戏内入口在**经营面板首屏的「🎁 每日福利」卡片**（平台要求侧边栏入口放在主页面）。
+
+| # | 能力 | 官方接口 | 默认 | 你要做什么 |
+| - | ---- | ------- | --- | --------- |
+| ③ | **侧边栏复访（必接）** | `tt.checkScene` / `tt.onShow` / `tt.navigateToScene` | 开 | 无需配置。宿主不支持时入口自动隐藏 |
+| ② | 添加到桌面 | `tt.checkShortcut` / `tt.addShortcut` | 开 | 无需配置 |
+| ④ | 订阅消息 | `tt.requestSubscribeMessage` | 关 | 控制台「运营 → 运营能力 → 订阅消息」拿模板 id，填进 `subscribeTmplIds`（最多 3 个） |
+| ⑤ | 广告（激励 / 插屏） | `tt.createRewardedVideoAd` / `tt.createInterstitialAd` | 关 | 控制台「运营 → 变现 → 广告位」拿 id 填进两个 `AdUnitId`，**并把广告位状态切为启用** |
+| ① | 内购 | `tt.requestGamePayment`（Android/PC）<br>`tt.openAwemeCustomerService`（iOS） | 关 | 需版号 + 已开通虚拟支付。把 `iap` 置 `true` 并填 `iapGoods` |
+
+### 改配置的地方
+
+全部在 `minigame/src/caps.js` 顶部的 `CFG`：
+
+```js
+var CFG = {
+  sidebar: true,                 // ③
+  shortcut: true,                // ②
+  subscribeTmplIds: [],          // ④ 填 MSG 开头的模板 id
+  rewardedAdUnitId: '',          // ⑤ 激励视频广告位
+  interstitialAdUnitId: '',      // ⑤ 插屏广告位
+  interstitialCooldown: 120,     // 插屏最小间隔（秒）
+  adDailyLimit: 3,               // 激励视频每日可领次数
+  iap: false,                    // ① 没有版号请保持 false
+  iapZoneId: '1',
+  iapGoods: [],                  // ① [{ id, name, qty, price(分), grantCash, grantIng }]
+};
+```
+
+改完必须重新打包：`node tools/build-minigame.js`。
+
+### 侧边栏复访链路（平台必接，不接会被审核拒绝）
+
+```
+启动时 tt.onShow 注册 ──► 持续更新 launch_from / location
+玩家点「前往侧边栏」  ──► tt.navigateToScene({ scene: 'sidebar' })
+玩家从侧边栏再次进入  ──► onShow 回调 launch_from='homepage'、location='sidebar_card'
+回到游戏点「领取」    ──► 现金 + 全原料 30 份（每日 1 次）
+```
+
+两个官方反复强调的坑，代码里已经规避：
+
+1. **`tt.onShow` 必须在启动时同步注册**。注册晚了收不到回调，玩家从侧边栏回来会领不到奖。
+   `CAPS.init()` 在 `caps.js` 加载时就自调用（与 `platform.js` 的 `installStore` 同理）。
+2. **必须用 `onShow` 的最新返回值判断**，不能用启动参数 —— 热启动时启动参数不更新。
+
+### 三个容易踩的平台限制
+
+- `tt.addShortcut` / `tt.requestSubscribeMessage` **必须由用户点击同步触发**。
+  本作的 `doAct` 由 `tt.onTouchEnd` 直接驱动，所以 `caps.js` 里绝不能给它们包
+  `setTimeout` / `Promise`，否则真机会报 `must be invoked by user gesture`。
+- 激励视频**每个实例只能 `show()` 一次**，播完即释放。代码里在 `onClose` 后丢弃实例、下次重造。
+- 插屏只放在「打烊结算 → 进入下一天」这个自然断点，且带 120 秒冷却。营业中途弹广告会毁掉连点手感。
+
+---
+
+## 八、平台规范检查清单（提审前）
 
 - [ ] `game.json` 中 `deviceOrientation: "portrait"`（本作为竖屏）
 - [ ] `projectconfig.json` 已填真实 AppID
+- [ ] **五项平台能力已按上表配置完毕**（③ 默认开；④⑤① 需要后台配置）
 - [ ] 已执行 `node tools/build-minigame.js`
-- [ ] `node tools/minigame-smoke.js` 全绿
+- [ ] `node tools/minigame-smoke.js` 全绿（含 21 项平台能力断言）
 - [ ] 开发者工具内编译无警告
 - [ ] 真机预览正常（见下方验证要点）
 
 ---
 
-## 八、真机验证要点
+## 九、真机验证要点
 
 详见 **`真机验证清单.md`**。
 

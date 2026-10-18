@@ -45,8 +45,11 @@ function drawBg(ctx, W, H) {
  * ---------------------------------------------------------- */
 function layoutOf(W, H) {
   var ins = VIEW.ins || { top: 0, bottom: 0 };
-  var hudH = 84, tabH = 40;
-  if (H < 600) { hudH = 76; tabH = 36; }
+  /* HUD 分两行：第一行四个数值胶囊，第二行是目标进度条 + 右上角图标按钮。
+     图标按钮必须独占第二行 —— 它们以前压在第一行右上角，390 宽时图标区从
+     x=228 一直伸到 374，而「净资产」那格占 287~374，等于被整个盖住。 */
+  var hudH = 88, tabH = 40;
+  if (H < 600) { hudH = 80; tabH = 36; }
   /* 顶部给刘海 / 状态栏让出高度，底部给 Home 指示条让出高度。
      Canvas 没有 env(safe-area-inset-*)，这两个值由 platform.js 向宿主问来。 */
   hudH += ins.top;
@@ -173,28 +176,30 @@ function drawHUD(ctx, L, s) {
     num(s.cash) < 0 ? T.red : T.amber);
   GFX.chip(ctx, 16 + (cw + 4) * 2, y, cw, 40, '口碑', String(Math.round(num(s.rep))), T.txt);
   GFX.chip(ctx, 16 + (cw + 4) * 3, y, cw, 40, '净资产', money(num(netWorth(s))), T.amber);
-  y += 42;
+  y += 44;
 
-  /* 目标进度条 */
-  GFX.bar(ctx, 16, y + 4, W - 32, 5, num(netWorth(s)) / goal, { color: T.cyan });
-  var share = num(rivalShare(s));
-  var gt = '目标 ' + money(goal) + ' · ' + Math.round(num(netWorth(s)) / goal * 100) + '%'
-    + (share >= 0.15 ? ' · 🦑对手抢 ' + Math.round(share * 100) + '%' : '');
-  text(ctx, gt, W - 16, y - 12, { size: 9.5, align: 'right', color: T.txt3 });
-
-  /* 右上角图标按钮 */
-  var bs = 32, gap = 6, iy = 8 + L.padTop;
-  var bx = W - 16 - bs;
+  /* 右上角图标按钮：独占第二行右侧，不再压住数值胶囊 */
+  var bs = hudH < 84 ? 26 : 28, gap = 6, iy = y;
   var icons = [
     { t: '💾', act: 'save' }, { t: '🏠', act: 'home' },
     { t: '📖', act: 'help' }, { t: '📈', act: 'chart' },
   ];
+  var iconW = icons.length * bs + (icons.length - 1) * gap;
+  var bx = W - 16 - bs;
   for (var i = 0; i < icons.length; i++) {
     GFX.fillRR(ctx, bx, iy, bs, bs, 9, T.card2, T.line);
-    text(ctx, icons[i].t, bx + bs / 2, iy + 6, { size: 15, align: 'center' });
+    text(ctx, icons[i].t, bx + bs / 2, iy + (bs - 15) / 2, { size: 15, align: 'center' });
     GFX.addHit(bx, iy, bs, bs, icons[i].act, null, null);
     bx -= bs + gap;
   }
+
+  /* 目标进度条：宽度让出图标区，文字改到进度条下方左对齐（原来右对齐会顶到图标） */
+  var barW = Math.max(60, W - 32 - iconW - 10);
+  GFX.bar(ctx, 16, y + 2, barW, 5, num(netWorth(s)) / goal, { color: T.cyan });
+  var share = num(rivalShare(s));
+  var gt = '目标 ' + money(goal) + ' · ' + Math.round(num(netWorth(s)) / goal * 100) + '%'
+    + (share >= 0.15 ? ' · 🦑对手抢 ' + Math.round(share * 100) + '%' : '');
+  text(ctx, gt, 16, y + 12, { size: 9.5, color: T.txt3, maxW: barW });
 }
 
 function drawTabs(ctx, L) {
@@ -236,6 +241,21 @@ function drawPanelArea(ctx, L, s) {
 function panelManage(ctx, x, y, w, s) {
   var tag = TAGS[s.trend] || {};
   var nextTag = TAGS[s.nextTrend] || {};
+
+  /* 平台福利入口。
+     侧边栏复访是平台必接能力，官方明确要求「礼包入口放在游戏主页面（首页）」——
+     经营面板就是进游戏后的第一屏，所以放在最顶上。
+     没有任何一项能力可用时（没 tt / 没配广告位 / 没开内购）整块不渲染。 */
+  if (CAPS.visible()) {
+    GFX.fillRR(ctx, x, y, w, 48, 12, 'rgba(255,194,71,.10)', 'rgba(255,194,71,.38)');
+    text(ctx, '🎁', x + 12, y + 13, { size: 17 });
+    text(ctx, '每日福利', x + 36, y + 9, { size: 13, weight: 800, color: T.amber });
+    text(ctx, CAPS.summary() || '侧边栏 · 加桌面 · 开提醒', x + 36, y + 27,
+      { size: 10, color: T.txt2, maxW: w - 70 });
+    text(ctx, '›', x + w - 18, y + 14, { size: 18, weight: 700, color: T.amber });
+    GFX.addHit(x, y, w, 48, 'gift', null, null);
+    y += 58;
+  }
 
   /* 今日情报 */
   var ih = 66;
@@ -740,6 +760,75 @@ MODALS.help = function (ctx, b, m) {
   GFX.button(ctx, x, y, w, 38,
     (VIEW.sound ? '🔊 音效：开' : '🔇 音效：关'),
     { kind: 'ghost', act: 'sound', size: 12 });
+};
+
+/* 平台福利中心：侧边栏复访 / 加桌面 / 订阅消息 / 激励广告 / 内购 */
+MODALS.gift = function (ctx, b, m) {
+  var s = S();
+  var x = b.x + 14, w = b.w - 28;
+  var y = b.y + 14;
+  text(ctx, '🎁 每日福利', x, y, { size: 15, weight: 900 });
+  y += 24;
+  y += para(ctx, '来自抖音官方能力。未开通的项目不会显示在这里，'
+    + '也不会向你要任何与本局无关的权限。', x, y,
+    { size: 10, color: T.txt3, maxW: w, lineH: 15 }) + 8;
+
+  var row = function (emoji, title, sub, btn, act, id, kind, off) {
+    GFX.fillRR(ctx, x, y, w, 54, 12, T.card, T.line);
+    text(ctx, emoji, x + 11, y + 16, { size: 18 });
+    text(ctx, title, x + 38, y + 8, { size: 12.5, weight: 800, maxW: w - 130 });
+    text(ctx, sub, x + 38, y + 27, { size: 10, color: T.txt2, maxW: w - 130 });
+    if (btn) {
+      GFX.button(ctx, x + w - 100, y + 11, 90, 32, btn,
+        { kind: kind || 'ghost', act: act, id: id, size: 11, disabled: !!off });
+    }
+    y += 62;
+  };
+
+  /* ③ 侧边栏复访 —— 平台必接，入口必须放在主页面 */
+  if (CAPS.sidebarOn()) {
+    if (CAPS.sidebarClaimed()) {
+      row('🎁', '侧边栏复访', '今日已领取，明天从侧边栏进来还能再领', '已领取', null, null, 'ghost', true);
+    } else if (CAPS.fromSidebar()) {
+      row('🎁', '侧边栏复访', '补给已到账：现金 ' + money(giftCashOf('sidebar', s)) + ' + 全原料 30 份',
+        '领取', 'sidebarclaim', null, 'primary');
+    } else {
+      row('🎁', '侧边栏复访', '把本游戏放到抖音首页侧边栏，明天从那里进来即可领补给',
+        '前往侧边栏', 'sidebar', null, 'amber');
+    }
+  }
+
+  /* ② 添加到桌面 */
+  if (CAPS.cfg.shortcut) {
+    if (CAPS.shortcutAdded) {
+      row('📱', '添加到桌面', '已添加，下次从桌面一键直达', '已添加', null, null, 'ghost', true);
+    } else {
+      row('📱', '添加到桌面', '在手机桌面留个入口，回来更方便', '加桌面', 'shortcut', null, 'ghost');
+    }
+  }
+
+  /* ④ 订阅消息 */
+  if ((CAPS.cfg.subscribeTmplIds || []).length) {
+    row('🔔', '订阅消息', '上新与活动经抖音「消息 - 游戏通知」提醒你', '开启提醒', 'subscribe', null, 'ghost');
+  }
+
+  /* ⑤ 激励广告 */
+  if (CAPS.cfg.rewardedAdUnitId) {
+    var left = CAPS.adLeft();
+    row('📺', '看视频领现金', '完整看完一段短视频可领 ' + money(giftCashOf('ad', s))
+      + '，今日剩 ' + left + '/' + CAPS.cfg.adDailyLimit + ' 次',
+      left > 0 ? '领 ' + money(giftCashOf('ad', s)) : '今日用完',
+      'adreward', null, left > 0 ? 'amber' : 'ghost', left <= 0);
+  }
+
+  /* ① 内购 */
+  var goods = CAPS.iapList();
+  for (var gi = 0; gi < goods.length; gi++) {
+    var g = goods[gi];
+    row('💎', g.name || '礼包',
+      '现金 ' + money(num(g.grantCash)) + ' + 全原料 ' + num(g.grantIng) + ' 份',
+      '¥' + (num(g.price) / 100).toFixed(2), 'iapbuy', String(gi), 'primary');
+  }
 };
 
 /* 紧急进货 */

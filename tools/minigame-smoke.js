@@ -43,16 +43,17 @@ const BUNDLE = fs.readFileSync(BUNDLE_PATH, 'utf8');
  * 刻意不提供 document / window / localStorage ——
  * 一旦业务代码里漏出半个 DOM 引用，这里就会直接炸出来。
  */
-function makeEnv(screenW, screenH, sysOverride) {
+function makeEnv(screenW, screenH, sysOverride, extraTT) {
   const store = {};
   const raf = [];
   const touch = { start: null, move: null, end: null, cancel: null };
   const fakeCanvas = { width: 0, height: 0, getContext: () => fakeCtx(), addEventListener() { } };
+  let showCb = null;
 
   const sys = Object.assign(
     { windowWidth: screenW, windowHeight: screenH, pixelRatio: 2 },
     sysOverride || {});
-  const tt = {
+  const tt = Object.assign({
     getSystemInfoSync: () => sys,
     createCanvas: () => fakeCanvas,
     onTouchStart: fn => { touch.start = fn; },
@@ -64,7 +65,9 @@ function makeEnv(screenW, screenH, sysOverride) {
     removeStorageSync: k => { delete store[k]; },
     getClipboardData: o => { if (o && o.success) o.success({ data: '' }); },
     setClipboardData: () => { },
-  };
+    /* 侧边栏复访靠它拿最新启动参数，基础环境也提供，方便测试注入 */
+    onShow: fn => { showCb = fn; },
+  }, extraTT || {});
 
   const ctx = {
     console, Math, JSON, Date, Object, Array, String, Number, Boolean, Error, Set, Map,
@@ -126,6 +129,8 @@ function makeEnv(screenW, screenH, sysOverride) {
     ctx, MG, G, V, store, touch, frames, findHit, tap,
     touchStart, touchDrag, touchEnd, tapAt,
     inCtx,
+    /** 模拟宿主回调 onShow（用来造「从侧边栏回来」的场景） */
+    show: op => { if (showCb) showCb(op || {}); },
     get frameErr() { return frameErr; },
     get frameHits() { return frameHits; },
     get loadErr() { return loadErr; },
@@ -343,6 +348,140 @@ check(!!V.end && !!V.end.grade, `结局页有评级：${V.end ? V.end.grade : '�
 check(!!findHit('again'), '结局页「再来一局」有可点区域');
 tap('again'); frames(1);
 check(V.screen === 'game' && MG.S.day === 1, '「再来一局」可重开新的一局');
+
+/* ------------------------------------------------------------
+ *  抖音平台能力：侧边栏复访 / 加桌面 / 订阅消息 / 广告 / 内购
+ *
+ *  基础环境的 tt 只有 6 个 API，这里补一套「完整 tt」来验证：
+ *    1. 能力全开时入口真的出现、按钮真的调到了对应官方 API
+ *    2. 一项都没配时入口完全不出现（不能给玩家一个点了没反应的按钮）
+ * ---------------------------------------------------------- */
+const capCalls = [];
+const adBox = { rewarded: null };
+const capTT = {
+  checkScene: o => { capCalls.push('checkScene'); if (o.success) o.success({ isExist: true }); },
+  navigateToScene: o => {
+    capCalls.push('navigateToScene:' + o.scene);
+    if (o.success) o.success({ code: 0, errMsg: 'navigateToScene:ok' });
+  },
+  checkShortcut: o => { capCalls.push('checkShortcut'); if (o.success) o.success({ exist: false }); },
+  addShortcut: o => { capCalls.push('addShortcut'); if (o.success) o.success({ errMsg: 'addShortcut:ok' }); },
+  requestSubscribeMessage: o => {
+    capCalls.push('subscribe:' + (o.tmplIds || []).length);
+    const r = { errMsg: 'requestSubscribeMessage:ok' };
+    (o.tmplIds || []).forEach(id => { r[id] = 'accept'; });
+    if (o.success) o.success(r);
+  },
+  createRewardedVideoAd: o => {
+    capCalls.push('createRewardedVideoAd');
+    adBox.rewarded = {
+      _close: null,
+      onLoad() { }, onError() { }, offError() { }, load() { },
+      onClose(fn) { this._close = fn; },
+      show() { capCalls.push('rewardedShow'); return Promise.resolve(); },
+      /* 测试专用：模拟「用户完整看完」 */
+      fire(isEnded) { if (this._close) this._close({ isEnded: isEnded !== false }); },
+    };
+    return adBox.rewarded;
+  },
+  createInterstitialAd: o => {
+    capCalls.push('createInterstitialAd');
+    return { onClose() { }, show() { return Promise.resolve(); } };
+  },
+  requestGamePayment: o => {
+    capCalls.push('pay:' + o.buyQuantity);
+    if (o.success) o.success({});
+  },
+  openAwemeCustomerService: o => {
+    capCalls.push('payIos:' + o.orderAmount);
+    if (o.success) o.success({});
+  },
+};
+
+const cap = makeEnv(390, 844, null, capTT);
+const C = cap.ctx.CAPS;
+C.cfg.rewardedAdUnitId = 'test-rewarded';
+C.cfg.interstitialAdUnitId = 'test-interstitial';
+C.cfg.subscribeTmplIds = ['MSG_TEST_1'];
+C.cfg.iap = true;
+C.cfg.iapGoods = [{ id: 'pearl60', name: '60 珍珠', qty: 60, price: 600, grantCash: 1200, grantIng: 60 }];
+
+cap.frames(2);
+check(capCalls.indexOf('checkScene') >= 0, '启动时即调用 tt.checkScene 探测侧边栏支持情况');
+
+cap.tap('start'); cap.frames(1);
+cap.tap('tutskip'); cap.frames(1);
+check(!!cap.findHit('gift'), '能力可用时，经营面板首屏出现「每日福利」入口');
+
+cap.tap('gift'); cap.frames(1);
+check(cap.V.modal && cap.V.modal.type === 'gift', '可打开福利中心');
+
+/* ③ 侧边栏：未从侧边栏进来时，按钮应是「前往侧边栏」 */
+check(!!cap.findHit('sidebar'), '③ 侧边栏复访有入口（平台必接项）');
+cap.tap('sidebar'); cap.frames(1);
+check(capCalls.indexOf('navigateToScene:sidebar') >= 0,
+  '③ 点击后确实调用了 tt.navigateToScene({scene:"sidebar"})');
+
+/* ② 添加到桌面 */
+check(!!cap.findHit('shortcut'), '② 添加到桌面有入口');
+cap.tap('shortcut'); cap.frames(1);
+check(capCalls.indexOf('addShortcut') >= 0, '② 点击后确实调用了 tt.addShortcut');
+
+/* ④ 订阅消息 */
+check(!!cap.findHit('subscribe'), '④ 订阅消息有入口');
+cap.tap('subscribe'); cap.frames(1);
+check(capCalls.indexOf('subscribe:1') >= 0, '④ 点击后确实调用了 tt.requestSubscribeMessage');
+
+/* ⑤ 激励广告：看完才发奖 */
+check(!!cap.findHit('adreward'), '⑤ 激励视频有入口');
+const cashBeforeAd = cap.MG.S.cash;
+cap.tap('adreward'); cap.frames(1);
+check(capCalls.indexOf('rewardedShow') >= 0, '⑤ 点击后调用了激励视频的 show()');
+cap.frames(1);
+if (adBox.rewarded) adBox.rewarded.fire(true);
+cap.frames(1);
+check(cap.MG.S.cash > cashBeforeAd,
+  `⑤ 完整看完广告后发放奖励（现金 ${Math.round(cashBeforeAd)} → ${Math.round(cap.MG.S.cash)}）`);
+
+/* ① 内购（领完广告奖励后弹窗会关掉，这里要重新打开） */
+cap.MG.doAct('gift'); cap.frames(1);
+check(cap.V.modal && cap.V.modal.type === 'gift', '领奖后福利中心可重新打开');
+check(!!cap.findHit('iapbuy', '0'), '① 内购商品有入口');
+const cashBeforePay = cap.MG.S.cash;
+cap.tap('iapbuy', '0'); cap.frames(1);
+check(capCalls.indexOf('pay:60') >= 0, '① 点击后调用了支付下单接口');
+check(cap.MG.S.cash >= cashBeforePay + 1200,
+  `① 支付成功后发放道具（现金 +${Math.round(cap.MG.S.cash - cashBeforePay)}）`);
+
+/* 侧边栏复访完整链路：从侧边栏启动 → 可领奖 → 只能领一次 */
+cap.MG.doAct('gift'); cap.frames(1);
+check(!cap.findHit('sidebarclaim'),
+  '未从侧边栏进入时，不出现「领取奖励」按钮（不能白送）');
+
+cap.show({ launch_from: 'homepage', location: 'sidebar_card' });
+cap.MG.doAct('gift'); cap.frames(1);
+check(!!cap.findHit('sidebarclaim'), '从侧边栏启动后出现「领取奖励」按钮');
+
+const cashBeforeClaim = cap.MG.S.cash;
+cap.tap('sidebarclaim'); cap.frames(1);
+check(cap.MG.S.cash > cashBeforeClaim,
+  `领取复访补给后现金增加（${Math.round(cashBeforeClaim)} → ${Math.round(cap.MG.S.cash)}）`);
+
+cap.MG.doAct('gift'); cap.frames(1);
+check(!cap.findHit('sidebarclaim'), '同一天不能重复领取（按钮变为「已领取」）');
+
+/* ⑤ 插屏：只在「打烊结算 → 进入下一天」这个自然断点上触发 */
+cap.V.modal = null; cap.frames(1);
+cap.MG.doAct('nextday'); cap.frames(1);
+check(capCalls.indexOf('createInterstitialAd') >= 0, '⑤ 进入下一天时触发插屏广告（自然断点）');
+
+/* 一项都没配 → 入口完全不出现 */
+const plain = makeEnv(390, 844);
+plain.frames(2);
+plain.tap('start'); plain.frames(1);
+plain.tap('tutskip'); plain.frames(1);
+check(!plain.findHit('gift'),
+  '未配置任何平台能力时不显示入口（不给出点了没反应的按钮）');
 
 console.log('');
 if (failed === 0) console.log('✅ 小游戏冒烟测试全部通过（' + step + ' 项）');
