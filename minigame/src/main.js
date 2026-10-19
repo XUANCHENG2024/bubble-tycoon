@@ -77,6 +77,9 @@ function buzz(kind) {
 
 /* ---------------- 主循环 ---------------- */
 var lastT = 0;
+/* 小游戏没有 beforeunload / pagehide 可用，进程被系统回收时上次动作以来的进度会全丢。
+   这里每 5 秒兜一次底（营业中不存：中途存档无法还原现场，存了也没意义）。 */
+var lastAutoSaveAt = 0;
 function loop(now) {
   /* 先续帧，再干活。
      把 requestAnimationFrame 放在末尾的话，任何一帧抛异常都会让整条 rAF 链断掉 ——
@@ -107,6 +110,10 @@ function step(dt) {
   /* 出杯/流失发生在 tick 里、进货研发发生在 doAct 里，两条路都可能达成任务，
      统一在这里收口最省事（空数组时开销就是一次长度判断）。 */
   emitQuests();
+  if (s && s.phase !== 'open' && Date.now() - lastAutoSaveAt > 5000) {
+    lastAutoSaveAt = Date.now();
+    autoSave(s);
+  }
   if (s && s.phase === 'prep' && s.pendingEvent && !VIEW.modal) {
     VIEW.modal = { type: 'event' };
   }
@@ -284,7 +291,9 @@ function doAct(act, id, extra) {
   /* --- 全局 --- */
   if (act === 'tab') { VIEW.tab = id; VIEW.scroll[id] = 0; beep('up', 560, 0.05); return; }
   if (act === 'help') { VIEW.modal = { type: 'help' }; return; }
-  if (act === 'chart') { VIEW.modal = { type: 'report', day: s.day }; return; }
+  /* 必须走独立的 chart 弹窗：report 底部固定带「进入 Day N」按钮，
+     复用它会让备货阶段看一眼曲线就直接跳到第二天。 */
+  if (act === 'chart') { VIEW.modal = { type: 'chart' }; return; }
 
   /* --- 抖音平台能力入口（实现见 minigame/src/caps.js） ---
      这几项的回调全部由平台异步返回，所以统一用 toast 反馈结果。
@@ -344,7 +353,45 @@ function doAct(act, id, extra) {
     return;
   }
   if (act === 'save') { autoSave(s); toast('💾 已保存到槽 ' + (getSlot() + 1)); return; }
-  if (act === 'home') { autoSave(s); VIEW.screen = 'title'; VIEW.modal = null; return; }
+  /* 回主菜单前必须先把营业停掉：主循环只看 phase==='open' 就继续 tick，
+     不停的话回到标题页后一天照样打完，结算弹窗会盖在标题页上。 */
+  if (act === 'home') {
+    if (s.phase === 'open' && s.sim) { togglePause(s, true); toast('⏸ 已暂停营业'); }
+    autoSave(s); VIEW.screen = 'title'; VIEW.modal = null; return;
+  }
+
+  /* --- 下面四项 H5 都有，小游戏原本漏了 --- */
+  if (act === 'autofill') {
+    var af = autoFill(s);
+    if (af.bought) { toast('🛒 补货 ' + af.bought + ' 单位 · -' + money(af.spent)); }
+    else toast('现金或仓位不足');
+    return;
+  }
+  if (act === 'scout') {
+    if (s.trendKnown) { toast('已经调研过了'); return; }
+    if (num(s.cash) < 150) { toast('现金不足'); return; }
+    s.cash = num(s.cash) - 150; s.trendKnown = true;
+    var tg = TAGS[s.nextTrend] || {};
+    toast('🔍 明日流行：' + (tg.emoji || '') + ' ' + (tg.name || ''));
+    return;
+  }
+  if (act === 'teambuild') {
+    var tb = teamBuild(s);
+    if (tb.ok) toast('🎉 团建完成，全员体力回满！-' + money(tb.cost));
+    else toast(tb.msg || '无法团建');
+    return;
+  }
+  if (act === 'endless') {
+    var eg = startEndless(s);
+    VIEW.modal = null;
+    VIEW.screen = 'game';
+    VIEW.tab = 'manage';
+    VIEW.scroll = { manage: 0, lab: 0, up: 0, staff: 0, rival: 0, ach: 0 };
+    confetti(40); buzz('long');
+    toast('♾️ 无尽模式！新目标 ' + money(eg));
+    autoSave(s);
+    return;
+  }
   if (act === 'nextday') {
     VIEW.modal = null;
     nextDay(s);
@@ -416,7 +463,10 @@ function doAct(act, id, extra) {
   }
   if (act === 'rivalact') {
     var ar = rivalAction(s, id);
-    toast('🏙️ ' + (ar.msg || '行动完成'));
+    /* rivalAction 返回的是 { ok, msgs, cost }，没有 msg ——
+       读 msg 会把「XX 跳槽加入！」这类具体结果整段丢掉。 */
+    var txt = (ar && ar.msgs && ar.msgs.length) ? ar.msgs.join('，') : (ar && ar.msg) || '行动完成';
+    toast('🏙️ ' + txt);
     return;
   }
   if (act === 'prestige') {
@@ -509,7 +559,10 @@ function doImportText(text) {
 }
 
 function offText(o) {
-  return '离线 ' + (o.hours || 0) + ' 小时，外卖带来 ' + money(o.income || 0) + ' 收入。';
+  /* claimOffline() 返回 { mins, gain }。读 hours/income 会永远显示「0 小时 ¥0」。 */
+  var m = Math.round(num(o && o.mins, 0));
+  var hm = m >= 60 ? Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分' : m + ' 分钟';
+  return '离线 ' + hm + '，外卖带来 ' + money(num(o && o.gain, 0)) + ' 收入。';
 }
 
 /* ---------------- 平台奖励发放 ----------------
@@ -521,14 +574,25 @@ function giftCashOf(kind, s) {
   return Math.round(Math.min(v, kind === 'ad' ? 4000 : 3000));
 }
 
+/** 按仓库剩余空间发放原料。
+    原来直接 += 固定量，会越过 storageCap —— 之后所有进货都返回「仓库装不下了」，
+    玩家只能干等库存耗到线下，等于领个补给把进货功能锁死了。 */
+function grantIng(s, each) {
+  var room = Math.max(0, Math.round(storageCap(s) - invUsed(s)));
+  if (room <= 0) return 0;
+  var per = Math.max(0, Math.floor(room / Math.max(1, ING.length)));
+  if (per <= 0) return 0;
+  var give = Math.min(per, each);
+  for (var i = 0; i < ING.length; i++) s.inv[ING[i].id] = num(s.inv[ING[i].id]) + give;
+  return give * ING.length;
+}
+
 function grantGift(kind) {
   var s = _S;
   if (!s) return 0;
   var c = giftCashOf(kind, s);
   s.cash = num(s.cash) + c;
-  for (var i = 0; i < ING.length; i++) {
-    s.inv[ING[i].id] = num(s.inv[ING[i].id]) + 30;
-  }
+  grantIng(s, 30);
   autoSave(s);
   return c;
 }
@@ -537,9 +601,7 @@ function grantIap(g) {
   var s = _S;
   if (!s || !g) return;
   s.cash = num(s.cash) + num(g.grantCash);
-  for (var i = 0; i < ING.length; i++) {
-    s.inv[ING[i].id] = num(s.inv[ING[i].id]) + num(g.grantIng);
-  }
+  grantIng(s, num(g.grantIng));
   autoSave(s);
 }
 
@@ -555,6 +617,9 @@ function startGame(diff, loaded, keepSeed) {
   VIEW.modal = null;
   /* 连续登录的创业基金在这里落进这一局（没签到会自动补签） */
   var lb = takeLoginBonus(s, _META);
+  /* 读档可能停在 report（结算弹窗开着时被系统回收）。不补弹的话玩家既看不到结算
+     也没有「进入下一天」，只能重开当天 —— 而重开会让营收/工资/stats 重复计一次。 */
+  if (s.phase === 'report') VIEW.modal = { type: 'report', day: s.day };
   autoSave(s);
   if (lb) { toast('🔥 连续登录 ' + lb.streak + ' 天，创业基金 +' + money(lb.cash)); confetti(16); buzz('short'); }
   /* 首次游玩自动开引导；读档则续上未完成的进度 */
@@ -633,7 +698,7 @@ function finishRun(kind) {
 
   var st = s.stats || {};
   VIEW.end = {
-    emoji: e, title: tt, grade: g,
+    kind: kind, emoji: e, title: tt, grade: g,
     sub: kind === 'bankrupt'
       ? '你在 Day ' + s.day + ' 破产了，店铺被房东收回。'
       : (ratio >= 1 ? '净资产 ' + money(nw) + '，超额完成目标！'

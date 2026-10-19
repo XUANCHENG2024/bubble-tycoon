@@ -239,7 +239,10 @@ check(!!again && again.day === 2, `存档读回一致：Day ${again ? again.day 
 
 /* 弹窗 */
 MG.doAct('chart'); frames(1);
-check(V.modal && V.modal.type === 'report', '图标按钮可打开经营报表');
+check(V.modal && V.modal.type === 'chart', '图标按钮可打开经营报表（独立的 chart 弹窗）');
+/* 回归锁定：报表弹窗绝不能是 report —— 它底部固定带「进入 Day N」，
+   备货阶段点一下就会跳过整天（不结算房租工资、不产生营收）。 */
+check(!V.modal || !findHit('nextday'), '报表弹窗里没有「进入下一天」按钮（不会误跳天）');
 tap('close'); frames(1);
 /* 当天若触发了随机事件，关掉报表后事件弹窗会立刻接上（与 H5 版一致）。
    所以这里不能断言「没有任何弹窗」，而要看报表本身是否已关。 */
@@ -276,26 +279,32 @@ small.tap('tutskip');
 small.frames(1);
 check(small.V.tab === 'manage', '小屏开局默认停在经营面板');
 
-/* 裁剪是否真的生效：滚动前「开门营业」在屏幕外，就不该能被点到 */
-check(!small.findHit('open'),
-  '小屏上未滚动时，屏幕外的「开门营业」不可点（裁剪生效）');
+/* 备货阶段的主操作「开门营业」现在是钉在底部的，不随面板滚动 ——
+   面板加上任务卡 / 新闻 / 日志后已经高过一屏，主操作不能藏进滚动区。
+   所以这里改为断言：未滚动时它在，滚动后它还在，且 y 不变。 */
+check(!!small.findHit('open'),
+  '小屏备货阶段「开门营业」钉在底部，未滚动即可点');
+
+/* 裁剪是否真的生效：用面板里的「+10 采购」按钮替代 —— 它在滚动区里。 */
+const tinyHit0 = small.findHit('buy', 'tea');
+check(!!tinyHit0, '小屏经营面板里的采购按钮可点');
 
 small.touchStart(180, 500);
 small.touchDrag(180, 300);
 small.touchEnd(180, 300);
 small.frames(1);
 check(small.V.scroll.manage > 0, `小屏经营面板可滚动（偏移 ${Math.round(small.V.scroll.manage)}px）`);
-check(!!small.findHit('open'), '滚动后「开门营业」进入视野且可点（命中区跟随滚动）');
+check(!!small.findHit('open'), '滚动后「开门营业」依然钉在原位（y 不随滚动变化）');
 
 /* 滚动位移后命中区必须跟着移动，否则会出现「点了没反应/点错按钮」 */
-const beforeY = small.findHit('open').y;
+const beforeY = (small.findHit('buy', 'tea') || {}).y;
 /* 反向小幅拖 40px：scroll 从 90 回到 50，按钮应跟着往上移回 40px。
    （故意不用大幅拖拽 —— 那样会被夹到 0，坐标反而回到原处，测不出位移。） */
 small.touchStart(180, 300);
 small.touchDrag(180, 340);
 small.touchEnd(180, 340);
 small.frames(1);
-const afterHit = small.findHit('open');
+const afterHit = small.findHit('buy', 'tea');
 check(!!afterHit && afterHit.y === beforeY + 40,
   `反向滚动时命中区同步位移（${beforeY} → ${afterHit ? afterHit.y : '不可见'}）`);
 
@@ -511,6 +520,55 @@ le.tap('start'); le.frames(1);
 le.tap('tutskip'); le.frames(1);
 check(le.MG.META.pendingCash === 0, '开局后创业基金已结转（pendingCash 清零）');
 check(le.MG.S.loginBonus === pend, `创业基金落进本局现金（+${Math.round(pend)}）`);
+
+/* 第二轮复查修复项的回归锁定：两版一致性 */
+const f2 = makeEnv(390, 844);
+f2.frames(2);
+f2.tap('start'); f2.frames(1);
+f2.tap('tutskip'); f2.frames(1);
+f2.MG.S.cash = 8000;
+
+/* 调研：小游戏原本没有入口，s.trendKnown 永远 false、明日预告永远是 ❓ */
+check(!!f2.findHit('scout'), '情报卡有「🔍 调研」按钮');
+const cashBeforeScout = f2.MG.S.cash;
+f2.tap('scout'); f2.frames(1);
+check(f2.MG.S.trendKnown === true, '调研后明日趋势可见（不再永远是 ❓）');
+check(f2.MG.S.cash === cashBeforeScout - 150, '调研扣了 ¥150');
+
+/* 团建：teamBuild() 原本是死代码 */
+f2.tap('tab', 'staff'); f2.frames(1);
+f2.tap('hire', '0'); f2.frames(1);
+check((f2.MG.S.staff || []).length > 0, '雇佣成功（为团建测试做准备）');
+check(!!f2.findHit('teambuild'), '员工面板有团建按钮（teamBuild 不再是死代码）');
+for (let i = 0; i < (f2.MG.S.staff || []).length; i++) f2.MG.S.staff[i].stamina = 20;
+f2.tap('teambuild'); f2.frames(1);
+check((f2.MG.S.staff || []).every(p => p.stamina > 20), '团建后体力的确回满了');
+
+/* 一键补货：原来那颗「满」按钮传 999，100% 撞仓库上限，永远只弹错误 */
+f2.tap('tab', 'manage'); f2.frames(1);
+const invBeforeFill = f2.inCtx('invUsed(_S)');
+check(!!f2.findHit('autofill'), '经营面板有「一键补货」按钮，且没有那颗必然失败的「满」');
+/* findHit 只按 act+id 匹配，extra 得自己去命中表里查 */
+const has999 = (f2.G.hits || []).some(h => h.act === 'buy' && h.extra === 999);
+check(!has999, '不存在 extra=999 的采购按钮（那颗「满」必然撞仓库上限而失败）');
+f2.tap('autofill'); f2.frames(1);
+check(f2.inCtx('invUsed(_S)') > invBeforeFill,
+  `一键补货真的进了货（${Math.round(invBeforeFill)} → ${Math.round(f2.inCtx('invUsed(_S)'))}）`);
+
+/* 离线弹窗文案：claimOffline 返回 mins/gain，读 hours/income 会永远显示 0 */
+const ot = f2.inCtx('offText({ mins: 125, gain: 300 })');
+check(/2 小时 5 分/.test(ot) && /300/.test(ot), '离线弹窗文案用了 mins/gain：' + ot);
+
+/* 平台补给不得越过仓库上限（越界后所有进货都会返回「仓库装不下了」） */
+const capT = Math.round(f2.inCtx('storageCap(_S)'));
+f2.inCtx('for (var i=0;i<ING.length;i++) _S.inv[ING[i].id] = 0; _S.inv[ING[0].id] = storageCap(_S);');
+f2.inCtx('grantIng(_S, 30)');
+check(Math.round(f2.inCtx('invUsed(_S)')) === capT,
+  `仓库已满时补给不越界（上限 ${capT}）`);
+
+/* 无尽模式在小游戏必须可达（原来 startEndless 没有任何调用点） */
+f2.MG.doAct('endless'); f2.frames(1);
+check(f2.MG.S.endless === true, '「无尽模式」在小游戏有可达入口');
 
 /* 一项都没配 → 入口完全不出现 */
 const plain = makeEnv(390, 844);

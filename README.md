@@ -127,11 +127,11 @@ node tools/sim.js 40           # 数值平衡（40 局）
 | 套件             | 项数    | 结果                                  |
 | -------------- | ----- | ----------------------------------- |
 | dom-smoke      | 26    | ✅                                   |
-| browser-smoke  | 43    | ✅                                   |
+| browser-smoke  | 45    | ✅                                   |
 | mobile-smoke   | 31    | ✅                                   |
-| minigame-smoke | 80    | ✅                                   |
+| minigame-smoke | 94~95 | ✅（随机事件那一项按当局是否触发而增减）           |
 | xss-verify     | —     | ✅ 注入未得逞                             |
-| sim 40 局       | —     | ✅ easy 171% / normal 93% / hard 72% |
+| sim 40 局       | —     | ✅ easy 173% / normal 95% / hard 72% |
 
 ---
 

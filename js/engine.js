@@ -663,6 +663,9 @@ function rushStation(s, idx) {
   bumpQuest(s, 'clicks', 1);
   const t = st.order.price * CFG.RUSH_TIP * bonus;
   s.cash += t; sim.revenue += t; sim.tips += t;
+  /* 小费进了 sim.revenue（结算报表会算），任务进度也该跟着走，
+     否则「营业额冲高」的进度条永远比报表少一截。 */
+  bumpQuest(s, 'revenue', t);
   if (st.order.progress >= 1) completeOrder(s, st);
   return { combo: sim.combo, tip: t };
 }
@@ -1196,10 +1199,11 @@ function sanitizeState(s) {
   for (const id of s.recipes) ratios[id] = clamp(num(obj(s.ratios)[id], 1), 0.5, 2.5);
   s.ratios = ratios;
 
-  /* 升级等级 0..8 */
+  /* 升级等级：按各自的 max 夹取。统一按 8 夹的话脏存档可以把 menu 顶到 7，
+     而 menu 的 max 是 6 —— menuSlots() 会算出超过设计上限的菜单位。 */
   const up = {};
-  for (const k of ['speed', 'decor', 'menu', 'storage', 'training', 'auto']) {
-    up[k] = clamp(int(obj(s.up)[k], 0), 0, 8);
+  for (const u of UPGRADES) {
+    up[u.id] = clamp(int(obj(s.up)[u.id], 0), 0, num(u.max, 8));
   }
   s.up = up;
 

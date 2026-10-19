@@ -278,6 +278,17 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     check(/连登|已领|签到/.test(bl.textContent),
       '连续登录按钮文案可读：' + bl.textContent.trim());
   }
+  /* 营销快捷键：switch 里原本没有 mktset 分支，四个按钮点了没反应也不报错 */
+  stQ.marketing = 0;
+  window.eval('UI.setTab("manage"); UI.renderAll();');
+  const mk = doc.querySelector('#panel-manage [data-act="mktset"][data-v="500"]');
+  check(!!mk, '经营面板有营销快捷键');
+  if (mk) {
+    mk.click();
+    check(window.S.marketing === 500,
+      `点击 ¥500 快捷键后营销预算变为 ${window.S.marketing}（不再是死键）`);
+  }
+
   /* 把 META 重置回「今天没签到」，再走一次真实点击，验证 data-act 接线 */
   window.META.loginDate = ''; window.META.pendingCash = 0; window.META.loginStreak = 0;
   window.eval('renderTitle()');

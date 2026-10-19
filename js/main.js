@@ -71,6 +71,9 @@ function startGame(diff, loaded, keepSeed) {
   UI.setTab('manage');
   UI.renderHUD();
   autoSave(s);
+  /* 读档可能停在 report（结算弹窗开着时关了页面）。不补弹的话玩家既看不到结算
+     也没有「进入下一天」，只能重开当天 —— 而重开会让营收/工资/stats 重复计一次。 */
+  if (s.phase === 'report') UI.showReport();
   /* 新手指引：首次游玩自动开启；读档则续上未完成的进度 */
   SFX.resume();
   if (lb) {
@@ -276,6 +279,14 @@ function doAct(act, el) {
       const r = toggleMenu(s, id);
       if (r === false) UI.toast(`上架位已满（${menuSlots(s)} 个），去升级「招牌展位」`, 'err');
       else { UI.toast(`${recipeById(id).name} ${r}`, 'ok'); SFX.click(); TUT.notify('toggle'); }
+      break;
+    }
+    /* --- 营销快捷键：原来只有 data-act="mktset"，switch 里没有这个 case，
+           点下去一路落到末尾的 pump()，既不改值也不报错 —— 四个按钮全是死键。 --- */
+    case 'mktset': {
+      s.marketing = clamp(+el.dataset.v || 0, 0, 2000);
+      SFX.click();
+      UI.toast(`📣 营销预算设为 ${money(s.marketing)}`, 'ok');
       break;
     }
     case 'scout': {
@@ -516,6 +527,10 @@ $('btnSave').addEventListener('click', () => {
   UI.renderSlots();
 });
 $('btnQuit').addEventListener('click', () => {
+  /* 主循环只看 phase==='open' 就继续 tick。退出前不停掉营业，回到标题页后
+     这一天照样打完，随后结算弹窗会盖在标题页上；存档里 phase 还会被写成 'prep'，
+     和内存里的 'open' 不一致。 */
+  if (window.S && window.S.phase === 'open' && window.S.sim) togglePause(window.S, true);
   autoSave(window.S);
   TUT.stop();
   UI.stageEnd();

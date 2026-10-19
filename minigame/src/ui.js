@@ -103,7 +103,10 @@ function drawTitle(ctx, L) {
     GFX.button(ctx, x, y, bw, 40, '💾 继续存档',
       { kind: 'ghost', act: 'continue', pressed: isPressed('continue') });
     GFX.button(ctx, x + bw + 10, y, bw, 40,
-      VIEW.dailyPlayed ? '📅 今日挑战 · 最佳 ' + money(m.dailyBest || 0) : '📅 每日挑战',
+      /* 原来读 VIEW.dailyPlayed，但这个字段全项目从未被赋值，永远 falsy，
+         昨天打过的成绩也就永远显示不出来。直接按 META 判断。 */
+      (m.dailyDate === todayKey() && m.dailyBest != null)
+        ? '📅 今日挑战 · 最佳 ' + money(m.dailyBest) : '📅 每日挑战',
       { kind: 'amber', act: 'daily', size: 11, pressed: isPressed('daily') });
   } else {
     GFX.button(ctx, x, y, w, 40, '📅 每日挑战',
@@ -238,14 +241,25 @@ function drawTabs(ctx, L) {
  * ---------------------------------------------------------- */
 function drawPanelArea(ctx, L, s) {
   var W = L.W, top = L.bodyY, H = L.H - top;
-  GFX.clipPush(ctx, 0, top, W, H);
+  /* 备货阶段把「开门营业」钉在底部。
+     面板加上任务卡 / 新闻 / 日志之后已经高过一屏，主操作若还留在滚动区最底下，
+     玩家就得先滑到底才能开门 —— 这一屏唯一的主操作不该被藏起来。 */
+  var pinH = (s.phase === 'prep' && VIEW.tab === 'manage') ? 54 + num(L.padBottom, 0) : 0;
+  GFX.clipPush(ctx, 0, top, W, H - pinH);
   var y = top + 10 - (VIEW.scroll[VIEW.tab] || 0);
   var x = 16, w = W - 32;
 
   var fn = PANELS[VIEW.tab];
   if (fn) y = fn(ctx, x, y, w, s);
-  VIEW_H = y - top + (VIEW.scroll[VIEW.tab] || 0) + 16;
+  VIEW_H = y - top + (VIEW.scroll[VIEW.tab] || 0) + 16 + pinH;
   GFX.clipPop(ctx);
+
+  if (pinH) {
+    var by = L.H - pinH;
+    GFX.fillRR(ctx, 0, by - 8, W, pinH + 8, 0, 'rgba(30,12,55,.97)', T.line);
+    GFX.button(ctx, x, by + 6, w, 44, '🚪 开门营业',
+      { kind: 'primary', act: 'open', size: 15, pressed: isPressed('open') });
+  }
 }
 
 /* ============================================================
@@ -281,7 +295,20 @@ function panelManage(ctx, x, y, w, s) {
     (tag.emoji || '') + ' ' + (tag.name || '—'), '命中销量 +55%');
   intel(ctx, x + cw * 2 + 4, y + 8, cw - 10, '明日预告',
     s.trendKnown ? (nextTag.emoji || '') + ' ' + (nextTag.name || '—') : '❓ 未知');
+  /* 调研按钮：H5 在情报卡的「明日预告」下面放了一颗，小游戏原本没有，
+     导致 s.trendKnown 永远是 false、「明日预告」永远是 ❓，scout 分支也无处触发。 */
+  if (!s.trendKnown) {
+    GFX.button(ctx, x + cw * 2 + 4, y + 32, cw - 14, 24, '🔍 调研 ¥150',
+      { kind: 'ghost', act: 'scout', size: 10, r: 7, disabled: !canAfford(s, 150), pressed: isPressed('scout') });
+  }
   y += ih + 10;
+
+  /* 市场新闻：它会实打实地改原料价格，不显示的话玩家只看到「今天怎么这么贵」。 */
+  if (s.news && s.news.text) {
+    GFX.fillRR(ctx, x, y - 6, w, 28, 10, 'rgba(255,194,71,.10)', 'rgba(255,194,71,.28)');
+    text(ctx, '📰 ' + s.news.text, x + 10, y + 2, { size: 10.5, color: T.amber, maxW: w - 20 });
+    y += 36;
+  }
 
   /* 每日任务：与 H5 版同一张卡，位置也一致（情报下面、采购上面）。
      达成即到账现金，是「再开一天」的具体理由。 */
@@ -312,7 +339,7 @@ function panelManage(ctx, x, y, w, s) {
 
   /* 采购 */
   var rows = ING.length;
-  GFX.card(ctx, x, y, w, 40 + rows * 30);
+  GFX.card(ctx, x, y, w, 40 + rows * 30 + 38);
   text(ctx, '🛒 采购', x + 10, y + 9, { size: 12.5, weight: 800 });
   text(ctx, '现金 ' + money(num(s.cash)), x + w - 10, y + 9,
     { size: 11, align: 'right', color: T.amber });
@@ -328,14 +355,18 @@ function panelManage(ctx, x, y, w, s) {
     text(ctx, (up ? '▲' : down ? '▼' : '—'), x + 122, ry + 6, { size: 10, color: col });
     text(ctx, '库存 ' + Math.round(num(s.inv[g.id])), x + 145, ry + 6, { size: 10.5, color: T.txt3 });
     /* 三个进货按钮：+10 / +50 / 满仓 */
+    /* 只留 +10 / +50。原来第三个「满」传 extra 999 给 buyIng()，
+       而仓库上限最多 1500 —— 这个按钮 100% 撞「仓库装不下了」，点了永远只弹错误。 */
     var bw = 34, bh = 24;
-    var bx = x + w - 10 - bw * 3 - 12;
+    var bx = x + w - 10 - (bw * 2 + 6);
     GFX.button(ctx, bx, ry + 1, bw, bh, '+10', { kind: 'ghost', act: 'buy', id: g.id, extra: 10, size: 10, r: 7, pressed: isPressed('buy', g.id, 10) });
     GFX.button(ctx, bx + bw + 6, ry + 1, bw, bh, '+50', { kind: 'ghost', act: 'buy', id: g.id, extra: 50, size: 10, r: 7, pressed: isPressed('buy', g.id, 50) });
-    GFX.button(ctx, bx + (bw + 6) * 2, ry + 1, bw, bh, '满', { kind: 'ghost', act: 'buy', id: g.id, extra: 999, size: 10, r: 7, pressed: isPressed('buy', g.id, 999) });
     ry += 30;
   }
-  y += 40 + rows * 30 + 10;
+  GFX.button(ctx, x + 10, ry + 2, w - 20, 30, '🛒 一键补货（按今日客流配齐）',
+    { kind: 'cyan', act: 'autofill', size: 11, r: 9, pressed: isPressed('autofill') });
+  ry += 38;
+  y += 40 + rows * 30 + 38 + 10;
 
   /* 菜单与定价 */
   var ms = s.menu || [];
@@ -376,21 +407,37 @@ function panelManage(ctx, x, y, w, s) {
   }
   y += 72;
 
-  /* 建议 */
-  var advice = adviceOf(s) || '';
-  if (advice) {
-    GFX.card(ctx, x, y, w, 46);
+  /* 建议。adviceOf() 返回的是对象数组（最多 4 条），曾经整只数组被直接塞进
+     text()，渲染出来是「[object Object],[object Object]」—— 两版不一致里最显眼的一个。 */
+  var advs = adviceOf(s) || [];
+  if (advs.length) {
+    GFX.card(ctx, x, y, w, 30 + advs.length * 20);
     text(ctx, '📌 今日建议', x + 10, y + 8, { size: 11.5, weight: 800, color: T.amber });
-    y += 24;
-    text(ctx, advice, x + 10, y, { size: 10.5, color: T.txt2, maxW: w - 20 });
-    y += 20;
-    GFX.card(ctx, x, y, w, 10 + 16);
-    y += 26 + 10;
+    var ay = y + 26;
+    for (var ai = 0; ai < advs.length; ai++) {
+      var av = advs[ai] || {};
+      text(ctx, (av.icon || '·') + ' ' + (av.text || ''), x + 10, ay, {
+        size: 10.5, maxW: w - 20,
+        color: av.level === 'warn' ? T.amber : (av.level === 'good' ? T.green : T.txt2),
+      });
+      ay += 20;
+    }
+    y += 30 + advs.length * 20 + 10;
   }
 
-  /* 开门营业 */
-  GFX.button(ctx, x, y, w, 48, '🚪 开门营业', { kind: 'primary', act: 'open', size: 15, pressed: isPressed('open') });
-  y += 58;
+  /* 店长日志：H5 有这张卡，小游戏原本不显示 —— pushLog 一直在写、一直进存档，却没人读。 */
+  var logs = (s.log || []).slice(-4);
+  if (logs.length) {
+    GFX.card(ctx, x, y, w, 30 + logs.length * 18);
+    text(ctx, '📔 店长日志', x + 10, y + 8, { size: 11.5, weight: 800, color: T.txt3 });
+    var ly = y + 26;
+    for (var li = 0; li < logs.length; li++) {
+      text(ctx, logs[li], x + 10, ly, { size: 10, color: T.txt3, maxW: w - 20 });
+      ly += 18;
+    }
+    y += 30 + logs.length * 18 + 10;
+  }
+
   return y;
 }
 
@@ -416,7 +463,8 @@ function panelLab(ctx, x, y, w, s) {
     var on = (s.menu || []).indexOf(r.id) >= 0;
     GFX.card(ctx, x, y, w, 44);
     text(ctx, r.emoji + ' ' + r.name, x + 10, y + 8, { size: 12, weight: 700 });
-    text(ctx, tagNames(r.tags) + ' · 基础 ¥' + r.base, x + 10, y + 25, { size: 10, color: T.txt3 });
+    text(ctx, tagNames(r.tags) + ' · 基础 ' + money(num(r.price, 0)), x + 10, y + 25,
+      { size: 10, color: T.txt3 });
     GFX.button(ctx, x + w - 74, y + 10, 64, 24, on ? '✅ 在售' : '上架',
       { kind: on ? 'ghost' : 'primary', act: 'toggle', id: r.id, size: 10.5, r: 8 });
     y += 52;
@@ -457,8 +505,8 @@ function panelUp(ctx, x, y, w, s) {
     GFX.card(ctx, x, y, w, 50);
     text(ctx, u.emoji + ' ' + u.name, x + 10, y + 8, { size: 12, weight: 700 });
     text(ctx, u.desc, x + 10, y + 26, { size: 10, color: T.txt3, maxW: w - 120 });
-    /* 等级点 */
-    for (var d = 0; d < 6; d++) {
+    /* 等级点：数量按各自 max 画。写死 6 的话 speed/decor（max 8）满级也只亮 6 个。 */
+    for (var d = 0; d < num(u.max, 6); d++) {
       ctx.fillStyle = d < lv ? T.cyan : 'rgba(255,255,255,.13)';
       ctx.beginPath(); ctx.arc(x + w - 100 + d * 11, y + 15, 3.5, 0, Math.PI * 2); ctx.fill();
     }
@@ -469,11 +517,12 @@ function panelUp(ctx, x, y, w, s) {
     y += 58;
   }
 
-  /* 开分店 */
-  var sc = SHOP_COSTS[num(s.shops) - 1];
+  /* 开分店。必须用 shopCost()：它带 diffOf(s).costMult，
+     直接用 SHOP_COSTS 会把地狱难度的价标少 15%，出现「按钮亮着、点了说钱不够」。 */
+  var sc = shopCost(s);
   GFX.card(ctx, x, y, w, 50);
   text(ctx, '🏪 开设分店', x + 10, y + 8, { size: 12, weight: 700 });
-  text(ctx, '当前 ' + num(s.shops) + ' 家 · 出杯位 +1、客流 +35%', x + 10, y + 26,
+  text(ctx, '当前 ' + num(s.shops) + ' 家 · 出杯位 +1、客流 +60%', x + 10, y + 26,
     { size: 10, color: T.txt3 });
   GFX.button(ctx, x + w - 76, y + 12, 66, 26, sc != null ? money(sc) : '已满', {
     kind: 'amber', act: 'shop', disabled: sc == null || !canAfford(s, sc), size: 10, r: 8,
@@ -517,6 +566,14 @@ function panelStaff(ctx, x, y, w, s) {
     GFX.button(ctx, x + w - 44, y + 18, 34, 24, '解雇', { kind: 'danger', act: 'fire', id: String(p.id), size: 10, r: 7 });
     y += 68;
   }
+  /* 团建：H5 有这个按钮，小游戏原本没有 —— teamBuild() 成了死代码，
+     员工体力只能靠随机事件或过天慢慢回。 */
+  if (st.length) {
+    var tbc = Math.round(180 * (1 + st.length * 0.4));
+    GFX.button(ctx, x, y, w, 38, '🎉 团建（全员体力回满）' + money(tbc),
+      { kind: 'amber', act: 'teambuild', size: 11.5, disabled: !canAfford(s, tbc), pressed: isPressed('teambuild') });
+    y += 48;
+  }
 
   GFX.card(ctx, x, y, w, 34);
   text(ctx, '📋 候选人', x + 10, y + 9, { size: 12.5, weight: 800 });
@@ -531,7 +588,8 @@ function panelStaff(ctx, x, y, w, s) {
       x + 10, y + 27, { size: 10, color: T.txt2 });
     GFX.button(ctx, x + w - 76, y + 14, 66, 26, '雇佣 ' + money(c.fee), {
       kind: 'primary', act: 'hire', id: String(j),
-      disabled: !canAfford(s, c.fee + c.wage), size: 10, r: 8,
+      /* 只校验聘用费：hireStaff() 也只扣 fee，多算一个 wage 会让能雇的人变灰 */
+      disabled: !canAfford(s, c.fee), size: 10, r: 8,
     });
     y += 62;
   }
@@ -551,7 +609,8 @@ function panelRival(ctx, x, y, w, s) {
   text(ctx, '抢走客流 ' + Math.round(share * 100) + '%', x + w - 10, y + 28,
     { size: 11, align: 'right', color: share > 0.15 ? T.red : T.txt2 });
   GFX.bar(ctx, x + 10, y + 52, w - 20, 8, share / 0.4, { color: T.pink });
-  text(ctx, '资金 ' + money(num(rv.cash)) + ' · 声望 ' + Math.round(num(rv.rep)),
+  /* rival 上没有 cash 字段（只有 rep / aggro / proof），写上去恒显示 ¥0 */
+  text(ctx, '声望 ' + Math.round(num(rv.rep)) + ' · 护城河 Lv.' + num(rv.proof),
     x + 10, y + 68, { size: 10.5, color: T.txt3 });
   y += 106;
 
@@ -713,8 +772,12 @@ function drawModal(ctx, L) {
   GFX.clipPush(ctx, box.x, box.y, box.w, box.h);
   fn(ctx, box, m);
   GFX.clipPop(ctx);
-  GFX.cardBtn(ctx, box.x + box.w - 34, box.y + 14, 20, 20, [{ t: '×', size: 16 }],
-    { act: 'close', r: 10 });
+  /* 事件弹窗不给 ×：step() 每帧都会重建它，给了 × 就是「关掉→下一帧又弹出来」，
+     看起来像按钮失灵。H5 的 showEvent() 同样锁死，必须选一个选项。 */
+  if (m.type !== 'event' && m.type !== 'report') {
+    GFX.cardBtn(ctx, box.x + box.w - 34, box.y + 14, 20, 20, [{ t: '×', size: 16 }],
+      { act: 'close', r: 10 });
+  }
 }
 
 var MODALS = {};
@@ -750,13 +813,57 @@ MODALS.report = function (ctx, b, m) {
   }
   y += Math.ceil(items.length / cols) * 44 + 8;
 
-  var advice = adviceOf(s) || '';
-  if (advice) {
+  var advs2 = adviceOf(s) || [];
+  if (advs2.length) {
     GFX.fillRR(ctx, x, y, w, 34, 10, 'rgba(255,194,71,.10)', 'rgba(255,194,71,.3)');
-    text(ctx, '📌 ' + advice, x + 10, y + 11, { size: 10.5, color: T.amber, maxW: w - 20 });
+    text(ctx, '📌 ' + (advs2[0].icon || '') + ' ' + (advs2[0].text || ''), x + 10, y + 11,
+      { size: 10.5, color: T.amber, maxW: w - 20 });
     y += 44;
   }
-  GFX.button(ctx, x, y, w, 40, '🌅 进入 Day ' + num(s.day), { kind: 'primary', act: 'nextday', size: 13 });
+  /* 按钮写的是「即将进入的那一天」。写 s.day 会让玩家以为这一天还没过去。 */
+  GFX.button(ctx, x, y, w, 40, '🌅 进入 Day ' + (num(s.day) + 1), { kind: 'primary', act: 'nextday', size: 13 });
+};
+
+/* 经营报表（备货阶段从 HUD 的 📈 进入）。
+   必须和 MODALS.report 分开：report 底部固定有一个「进入 Day N」按钮，
+   复用它会让「备货时看一眼曲线」直接 nextDay() 跳过整天 —— 不结算房租工资、
+   不产生营收，反复点还能一路刷到 Day 31 触发收官。 */
+MODALS.chart = function (ctx, b, m) {
+  var s = S();
+  var x = b.x + 14, w = b.w - 28;
+  var y = b.y + 14;
+  text(ctx, '📈 经营报表', x, y, { size: 15, weight: 900 });
+  text(ctx, 'Day ' + num(s.day) + ' · 净资产 ' + money(netWorth(s)), x + w, y + 2,
+    { size: 10.5, align: 'right', color: T.txt3 });
+  y += 28;
+
+  var rows = (s.history || []).slice(-14);
+  if (rows.length < 2) {
+    text(ctx, '还没有足够的数据 —— 打烊两天后这里就会出现曲线。', x, y + 16,
+      { size: 11.5, color: T.txt3, maxW: w });
+    return;
+  }
+  GFX.lineChart(ctx, x, y, w, 132,
+    [{ key: 'worth', color: T.cyan }, { key: 'revenue', color: T.amber },
+     { key: 'net', color: T.green }], rows);
+  y += 140;
+
+  var last = rows[rows.length - 1] || {};
+  var items = [
+    { k: '当日营收', v: money(last.revenue || 0), c: T.amber },
+    { k: '当日净利', v: money(last.net || 0), c: (last.net || 0) >= 0 ? T.green : T.red },
+    { k: '卖出', v: Math.round(last.cups || 0) + ' 杯', c: T.txt },
+    { k: '流失', v: Math.round(last.lost || 0) + ' 人', c: (last.lost || 0) ? T.red : T.txt2 },
+    { k: '口碑', v: Math.round(num(last.rep, 0)) + '', c: T.txt },
+    { k: '净资产', v: money(last.worth || 0), c: T.cyan },
+  ];
+  var cols = 3, cw = (w - 16) / cols;
+  for (var i = 0; i < items.length; i++) {
+    var ix = x + (i % cols) * (cw + 8), iy = y + Math.floor(i / cols) * 44;
+    GFX.fillRR(ctx, ix, iy, cw, 38, 10, T.card, T.line);
+    text(ctx, items[i].k, ix + 8, iy + 5, { size: 9.5, color: T.txt3 });
+    text(ctx, items[i].v, ix + 8, iy + 19, { size: 12.5, weight: 800, color: items[i].c, maxW: cw - 16 });
+  }
 };
 
 /* 随机事件 */
@@ -951,6 +1058,15 @@ function drawEnd(ctx, L) {
   y += Math.ceil(its.length / 2) * 40 + 12;
 
   var by = Math.min(H - 108, y + 8);
+  /* 无尽入口：H5 在结局页有一张「♾️ 继续经营」卡，小游戏原本没有，
+     导致 startEndless() 在这版没有任何调用点 —— 无尽模式彻底不可达。 */
+  if ((VIEW.end || {}).kind !== 'bankrupt') {
+    GFX.fillRR(ctx, x, by, w, 44, 12, 'rgba(53,229,240,.10)', 'rgba(53,229,240,.34)');
+    text(ctx, '♾️ 无尽模式 · 目标持续升级', x + 12, by + 14, { size: 12, weight: 800, color: T.cyan });
+    GFX.button(ctx, x + w - 96, by + 8, 84, 28, '继续经营',
+      { kind: 'cyan', act: 'endless', size: 11, r: 9, pressed: isPressed('endless') });
+    by += 52;
+  }
   GFX.button(ctx, x, by, w, 44, '🔄 再来一局', { kind: 'primary', act: 'again', size: 14 });
   GFX.button(ctx, x, by + 52, w, 40, '🏠 回到主菜单', { kind: 'ghost', act: 'home', size: 12.5 });
 }
