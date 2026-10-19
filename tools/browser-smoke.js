@@ -65,6 +65,21 @@ const tick = () => new Promise(r => setTimeout(r, 0));
   check(!!window.S, '全局状态已建立');
   check($('hudCash').textContent.startsWith('¥'), 'HUD 现金已渲染：' + $('hudCash').textContent);
 
+  /* 3b. 导出入口：UI.showExport 以前完全没有调用点，等于死代码 */
+  const btnExp = $('btnExport');
+  check(!!btnExp, '标题页存在「导出存档」按钮（UI.showExport 不再是死代码）');
+  if (btnExp) {
+    btnExp.click();
+    await tick();
+    const expTa = $('exportCode');
+    check(!!expTa && expTa.value.length > 50,
+      `点导出后生成存档码（${expTa ? expTa.value.length : 0} 字符）`);
+    const rt = expTa ? window.importSave(expTa.value) : null;
+    check(!!(rt && rt.ok), '导出的存档码可原样导入还原');
+    window.UI.closeModal();
+    await tick();
+  }
+
   /* 4. 六个面板 */
   const tabs = [...doc.querySelectorAll('.tab')].map(t => t.dataset.tab);
   check(tabs.length === 6, `Tab 数量 ${tabs.length}：${tabs.join('/')}`);

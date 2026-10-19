@@ -81,7 +81,8 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'CUSTOMER_TYPES,CUSTOMER_FACES,RIVAL_ACTIONS,RIVAL_NAMES,TYPE_WEATHER_BIAS,isWeekend,endlessGoal,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalLevel,rivalAction,updateRival,money,clamp,pick,rnd,'
   + 'QUESTS,QUEST_COUNT,questById,questPool,questGoalOf,questRewardOf,rollQuests,bumpQuest,closeQuests,questViews,'
-  + 'goalOf,startEndless,togglePause,slotInfo,hasAnySave,getSlot,setSlot,exportSave,importSave};';
+  + 'goalOf,startEndless,togglePause,slotInfo,hasAnySave,getSlot,setSlot,exportSave,importSave,'
+  + 'MILESTONE_EVERY,MILESTONE_RATIO,milestoneOf,endlessPressure,prestigeGain};';
 vm.createContext(ctx);
 vm.runInContext(src, ctx, { filename: 'bundle.js' });
 Object.assign(ctx, ctx.__D);
@@ -478,6 +479,187 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
   const snap = E.loginState(m4);
   if (snap.streak !== 1 || !snap.claimed) throw new Error('loginState 快照不对');
   ok(`连续登录：首签 ${r1.cash} 元 · 断签重置 · 续签 +1 · 奖励封顶 · 开局到账且不可重复领`);
+}
+
+/* 26. 第一轮 P1 遗留：营销清零提示 / 事件池轮换 / 无尽难度阶梯 / 结算环比 */
+{
+  /* ① 营销：当日投入打烊后归零，必须留下「昨天投了多少」供 UI 提示 */
+  const g = E.newGame('normal', 0);
+  g.marketing = 500;
+  E.openShop(g);
+  if (g.dayMarketing !== 500) throw new Error('开门时没有把营销投入记进当天');
+  if (g.marketing !== 0) throw new Error('营销投入后没有归零');
+  /* 直接推进到打烊 */
+  let n = 0;
+  while (g.phase === 'open' && n++ < 5000) E.tick(g, 1 / 30);
+  E.nextDay(g);
+  if (g.lastMarketing !== 500) throw new Error('跨天后没有保留昨日营销额（UI 无法提示）');
+  if (!g.log.some(l => String(l.t || l).indexOf('营销') >= 0)) throw new Error('跨天日志没有说明营销已消耗');
+  if (g.dayMarketing !== 0) throw new Error('新的一天营销没有归零');
+
+  /* ② 事件池：抽干之后要重新轮换，不能永久静默 */
+  const ev = E.newGame('normal', 0);
+  if (!ev.doneEvents) throw new Error('doneEvents 缺失');
+  ev.doneEvents = E.EVENTS.map(e => e.id);   /* 假装所有事件都已用过 */
+  let rolled = 0;
+  for (let i = 0; i < 400; i++) { ev.pendingEvent = null; E.nextDay(ev); if (ev.pendingEvent) rolled++; }
+  if (rolled === 0) throw new Error('事件池耗尽后永久不再出事件（应为重新轮换）');
+  if (ev.doneEvents.length > E.EVENTS.length) throw new Error('doneEvents 无限增长，轮换没有重置');
+
+  /* ③ 无尽：只抬目标不够，工资与租金要同步上浮 */
+  const en = E.newGame('normal', 0);
+  if (E.endlessPressure(en) !== 1) throw new Error('非无尽模式不该有成本压力');
+  en.endless = true; en.milestone = 1;
+  const p1 = E.endlessPressure(en);
+  en.milestone = 3;
+  const p3 = E.endlessPressure(en);
+  if (!(p3 > p1) || p1 !== 1) throw new Error('无尽压力没有随里程碑上升');
+  /* 同一局面下开了无尽，固定成本必须真的变高 */
+  const base = E.newGame('normal', 0);
+  base.staff = [{ name: 'A', emoji: '🙂', skill: 1, trait: null, wage: 100, stamina: 100 }];
+  base.shops = 2;
+  const hard = JSON.parse(JSON.stringify(base));
+  hard.endless = true; hard.milestone = 4;
+  for (const st of [base, hard]) {
+    st.menu = st.recipes.slice(0, E.menuSlots(st));
+    E.openShop(st);
+    let k = 0;
+    while (st.phase === 'open' && k++ < 5000) E.tick(st, 1 / 30);
+  }
+  if (!(hard.report.rent + hard.report.wages > base.report.rent + base.report.wages)) {
+    throw new Error('无尽里程碑没有真的抬高固定成本');
+  }
+  if (!(hard.report.pressure > 1)) throw new Error('结算没有带上压力系数，UI 无法展示');
+
+  /* ④ 结算环比：要留一份「前一天」的报告 */
+  const rp = E.newGame('normal', 0);
+  rp.menu = rp.recipes.slice(0, E.menuSlots(rp));
+  E.openShop(rp);
+  let a = 0;
+  while (rp.phase === 'open' && a++ < 5000) E.tick(rp, 1 / 30);
+  if (rp.prevReport) throw new Error('第一天不该有环比基准');
+  E.nextDay(rp);
+  rp.menu = rp.recipes.slice(0, E.menuSlots(rp));
+  E.openShop(rp);
+  let b = 0;
+  while (rp.phase === 'open' && b++ < 5000) E.tick(rp, 1 / 30);
+  if (!rp.prevReport) throw new Error('第二天结算没有留下前一天的报告，环比无从计算');
+  if (rp.prevReport.day === rp.report.day) throw new Error('prevReport 指向了自己');
+  /* 存档往返 */
+  E.setSlot(0); E.saveGame(rp);
+  const rp2 = E.loadGame(0);
+  if (!rp2.prevReport || rp2.prevReport.day !== rp.prevReport.day) throw new Error('prevReport 没有随存档保留');
+  /* 结算页要真的画得出来（环比标签 + 营销提示都在里面） */
+  E.window.S = rp;
+  UI.showReport();
+  checkHTML('结算页(环比)', E.document.getElementById('modalBox').innerHTML);
+  ok('P1 遗留：营销提示 · 事件池轮换 · 无尽成本阶梯 · 结算环比（含存档往返）');
+}
+
+/* 27. 中期目标：每 5 天一个锚点 */
+{
+  const n = E.newGame('normal', 0);
+  const ms1 = E.milestoneOf(n);
+  if (!ms1 || ms1.day !== 5) throw new Error('开局应指向 Day 5 这个锚点');
+  const goal = E.goalOf(n);
+  if (ms1.worth !== Math.round(goal * E.MILESTONE_RATIO[0])) throw new Error('锚点金额与比例表不一致');
+
+  /* 窗口推进：Day 6 起指向 Day 10 */
+  n.day = 6;
+  if (E.milestoneOf(n).day !== 10) throw new Error('跨过锚点后没有指向下一个');
+  n.day = 30;
+  if (E.milestoneOf(n).day !== 30) throw new Error('最后一个锚点应是 Day 30');
+
+  /* 无尽 / 已通关没有中期目标 */
+  const en = E.newGame('normal', 0); en.endless = true;
+  if (E.milestoneOf(en) !== null) throw new Error('无尽模式不该有中期目标');
+
+  /* 达成只记一次，且兑现成声望点 */
+  const w = E.newGame('normal', 0);
+  w.cash = 999999;                       /* 直接把净资产顶到锚点之上 */
+  const mw = E.milestoneOf(w);
+  if (!mw.hit) throw new Error('净资产远高于锚点却判定未达成');
+  /* 走一次真实结算来触发记录 */
+  w.menu = w.recipes.slice(0, E.menuSlots(w));
+  E.openShop(w);
+  let k = 0;
+  while (w.phase === 'open' && k++ < 5000) E.tick(w, 1 / 30);
+  if (!w.msHit || w.msHit.indexOf(5) < 0) throw new Error('结算时没有记下中期目标达成');
+  /* 声望 = 净资产折算 + 每个已达成锚点各 +1；不能直接拿「改动前的值 +1」比，
+     因为这一天的经营本身也改变了净资产。 */
+  const baseBp = Math.max(1, Math.floor(Math.sqrt(Math.max(0, E.netWorth(w)) / 220)));
+  if (E.prestigeGain(w) !== baseBp + w.msHit.length) throw new Error('中期目标没有兑现成声望点');
+  if (w.msHit.length !== 1) throw new Error('第一天结算只应记下一个锚点，实际 ' + w.msHit.length);
+  /* 同一锚点重复结算不能重复记 */
+  const cnt = w.msHit.length;
+  E.nextDay(w);
+  w.menu = w.recipes.slice(0, E.menuSlots(w));
+  E.openShop(w);
+  let k2 = 0;
+  while (w.phase === 'open' && k2++ < 5000) E.tick(w, 1 / 30);
+  if (w.msHit.filter(d => d === 5).length !== 1) throw new Error('同一个锚点被重复记账');
+  if (w.msHit.length < cnt) throw new Error('msHit 记录丢失');
+
+  /* 存档往返 + 脏数据清洗 */
+  E.setSlot(0); E.saveGame(w);
+  const w2 = E.loadGame(0);
+  if (!w2.msHit || !w2.msHit.length) throw new Error('msHit 没有随存档保留');
+  const dirty = E.sanitizeState(Object.assign({}, E.newGame('normal', 0),
+    { msHit: [3, 5, 7, 40, -5, 'x'] }));
+  if (dirty.msHit.join(',') !== '5') throw new Error('非法锚点天数没有被过滤：' + dirty.msHit.join(','));
+
+  /* 两版都要画得出来 */
+  UI.renderManage();
+  checkHTML('经营面板(中期目标)', E.document.getElementById('panel-manage').innerHTML);
+  ok(`中期目标：每 ${E.MILESTONE_EVERY} 天一个锚点 · 达成记账一次 · 兑现声望 +1 · 存档往返 · 脏数据清洗`);
+}
+
+/* 28. 本机战绩榜：跨局保留最好的 5 局 */
+{
+  const m = E.newMeta();
+  if (!Array.isArray(m.runsTop) || m.runsTop.length) throw new Error('新 Meta 的 runsTop 应为空数组');
+
+  /* 用真实局面来记：净资产 = 现金 + 库存 + 已投入，手搓的假对象算不出来 */
+  const mk = (cash, day, diff, extra) => {
+    const g = E.newGame(diff, 0);
+    g.cash = cash; g.day = day;
+    Object.assign(g, extra || {});
+    return g;
+  };
+  for (const w of [1000, 9000, 3000, 7000, 5000, 2000, 8000]) {
+    E.pushRunRecord(m, mk(w, 30, 'normal'), 'finish');
+  }
+  if (m.runsTop.length !== E.CFG.RUN_TOP_N) throw new Error('战绩榜没有截断到 ' + E.CFG.RUN_TOP_N + ' 条');
+  const ws = m.runsTop.map(r => r.worth);
+  for (let i = 1; i < ws.length; i++) {
+    if (ws[i] > ws[i - 1]) throw new Error('战绩榜没有按净资产降序：' + ws.join(','));
+  }
+  /* 输进去比它小的那一局不该留在榜上 */
+  if (ws[ws.length - 1] <= 1000) throw new Error('战绩榜把垫底的小成绩也留下了：' + ws.join(','));
+
+  /* 破产局也要记（这里给个足够高的净资产才能进前 5），且能被读出来 */
+  E.pushRunRecord(m, mk(9500, 12, 'hard'), 'bankrupt');
+  if (!m.runsTop.some(r => r.result === 'bankrupt')) throw new Error('破产局没有被记进战绩榜');
+
+  /* 存读档往返 + 脏数据清洗 */
+  E.saveMeta(m);
+  const m2 = E.loadMeta();
+  if (!m2.runsTop || m2.runsTop.length !== E.CFG.RUN_TOP_N) throw new Error('战绩榜没有随 META 持久化');
+  store[E.CFG.META_KEY] = JSON.stringify({
+    best: {}, bp: 0, runs: 1, ach: {},
+    runsTop: [{ worth: 'x', day: -3, diff: '不存在的难度', result: 5 }, null, 42, { worth: 500 }],
+  });
+  const m3 = E.loadMeta();
+  if (m3.runsTop.length !== 1) throw new Error('脏战绩数据没有被过滤：' + JSON.stringify(m3.runsTop));
+  if (m3.runsTop[0].worth !== 500 || m3.runsTop[0].diff !== 'normal' || m3.runsTop[0].day !== 1) {
+    throw new Error('脏战绩数据没有被夹到合法值：' + JSON.stringify(m3.runsTop[0]));
+  }
+
+  /* 标题页要真的渲染出这块（两版一致） */
+  E.window.META = m;
+  E.renderTitle();
+  checkHTML('标题页(战绩榜)', E.document.getElementById('metaBox').innerHTML);
+  ok(`本机战绩榜：按净资产降序保留 ${E.CFG.RUN_TOP_N} 局 · 破产局也记 · 存档往返 · 脏数据清洗`);
 }
 
 console.log('\n✅ 全部冒烟测试通过，无运行时异常');

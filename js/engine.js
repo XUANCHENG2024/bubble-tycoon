@@ -225,7 +225,7 @@ function newGame(diffKey, bpBonus) {
     news: null, newsFx: null, marketing: 0, dayMarketing: 0, eventTrafficMul: 1,
     doneEvents: [],
     phase: 'prep', sim: null, report: null, pendingEvent: null,
-    debtDays: 0, lastReport: null,
+    debtDays: 0, lastReport: null, prevReport: null, lastMarketing: 0, msHit: [],
     bpBonus: bpBonus || 0,
     stats: { totalCups: 0, totalRevenue: 0, totalProfit: 0, bestDayProfit: 0, totalLost: 0, totalServed: 0, clicks: 0, days: 0 },
     flags: {}, ach: {}, log: [],
@@ -752,8 +752,12 @@ function tick(s, dt) {
 function endDay(s) {
   const sim = s.sim;
   const d = diffOf(s);
-  const wages = s.staff.reduce((a, b) => a + b.wage, 0);
-  let rentRaw = (CFG.RENT_PER_SHOP * s.shops + CFG.SHOP_UPKEEP * (s.shops - 1)) * d.rentMult;
+  /* 无尽模式的难度阶梯：只抬目标数字、成本不变，等于难度没变，
+     玩家靠时间堆就能过。每上一个里程碑，工资与租金同步上浮，
+     逼着他继续提人效 —— 这才是「越来越难」。 */
+  const ep = endlessPressure(s);
+  const wages = Math.round(s.staff.reduce((a, b) => a + b.wage, 0) * ep);
+  let rentRaw = (CFG.RENT_PER_SHOP * s.shops + CFG.SHOP_UPKEEP * (s.shops - 1)) * d.rentMult * ep;
   for (const st of s.staff) if (st.trait === 'wise') rentRaw *= 0.92;
   const rent = Math.round(rentRaw);
   const net = sim.revenue - sim.cogs - wages - rent - (s.dayMarketing || 0);
@@ -787,6 +791,9 @@ function endDay(s) {
   if ((sim.cups || 0) >= 12 && sim.lost === 0) s.flags.perfectDay = true;
 
   const worth = netWorth(s);
+  /* 结算页的环比要用「前一天」那份，而下面马上就要覆盖 s.report 了，
+     所以先把它留一份 —— 否则永远只能和自己比。 */
+  s.prevReport = s.lastReport || null;
   s.report = {
     day: s.day, served: sim.cups || 0, orders: sim.orders || 0, lost: sim.lost,
     priceLost: sim.priceLost || 0, stockout: sim.stockout,
@@ -797,6 +804,7 @@ function endDay(s) {
     tips: sim.tips, traffic: sim.traffic,
     typeServed: Object.assign({}, sim.typeServed), typeLost: Object.assign({}, sim.typeLost),
     rivalShare: rivalShare(s), worth,
+    pressure: ep, lastMarketing: s.lastMarketing || 0,
   };
   s.lastReport = s.report;
   s.phase = 'report';
@@ -826,7 +834,39 @@ function endDay(s) {
     if (s.endless) { s.milestone = (s.milestone || 0) + 1; s.endlessLevelUp = true; }
   }
 
+  /* 中期目标：达成一次记一次，结算成声望点（见 prestigeGain）。
+     只在当天达成时记，之后即使净资产回落也不撤销 —— 它是节奏提示，不是持续 buff。 */
+  const ms = milestoneOf(s);
+  if (ms && ms.hit) {
+    if (!Array.isArray(s.msHit)) s.msHit = [];
+    if (s.msHit.indexOf(ms.day) < 0) {
+      s.msHit.push(ms.day);
+      pushLog(s, `🏁 达成中期目标：Day ${ms.day} 前净资产 ${money(ms.worth)} · 声望 +1`);
+    }
+  }
+
   if (s.cash < 0) s.debtDays++; else s.debtDays = 0;
+}
+
+/** 中期目标：当前这个 5 天窗口要在净资产上达到的锚点。
+    无尽模式与已通关的局面没有中期目标，返回 null。 */
+function milestoneOf(s) {
+  if (s.endless || isFinished(s)) return null;
+  const goal = num(goalOf(s), 0);
+  if (!(goal > 0)) return null;
+  const d = Math.max(1, num(s.day, 1));
+  let idx = Math.ceil(d / MILESTONE_EVERY) - 1;
+  idx = Math.max(0, Math.min(MILESTONE_RATIO.length - 1, idx));
+  const atDay = Math.min(CFG.DAYS, (idx + 1) * MILESTONE_EVERY);
+  const worth = Math.round(goal * MILESTONE_RATIO[idx]);
+  const nw = num(netWorth(s), 0);
+  return { day: atDay, worth: worth, gap: worth - nw, hit: nw >= worth };
+}
+
+/** 无尽模式的成本压力：每上一个里程碑，工资与租金各上浮 12% */
+function endlessPressure(s) {
+  if (!s.endless) return 1;
+  return 1 + 0.12 * Math.max(0, (s.milestone || 1) - 1);
 }
 
 /** 无尽模式：30 天后继续经营 */
@@ -841,6 +881,14 @@ function startEndless(s) {
 function nextDay(s) {
   s.endlessLevelUp = false;
   s.day++;
+  /* 营销是「当天一次性投入」，开门时扣掉、打烊后归零。
+     以前这个归零是完全静默的：玩家第二天看到营销还是 ¥0，
+     会以为昨天那笔钱没生效，或者干脆忘了每天都要重新投。
+     这里把昨天的投入留一份并写进日志，经营面板也能提示「今日未投放」。 */
+  s.lastMarketing = s.dayMarketing || 0;
+  if (s.lastMarketing > 0) {
+    pushLog(s, `📢 昨日营销投入 ${money(s.lastMarketing)} 已消耗完毕，今天需要重新设置`);
+  }
   s.dayMarketing = 0;
   s.phase = 'prep';
   s.sim = null;
@@ -853,7 +901,12 @@ function nextDay(s) {
   refreshCandidates(s, false);
   rollQuests(s);
   if (RNG.next() < 0.42 && !s.pendingEvent) {
-    s.pendingEvent = pick(EVENTS.filter(e => !s.doneEvents || !s.doneEvents.includes(e.id))) || null;
+    let pool = EVENTS.filter(e => !s.doneEvents || !s.doneEvents.includes(e.id));
+    /* 事件抽完之后不能就这么静默地「再也不出事件」：
+       30 天里大约会触发 12 次，长局和无尽模式一定会把池子抽干。
+       抽干就清空记录重新轮换，保证后期仍有随机性。 */
+    if (!pool.length && EVENTS.length) { s.doneEvents = []; pool = EVENTS.slice(); }
+    s.pendingEvent = pick(pool) || null;
     (s.doneEvents = s.doneEvents || []).push(s.pendingEvent ? s.pendingEvent.id : '');
   }
   return s.day;
@@ -928,7 +981,8 @@ function checkAchievements(s) {
 /* ---------------- 转生 ---------------- */
 function prestigeGain(s) {
   const nw = Math.max(0, netWorth(s));
-  return Math.max(1, Math.floor(Math.sqrt(nw / 220)));
+  const msBonus = Array.isArray(s.msHit) ? s.msHit.length : 0;
+  return Math.max(1, Math.floor(Math.sqrt(nw / 220))) + msBonus;
 }
 
 /* ============================================================
@@ -1294,6 +1348,11 @@ function sanitizeState(s) {
   s.phase = (s.phase === 'report' || s.phase === 'over') ? s.phase : 'prep';
   s.report = (s.report && typeof s.report === 'object') ? s.report : null;
   s.lastReport = (s.lastReport && typeof s.lastReport === 'object') ? s.lastReport : null;
+  /* 结算页的「较昨日」环比要用前一天那份；坏档时置空即可，最多是不显示涨跌 */
+  s.prevReport = (s.prevReport && typeof s.prevReport === 'object') ? s.prevReport : null;
+  s.lastMarketing = pos(s.lastMarketing, 0);
+  /* 中期目标达成记录：只认 5 的倍数天数，脏数据直接丢掉 */
+  s.msHit = arr(s.msHit).filter(d => d % MILESTONE_EVERY === 0 && d > 0 && d <= CFG.DAYS);
   return s;
 }
 
@@ -1402,7 +1461,28 @@ function newMeta() {
     best: {}, bp: 0, runs: 0, ach: {}, maxBpEarned: 0, sound: true, tutDone: false,
     /* 连续登录：跨局数据，跟某一局的进度无关 */
     loginDate: '', loginStreak: 0, loginBest: 0, pendingCash: 0,
+    /* 本机战绩榜：跨局保留的最好 5 局。
+       平台级排行榜要开放数据域 + 云存储（有服务端），这里先用本机的 ——
+       至少让玩家有个「再破一次自己的纪录」的理由。 */
+    runsTop: [],
   };
+}
+
+/** 收官时把这一局记进本机战绩榜（按净资产降序，只留前 RUN_TOP_N 条） */
+function pushRunRecord(m, s, result) {
+  if (!m || !s) return m;
+  if (!Array.isArray(m.runsTop)) m.runsTop = [];
+  m.runsTop.push({
+    worth: Math.round(num(netWorth(s), 0)),
+    day: Math.max(1, num(s.day, 1)),
+    diff: s.diff || 'normal',
+    endless: !!s.endless,
+    milestone: num(s.milestone, 0),
+    result: result || 'finish',
+  });
+  m.runsTop.sort((a, b) => num(b.worth) - num(a.worth));
+  if (m.runsTop.length > CFG.RUN_TOP_N) m.runsTop.length = CFG.RUN_TOP_N;
+  return m;
 }
 function loadMeta() {
   const raw = storageGet(CFG.META_KEY);
@@ -1411,7 +1491,23 @@ function loadMeta() {
     const m = JSON.parse(raw);
     /* JSON.parse('null') 是 null、脏数据也可能是数组，这里一并挡掉 */
     if (!m || typeof m !== 'object' || Array.isArray(m)) return newMeta();
-    return Object.assign(newMeta(), m);
+    const out = Object.assign(newMeta(), m);
+    /* runsTop 可能来自旧版本或脏数据。Object.assign 会原样覆盖，
+       不逐条校验的话战绩榜会渲染出 NaN / undefined。 */
+    if (!Array.isArray(out.runsTop)) out.runsTop = [];
+    out.runsTop = out.runsTop
+      .filter(r => r && typeof r === 'object' && !Array.isArray(r) && num(r.worth, 0) > 0)
+      .map(r => ({
+        worth: Math.max(0, num(r.worth, 0)),
+        day: Math.max(1, num(r.day, 1)),
+        diff: DIFFICULTY[r.diff] ? r.diff : 'normal',
+        endless: !!r.endless,
+        milestone: Math.max(0, num(r.milestone, 0)),
+        result: (r.result === 'bankrupt') ? 'bankrupt' : 'finish',
+      }))
+      .sort((a, b) => b.worth - a.worth)
+      .slice(0, CFG.RUN_TOP_N);
+    return out;
   } catch (e) { return newMeta(); }
 }
 function saveMeta(m) { storageSet(CFG.META_KEY, JSON.stringify(m)); }

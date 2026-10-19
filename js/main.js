@@ -12,6 +12,26 @@ let chosenDiff = 'normal';
 const TITLE_ACTS = ['diff', 'start', 'continue', 'sound', 'retut'];
 
 /* ---------------- 开始界面 ---------------- */
+
+/** 本机战绩榜：平台级排行榜要开放数据域 + 云存储（有服务端），
+ *  这里先用本机的，至少给玩家一个「再破一次自己纪录」的理由。 */
+function topRunsHtml(m) {
+  const top = (m && Array.isArray(m.runsTop)) ? m.runsTop.filter(Boolean) : [];
+  if (!top.length) return '';
+  const rows = top.map((r, i) => {
+    const d = DIFFICULTY[r.diff] || DIFFICULTY.normal;
+    const res = r.result === 'bankrupt' ? '💸 破产'
+      : (r.endless ? `♾️ 第 ${r.milestone} 阶` : (r.worth >= (d.goal || Infinity) ? '🎯 达标' : '未达标'));
+    return `<div class="tr-row">
+      <span class="tr-i">${['🥇', '🥈', '🥉', '4', '5'][i] || (i + 1)}</span>
+      <span class="tr-w">${money(r.worth)}</span>
+      <span class="tr-d">${d.emoji}${d.name}</span>
+      <span class="tr-r">Day ${r.day} · ${res}</span>
+    </div>`;
+  }).join('');
+  return `<div class="top-runs"><div class="tr-h">🏅 本机战绩榜（前 ${CFG.RUN_TOP_N}）</div>${rows}</div>`;
+}
+
 function renderTitle() {
   const dp = $('diffPick');
   dp.innerHTML = Object.values(DIFFICULTY).map(d => `
@@ -26,7 +46,8 @@ function renderTitle() {
   $('metaBox').innerHTML = `
     <span class="mchip">🌟 声望 <b>${m.bp}</b> ★</span>
     <span class="mchip">🏆 最高净资产 <b>${money(m.best.normal || 0)}</b></span>
-    <span class="mchip">🎮 已玩 <b>${m.runs}</b> 局</span>`;
+    <span class="mchip">🎮 已玩 <b>${m.runs}</b> 局</span>
+    ${topRunsHtml(m)}`;
 
   const hasSave = hasAnySave();
   $('btnContinue').style.display = hasSave ? '' : 'none';
@@ -161,6 +182,7 @@ function finishRun(kind) {
   const nw = netWorth(s);
   m.best[s.diff] = Math.max(m.best[s.diff] || 0, Math.round(nw));
   for (const k in s.ach) m.ach[k] = true;
+  pushRunRecord(m, s, kind);
   /* 每日挑战：记录当天最佳 */
   if (s.daily) {
     const key = todayKey();
@@ -236,6 +258,7 @@ function doAct(act, el) {
       return;
     }
     case 'dlcard': UI.downloadCard(); return;
+    case 'export': UI.showExport(); return;
     case 'doimport': {
       const ta = $('importCode');
       const r = importSave(ta ? ta.value : '');
@@ -515,6 +538,7 @@ $('btnContinue').addEventListener('click', () => {
 });
 $('btnDaily').addEventListener('click', () => doAct('daily', $('btnDaily')));
 $('btnImport').addEventListener('click', () => UI.showImport());
+$('btnExport').addEventListener('click', () => UI.showExport());
 $('btnChart').addEventListener('click', () => { SFX.click(); UI.showChart(); });
 $('btnPause').addEventListener('click', () => doAct('pause', $('btnPause')));
 $('btnHelp').addEventListener('click', () => { SFX.resume(); UI.showHelp(); });

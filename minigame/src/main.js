@@ -177,14 +177,17 @@ function syncStageFeel(s) {
 }
 
 /* ---------------- 输入 ---------------- */
-var down = { x: 0, y: 0, t: 0, hit: null, dragging: false, scroll0: 0, y0: 0 };
+var down = { x: 0, y: 0, t: 0, hit: null, dragging: false, scroll0: 0, stageScroll0: 0, y0: 0 };
 
 function onDown(x, y) {
   if (AUDIO) AUDIO.resume();
   down.x = x; down.y = y; down.y0 = y; down.t = Date.now();
   down.dragging = false;
   down.hit = GFX.hitAt(x, y);
+  /* 起手就把当前滚动量记下来：面板区与出杯位区各记一份，
+     onMove 里按当时处在哪个区取用，避免两个滚动量互相污染。 */
   down.scroll0 = VIEW.scroll[VIEW.tab] || 0;
+  down.stageScroll0 = VIEW.stageScroll || 0;
   VIEW.pressedAct = down.hit ? { act: down.hit.act, id: down.hit.id, extra: down.hit.extra } : null;
 }
 
@@ -193,10 +196,19 @@ function onMove(x, y) {
      面板上大片区域是文本和卡片空白，手指落在那里才是常态。
      如果只有按在按钮上才能滑，玩家会以为列表卡住了。 */
   var dy = y - down.y0;
-  if (!down.dragging && Math.abs(dy) > 6) down.dragging = true;
+  var s0 = _S;
+  /* 营业中手指主要在做「点工位加速」，判定拖动要用更大的阈值（14px），
+     否则连点时的手抖会被当成滑动，加速点击就这么被吃掉了。 */
+  var inStage = !!(s0 && s0.phase === 'open' && VIEW.stageMax > 0 && !VIEW.modal && !VIEW.tut.on);
+  var thresh = inStage ? 14 : 6;
+  if (!down.dragging && Math.abs(dy) > thresh) down.dragging = true;
   if (!down.dragging) return;
-  /* 只有面板区才滚；舞台和弹窗不滚 */
   if (VIEW.modal || VIEW.tut.on) return;
+  if (inStage) {
+    /* 出杯位多到一屏放不下时才允许滑动；能放下就完全不介入，手感与以前一致 */
+    VIEW.stageScroll = Math.max(0, Math.min(VIEW.stageMax, down.stageScroll0 - dy));
+    return;
+  }
   var s = _S;
   if (s && s.phase === 'open') return;
   var L = CV.layoutOf(CW, CH);
@@ -219,11 +231,15 @@ function onUp(x, y) {
 function doAct(act, id, extra) {
   var s = _S;
 
-  /* 引导优先吞掉事件，避免玩家在引导里误触到后面的按钮 */
+  /* 引导优先吞掉事件，避免玩家在引导里误触到后面的按钮。
+     但「等待型」步骤要放行它正在等的那一个动作 —— 否则玩家永远做不出动作，
+     自动推进也就无从发生，只能靠「下一步」把引导硬念完。 */
   if (VIEW.tut.on) {
     if (act === 'tutnext') { tutNext(); return; }
     if (act === 'tutskip') { tutStop(); return; }
-    return;
+    var wait = tutWaitAct();
+    if (!wait || wait !== act) return;
+    /* 落到下面的正常分支，成功后各自调 tutNotify() */
   }
 
   /* --- 标题页 --- */
@@ -257,6 +273,17 @@ function doAct(act, id, extra) {
     return;
   }
   if (act === 'import') { VIEW.modal = { type: 'import' }; return; }
+  if (act === 'export') {
+    /* 与导入成对：小游戏里没有输入框，导出只能走剪贴板。
+       标题页没有当前局面时，导出当前存档槽里的那份。 */
+    var es = _S;
+    if (!es) { try { es = loadGame(); } catch (e) { es = null; } }
+    if (!es) { toast('还没有可导出的存档'); return; }
+    var code = exportSave(es);
+    if (!code) { toast('存档导出失败'); return; }
+    toast(PLAT.copy(code) ? '📋 存档码已复制，可粘到浏览器版导入' : '复制失败，剪贴板不可用');
+    return;
+  }
   if (act === 'doimport') {
     /* 小游戏里没有文本输入框，只能从剪贴板读 */
     var got = null;
@@ -363,7 +390,7 @@ function doAct(act, id, extra) {
   /* --- 下面四项 H5 都有，小游戏原本漏了 --- */
   if (act === 'autofill') {
     var af = autoFill(s);
-    if (af.bought) { toast('🛒 补货 ' + af.bought + ' 单位 · -' + money(af.spent)); }
+    if (af.bought) { toast('🛒 补货 ' + af.bought + ' 单位 · -' + money(af.spent)); tutNotify('buy'); }
     else toast('现金或仓位不足');
     return;
   }
@@ -387,6 +414,7 @@ function doAct(act, id, extra) {
     VIEW.screen = 'game';
     VIEW.tab = 'manage';
     VIEW.scroll = { manage: 0, lab: 0, up: 0, staff: 0, rival: 0, ach: 0 };
+    VIEW.stageScroll = 0;
     confetti(40); buzz('long');
     toast('♾️ 无尽模式！新目标 ' + money(eg));
     autoSave(s);
@@ -394,6 +422,7 @@ function doAct(act, id, extra) {
   }
   if (act === 'nextday') {
     VIEW.modal = null;
+    VIEW.stageScroll = 0;
     nextDay(s);
     if (isFinished(s)) { finishRun('finish'); return; }
     autoSave(s);
@@ -414,7 +443,7 @@ function doAct(act, id, extra) {
   /* --- 经营面板 --- */
   if (act === 'buy') {
     var r = buyIng(s, id, num(extra, 10));
-    if (r.ok) beep('up', 600, 0.06); else toast(r.msg);
+    if (r.ok) { beep('up', 600, 0.06); tutNotify('buy'); } else toast(r.msg);
     return;
   }
   if (act === 'ratio') {
@@ -425,8 +454,8 @@ function doAct(act, id, extra) {
   if (act === 'mkt') { s.marketing = num(id, 0); return; }
   if (act === 'toggle') {
     var ix = (s.menu || []).indexOf(id);
-    if (ix >= 0) s.menu.splice(ix, 1);
-    else if ((s.menu || []).length < menuSlots(s)) s.menu.push(id);
+    if (ix >= 0) { s.menu.splice(ix, 1); tutNotify('toggle'); }
+    else if ((s.menu || []).length < menuSlots(s)) { s.menu.push(id); tutNotify('toggle'); }
     else toast('菜单位不足，先升级「菜单位」');
     return;
   }
@@ -509,7 +538,9 @@ function doAct(act, id, extra) {
     var op = openShop(s);
     if (!op.ok) { toast(op.msg); return; }
     VIEW.lastServed = 0; VIEW.lastLost = 0;
+    VIEW.stageScroll = 0;      /* 每天开门都从第一个工位看起 */
     beep('up', 660, 0.12);
+    tutNotify('open');
     return;
   }
   if (act === 'rush') {
@@ -518,11 +549,16 @@ function doAct(act, id, extra) {
       beep('up', 880, 0.07);
       floater(CW / 2, CH * 0.45, '+¥' + rx.tip.toFixed(1), 'good');
       if (rx.combo >= 5) toast('🔥 ' + rx.combo + ' 连击！');
+      /* 这一步要教的是「连点」，点一次就跳过等于没教。与 H5 同为 3 次。 */
+      if (VIEW.tut.on && tutWaitAct() === 'rush') {
+        VIEW.tutRush = (VIEW.tutRush || 0) + 1;
+        if (VIEW.tutRush >= 3) tutNotify('rush');
+      }
     }
     return;
   }
   if (act === 'boss') {
-    if (bossSkill(s)) { beep('up', 900, 0.18); buzz('long'); toast('⚡ 老板亲自上阵！全员加速'); }
+    if (bossSkill(s)) { beep('up', 900, 0.18); buzz('long'); toast('⚡ 老板亲自上阵！全员加速'); tutNotify('boss'); }
     return;
   }
   if (act === 'pause') { var p = togglePause(s); toast(p ? '⏸ 已暂停' : '▶ 继续营业'); return; }
@@ -539,6 +575,12 @@ function doAct(act, id, extra) {
   }
 
   /* --- 结局页 --- */
+  if (act === 'share') {
+    /* 必须是点击直接触发，不能包异步：抖音的 shareAppMessage 会校验手势 */
+    var okShare = CAPS.share({ worth: money(Math.round(netWorth(s))), day: num(s.day) });
+    if (!okShare) toast('当前环境不支持分享');
+    return;
+  }
   if (act === 'again') {
     var d = s ? s.diff : VIEW.diff;
     clearSave();
@@ -614,6 +656,7 @@ function startGame(diff, loaded, keepSeed) {
   VIEW.screen = 'game';
   VIEW.tab = 'manage';
   VIEW.scroll = { manage: 0, lab: 0, up: 0, staff: 0, rival: 0, ach: 0 };
+  VIEW.stageScroll = 0;
   VIEW.modal = null;
   /* 连续登录的创业基金在这里落进这一局（没签到会自动补签） */
   var lb = takeLoginBonus(s, _META);
@@ -678,6 +721,7 @@ function finishRun(kind) {
   var nw = netWorth(s);
   _META.best[s.diff] = Math.max(_META.best[s.diff] || 0, Math.round(nw));
   for (var k in s.ach) _META.ach[k] = true;
+  pushRunRecord(_META, s, kind);
   if (s.daily) {
     var key = todayKey();
     if (_META.dailyDate !== key || (_META.dailyBest || 0) < nw) {
@@ -727,7 +771,23 @@ var TUT_RECT = {
   finish: function () { var L = CV.layoutOf(CW, CH); return { x: 0, y: L.hudH, w: CW, h: L.tabH }; },
 };
 
+/** 当前步骤在等的游戏动作；'next'（手动）步骤返回 null */
+function tutWaitAct() {
+  var st = TUTORIAL[VIEW.tut.step];
+  if (!st || !st.advance || st.advance === 'next') return null;
+  return st.advance;
+}
+/** 与 H5 的 TUT.notify() 同义：玩家真的做出了这一步要求的动作才推进 */
+function tutNotify(evt) {
+  if (!VIEW.tut.on) return;
+  var st = TUTORIAL[VIEW.tut.step];
+  if (!st || st.advance !== evt) return;
+  VIEW.tutRush = 0;
+  tutNext();
+}
+
 function tutStart(step) {
+  VIEW.tutRush = 0;
   VIEW.tut = { on: true, step: step || 0, rect: null };
   if (_S) _S.tut = { active: true, step: VIEW.tut.step, done: false };
   tutSync();
@@ -741,6 +801,7 @@ function tutSync() {
   VIEW.tut.rect = f ? f() : null;
 }
 function tutNext() {
+  VIEW.tutRush = 0;
   VIEW.tut.step++;
   if (VIEW.tut.step >= TUTORIAL.length) { tutStop(); return; }
   if (_S) _S.tut = { active: true, step: VIEW.tut.step, done: false };
@@ -779,5 +840,6 @@ if (typeof globalThis !== 'undefined') {
     get canvas() { return canvas; },
     get ctx() { return ctx; },
     get size() { return { w: CW, h: CH }; },
+    get audio() { return AUDIO; },
   };
 }

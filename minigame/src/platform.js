@@ -117,14 +117,36 @@ var PLAT = (function () {
   }
 
   /* ---------- 音频 ----------
-     H5：WebAudio 实时合成，零资源文件。
-     小游戏：没有 AudioContext。tt.createInnerAudioContext() 需要真实音频文件，
-     会撑大首屏包（平台对初始包体积有严格限制）。
-     这里做成「接口在、实现空」，音效开关照常记录，后续放入音频文件即可启用，
-     不需要改动任何业务代码。 */
+     浏览器：WebAudio 实时合成，零资源文件。
+     小游戏：没有 AudioContext，只能走 tt.createInnerAudioContext() + 真实音频文件。
+     音频文件由 tools/gen-sfx.js 离线合成（3 个极短 WAV，合计约 17KB）——
+     本作核心手感是「连点出杯位」，点下去没声音，手感就只剩振动一半。
+     文件缺失或宿主不支持时整体降级为静音，绝不影响玩法。 */
+  var SFX_FILES = { tap: 'audio/tap.wav', up: 'audio/up.wav', down: 'audio/down.wav' };
   function createAudio() {
     if (isTT) {
-      return { available: false, play: function () { }, resume: function () { } };
+      var pool = {};
+      try {
+        if (typeof tt.createInnerAudioContext === 'function') {
+          for (var k in SFX_FILES) {
+            pool[k] = tt.createInnerAudioContext({ src: SFX_FILES[k], loop: false });
+          }
+        }
+      } catch (e) { pool = {}; }
+      var has = false;
+      for (var k2 in pool) { has = true; break; }
+      return {
+        available: has,
+        resume: function () { },
+        play: function (kind, freq, dur) {
+          /* 按频率挑文件：调用方仍然只说「响一下」，不用为每个事件新增常量。
+             高频 = 连点出杯（要短促），低频 = 负反馈，其余 = 正向反馈。 */
+          var key = freq >= 850 ? 'tap' : (freq < 300 ? 'down' : 'up');
+          var a = pool[key] || pool.up;
+          if (!a) return;
+          try { a.stop(); a.seek(0); a.play(); } catch (e) { /* 音效永远不该影响玩 */ }
+        },
+      };
     }
     var ac = null;
     try {

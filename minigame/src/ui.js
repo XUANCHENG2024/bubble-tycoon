@@ -21,7 +21,10 @@ var VIEW = {
   confetti: [],
   floaters: [],
   pressedAct: null,         /* 当前按下的命中项，用于按下反馈 */
+  stageScroll: 0,           /* 出杯位区域的滚动量（员工多到一屏放不下时） */
+  stageMax: 0,              /* 出杯位区域的最大滚动量，由 drawStage 每帧回写 */
   tut: { on: false, step: 0, rect: null },
+  tutRush: 0,               /* 引导「点击加速」那一步已点的次数 */
   ins: { top: 0, bottom: 0 },
   lastServed: 0,
   lastLost: 0,
@@ -117,12 +120,15 @@ function drawTitle(ctx, L) {
   /* 连续登录：和「玩法说明 / 导入存档」挤在同一行做三等分，
      标题页在小屏（640 高）上已经没有余量再单独加一行了。 */
   var lg = loginState(m);
-  var bw3 = (w - 16) / 3;
+  /* 四等分：导出要和导入成对出现，否则玩家能在小游戏里导入、
+     却没法把进度导出去给浏览器版用。小屏没有余量再加一行，只能挤。 */
+  var bw3 = (w - 24) / 4;
   GFX.button(ctx, x, y, bw3, 38,
     !lg.claimed ? '🔥 签到 ' + money(lg.next) : '🎁 已签',
-    { kind: lg.claimed ? 'ghost' : 'amber', act: 'login', size: 10.5, disabled: !!lg.claimed, pressed: isPressed('login') });
-  GFX.button(ctx, x + bw3 + 8, y, bw3, 38, '📖 玩法说明', { kind: 'ghost', act: 'help', size: 10.5, pressed: isPressed('help') });
-  GFX.button(ctx, x + (bw3 + 8) * 2, y, bw3, 38, '📥 导入存档', { kind: 'ghost', act: 'import', size: 10.5, pressed: isPressed('import') });
+    { kind: lg.claimed ? 'ghost' : 'amber', act: 'login', size: 10, disabled: !!lg.claimed, pressed: isPressed('login') });
+  GFX.button(ctx, x + bw3 + 8, y, bw3, 38, '📖 玩法说明', { kind: 'ghost', act: 'help', size: 10, pressed: isPressed('help') });
+  GFX.button(ctx, x + (bw3 + 8) * 2, y, bw3, 38, '📥 导入', { kind: 'ghost', act: 'import', size: 10, pressed: isPressed('import') });
+  GFX.button(ctx, x + (bw3 + 8) * 3, y, bw3, 38, '📤 导出', { kind: 'ghost', act: 'export', size: 10, pressed: isPressed('export') });
   y += 46;
 
   /* 存档槽 */
@@ -156,6 +162,29 @@ function drawTitle(ctx, L) {
     text(ctx, '⚠️ 存储不可用，本局进度无法保存', W / 2, y,
       { size: 10.5, align: 'center', color: T.red });
     y += 16;
+  }
+  /* 本机战绩榜：平台级排行榜要开放数据域 + 云存储（有服务端），
+     这里先用本机的，至少给玩家一个「再破一次自己纪录」的理由。
+     标题页在小屏上余量很小，所以只画真正放得下的行数。 */
+  var top = (m.runsTop || []).filter(Boolean);
+  if (top.length) {
+    y += 4;
+    text(ctx, '🏅 本机战绩榜', W / 2, y, { size: 10, align: 'center', color: T.txt3 });
+    y += 15;
+    var room = Math.floor((H - 32 - y) / 15);
+    var showN = Math.max(0, Math.min(top.length, Math.min(3, room)));
+    for (var ti = 0; ti < showN; ti++) {
+      var tr = top[ti];
+      var td = DIFFICULTY[tr.diff] || DIFFICULTY.normal;
+      var tres = tr.result === 'bankrupt' ? '💸 破产'
+        : (tr.endless ? '♾️ 第 ' + num(tr.milestone) + ' 阶'
+          : (num(tr.worth) >= num(td.goal, Infinity) ? '🎯 达标' : '未达标'));
+      text(ctx, ['🥇', '🥈', '🥉'][ti] + ' ' + money(num(tr.worth)), x, y,
+        { size: 10.5, color: T.amber });
+      text(ctx, td.emoji + td.name + ' · Day ' + num(tr.day) + ' · ' + tres,
+        x + w, y, { size: 10, align: 'right', color: T.txt3, maxW: w * 0.6 });
+      y += 15;
+    }
   }
   ctx.textAlign = 'left';
   if (y < H - 26) {
@@ -391,8 +420,10 @@ function panelManage(ctx, x, y, w, s) {
   }
   y += mh + 10;
 
-  /* 营销 */
-  GFX.card(ctx, x, y, w, 62);
+  /* 营销
+     这是「当天一次性投入」，打烊后归零 —— 以前这个归零完全静默，
+     玩家第二天看到 ¥0 只会以为昨天那笔钱没生效。 */
+  GFX.card(ctx, x, y, w, 80);
   text(ctx, '📣 营销投入', x + 10, y + 9, { size: 12.5, weight: 800 });
   text(ctx, '¥' + Math.round(num(s.marketing)) + ' → 客流 ×' + marketingMul(num(s.marketing)).toFixed(2),
     x + w - 10, y + 10, { size: 10.5, align: 'right', color: T.cyan });
@@ -405,7 +436,30 @@ function panelManage(ctx, x, y, w, s) {
       mks[mi] === 0 ? '不投' : '¥' + mks[mi],
       { kind: 'ghost', act: 'mkt', id: String(mks[mi]), size: 9.5, r: 6 });
   }
-  y += 72;
+  text(ctx, num(s.lastMarketing) > 0
+    ? '📢 昨日投入 ' + money(num(s.lastMarketing)) + ' 已用完，今天要重新投'
+    : '营销只在当天生效，打烊后归零',
+    x + 10, y + 63,
+    { size: 10, maxW: w - 20, color: num(s.lastMarketing) > 0 ? T.amber : T.txt3 });
+  y += 90;
+
+  /* 中期目标：30 天只有一个终点太远，中间三周玩家不知道自己是领先还是落后。
+     每 5 天给一个锚点，达成记一次声望（在 prestigeGain 里兑现）。 */
+  var ms = milestoneOf(s);
+  if (ms) {
+    GFX.card(ctx, x, y, w, 62);
+    text(ctx, '🎯 中期目标', x + 10, y + 8, { size: 11.5, weight: 800 });
+    text(ctx, 'Day ' + ms.day + ' 前 ' + money(ms.worth), x + w - 10, y + 9,
+      { size: 10.5, align: 'right', color: T.cyan });
+    var mp = Math.max(0, Math.min(1, num(netWorth(s)) / Math.max(1, ms.worth)));
+    GFX.bar(ctx, x + 10, y + 30, w - 20, 6, mp, { color: ms.hit ? T.green : T.cyan });
+    text(ctx, ms.hit
+      ? '✅ 已达成（' + money(netWorth(s)) + '）· 声望 +1 已记账'
+      : '还差 ' + money(Math.max(0, ms.gap)) + '（' + money(netWorth(s)) + '，' + Math.round(mp * 100) + '%）',
+      x + 10, y + 42,
+      { size: 10.5, maxW: w - 20, color: ms.hit ? T.green : T.txt2 });
+    y += 72;
+  }
 
   /* 建议。adviceOf() 返回的是对象数组（最多 4 条），曾经整只数组被直接塞进
      text()，渲染出来是「[object Object],[object Object]」—— 两版不一致里最显眼的一个。 */
@@ -665,6 +719,24 @@ var PANELS = {
  *  营业舞台
  *  核心手感就在「点出杯位」上，按钮必须够大、反馈必须即时
  * ========================================================== */
+
+/* 在给定宽高里挑一套能装下 n 个出杯位的网格。
+   策略是先加列、后压高度：点击块越大越好点，宁可窄一点也不想变矮。
+   返回 null 表示一套都装不下（走滑动兜底）。 */
+var STATION_GRIDS = [
+  { cols: 2, sh: 76 }, { cols: 3, sh: 76 }, { cols: 4, sh: 76 },
+  { cols: 4, sh: 62 }, { cols: 4, sh: 52 },
+];
+function pickStationGrid(n, w, viewH) {
+  if (!(n > 0)) return { cols: 2, sh: 76 };
+  for (var i = 0; i < STATION_GRIDS.length; i++) {
+    var g = STATION_GRIDS[i];
+    var rows = Math.ceil(n / g.cols);
+    if (rows * (g.sh + 8) - 8 <= viewH) return g;
+  }
+  return STATION_GRIDS[STATION_GRIDS.length - 1];
+}
+
 function drawStage(ctx, L, s) {
   var W = L.W, top = L.bodyY, H = L.H - top;
   var sim = s.sim;
@@ -694,12 +766,19 @@ function drawStage(ctx, L, s) {
   }
   y += 48;
 
-  /* 队列 */
-  text(ctx, '🚶 排队中 ' + (sim.queue || []).length + '/' + queueCap(s), x, y, { size: 11, color: T.txt3 });
-  y += 18;
+  /* 队列
+     队伍长的时候不能让它无限往下长：队列每多一行，出杯位区就少 58px，
+     而点位才是玩家要点的东西。这里最多显示 3 行（约 15~18 人，已覆盖等位座上限），
+     多出来的人数在标题里体现，不再继续挤占下面的工位区。 */
   var q = sim.queue || [];
   var qw = 46, per = Math.max(1, Math.floor((w + 6) / (qw + 6)));
-  for (var qi = 0; qi < q.length; qi++) {
+  var QROWS = 3;
+  var qShow = Math.min(q.length, per * QROWS);
+  text(ctx, '🚶 排队中 ' + q.length + '/' + queueCap(s)
+    + (q.length > qShow ? '（下方显示前 ' + qShow + ' 位）' : ''),
+    x, y, { size: 11, color: T.txt3 });
+  y += 18;
+  for (var qi = 0; qi < qShow; qi++) {
     var c = q[qi];
     var cx = x + (qi % per) * (qw + 6);
     var cy = y + Math.floor(qi / per) * 58;
@@ -710,42 +789,82 @@ function drawStage(ctx, L, s) {
     var left = 1 - num(c.wait) / Math.max(0.001, num(c.patience));
     GFX.bar(ctx, cx + 4, cy + 42, qw - 8, 4, left, { color: left < 0.3 ? T.red : T.green });
   }
-  y += Math.ceil(q.length / per) * 58 + (q.length ? 6 : 0);
+  y += Math.ceil(qShow / per) * 58 + (qShow ? 6 : 0);
 
-  /* 出杯位 —— 核心交互区 */
+  /* 出杯位 —— 核心交互区
+     旧写法是写死 2 列 + `if (sy + sh > L.H - 96) break;`：
+     出杯位 = 老板 + 员工 + 分店，招满人开满分店能到十几个，
+     超屏的那部分既不绘制也不登记命中区 —— 玩家看得见订单、却点不到工位，
+     加速不了只能眼看客人流失，属于「不修就不能玩」的级别。
+     改法：先按可用高度挑一套装得下的网格（优先加列、保留大点击块，
+     实在不够再压卡片高度），仍然溢出就让这一区可上下滑动。 */
   var stn = sim.stations || [];
-  var cols = 2;
-  var sw = (w - 10) / cols;
-  var sh = 76;
+  var btnTop = L.H - 92 - L.padBottom;
+  var viewTop = y + 14;
+  var viewH = Math.max(72, btnTop - 10 - viewTop);
+  var grid = pickStationGrid(stn.length, w, viewH);
+  var cols = grid.cols, sh = grid.sh;
+  var sw = (w - (cols - 1) * 10) / cols;
+  var compact = sh < 68;
+  var rows = Math.ceil(stn.length / cols);
+  var contentH = rows * (sh + 8) - 8;
+
+  VIEW.stageMax = Math.max(0, contentH - viewH);
+  if (!(VIEW.stageScroll > 0)) VIEW.stageScroll = 0;
+  if (VIEW.stageScroll > VIEW.stageMax) VIEW.stageScroll = VIEW.stageMax;
+  var sc = VIEW.stageScroll;
+
+  text(ctx, '🧋 出杯位 ' + stn.length + ' 个'
+    + (VIEW.stageMax > 0 ? '　↕ 可上下滑动' : ''),
+    x, y, { size: 11, color: VIEW.stageMax > 0 ? T.cyan : T.txt3 });
+
+  GFX.clipPush(ctx, x - 2, viewTop, w + 4, viewH);
   for (var si = 0; si < stn.length; si++) {
     var st = stn[si];
     var sx = x + (si % cols) * (sw + 10);
-    var sy = y + Math.floor(si / cols) * (sh + 8);
-    if (sy + sh > L.H - 96) break;
+    var sy = viewTop + Math.floor(si / cols) * (sh + 8) - sc;
+    /* 卡片整体被裁掉时 addHit 会自动放弃登记，无需在这里再判断可见性 */
     var busy = !!st.order;
     GFX.fillRR(ctx, sx, sy, sw, sh, 12,
       busy ? 'rgba(53,229,240,.10)' : T.card,
       busy ? 'rgba(53,229,240,.4)' : T.line);
     var nm = st.isBoss ? '👑 老板' : (st.branch ? '🏪 分店位'
       : (st.worker ? st.worker.emoji + ' ' + st.worker.name : '空位'));
-    text(ctx, nm, sx + 8, sy + 6, { size: 10.5, weight: 700, color: T.txt, maxW: sw - 16 });
+    text(ctx, nm, sx + 8, sy + 5,
+      { size: compact ? 9.5 : 10.5, weight: 700, color: T.txt, maxW: sw - 16 });
     if (st.order) {
       var rr = recipeById(st.order.rid) || { emoji: '🥤', tags: [] };
       var n = num(st.order.cups, 1);
-      text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + sw / 2, sy + 22, { size: 17, align: 'center' });
-      GFX.bar(ctx, sx + 8, sy + 46, sw - 16, 6, num(st.order.progress), { color: T.cyan });
       var hit = (rr.tags || []).indexOf(s.trend) >= 0;
-      text(ctx, '¥' + Math.round(num(st.order.price) * n) + (hit ? ' 🔥' : ''),
-        sx + sw / 2, sy + 56, { size: 10, align: 'center', color: hit ? T.amber : T.txt2 });
+      var pay = '¥' + Math.round(num(st.order.price) * n) + (hit ? ' 🔥' : '');
+      if (compact) {
+        text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + 8, sy + 16, { size: 13 });
+        text(ctx, pay, sx + sw - 8, sy + 18,
+          { size: 9.5, align: 'right', color: hit ? T.amber : T.txt2, maxW: sw - 34 });
+        GFX.bar(ctx, sx + 8, sy + sh - 16, sw - 16, 5, num(st.order.progress), { color: T.cyan });
+      } else {
+        text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + sw / 2, sy + 22, { size: 17, align: 'center' });
+        GFX.bar(ctx, sx + 8, sy + 46, sw - 16, 6, num(st.order.progress), { color: T.cyan });
+        text(ctx, pay, sx + sw / 2, sy + 56, { size: 10, align: 'center', color: hit ? T.amber : T.txt2 });
+      }
     } else {
-      text(ctx, '—', sx + sw / 2, sy + 24, { size: 15, align: 'center', color: T.txt3 });
+      text(ctx, '—', sx + sw / 2, sy + (compact ? 16 : 24),
+        { size: compact ? 12 : 15, align: 'center', color: T.txt3 });
       text(ctx, st.worker && num(st.worker.stamina) <= 0 ? '😴 累瘫' : '空闲',
-        sx + sw / 2, sy + 46, { size: 10, align: 'center', color: T.txt3 });
+        sx + sw / 2, sy + (compact ? sh - 15 : 46),
+        { size: compact ? 9.5 : 10, align: 'center', color: T.txt3 });
     }
     /* 整个出杯位都是可点区域：手指不需要瞄准小控件 */
     GFX.addHit(sx, sy, sw, sh, 'rush', String(si), null);
   }
-  y += Math.ceil(stn.length / cols) * (sh + 8);
+  GFX.clipPop(ctx);
+  /* 右侧一条细滚动条，让玩家知道下面还有工位 */
+  if (VIEW.stageMax > 0) {
+    var trh = viewH * (viewH / contentH);
+    var try0 = viewTop + (viewH - trh) * (sc / VIEW.stageMax);
+    GFX.fillRR(ctx, x + w + 2, try0, 3, Math.max(18, trh), 2, 'rgba(53,229,240,.45)');
+  }
+  y = viewTop + viewH;
 
   /* 操作按钮 */
   var by = L.H - 92 - L.padBottom;
@@ -782,6 +901,34 @@ function drawModal(ctx, L) {
 
 var MODALS = {};
 
+/* 结算「较昨日」环比。
+   没有 prev 或差得可以忽略时返回 null，调用方据此决定画不画。
+   inverse = 该指标越小越好（流失），涨跌配色要反过来看。 */
+function deltaStr(cur, prev, opt) {
+  if (prev == null || !isFinite(num(prev, NaN))) return null;
+  var d = num(cur, 0) - num(prev, 0);
+  var eps = (opt && opt.eps != null) ? opt.eps : 0.5;
+  if (Math.abs(d) < eps) return { t: '持平', c: T.txt3 };
+  var up = d > 0;
+  var good = (opt && opt.inverse) ? !up : up;
+  var a = Math.abs(d);
+  var v = a >= 1000 ? Math.round(a) : (a % 1 ? a.toFixed(1) : a);
+  return { t: (up ? '▲' : '▼') + ((opt && opt.unit) || '') + v, c: good ? T.green : T.red };
+}
+/* 一行里每段自带涨跌配色，Canvas 没有富文本，只能自己排 */
+function drawDeltas(ctx, x, y, label, items) {
+  var cx = x;
+  text(ctx, label, cx, y + 1, { size: 10, color: T.txt3 });
+  cx += GFX.textW(ctx, label, 10, 400) + 6;
+  for (var i = 0; i < items.length; i++) {
+    if (i) { text(ctx, '·', cx, y + 1, { size: 10, color: T.txt3 }); cx += 9; }
+    text(ctx, items[i].label, cx, y + 1, { size: 10, color: T.txt3 });
+    cx += GFX.textW(ctx, items[i].label, 10, 400) + 2;
+    text(ctx, items[i].d.t, cx, y, { size: 11, weight: 800, color: items[i].d.c });
+    cx += GFX.textW(ctx, items[i].d.t, 11, 800) + 7;
+  }
+}
+
 /* 经营报表 */
 MODALS.report = function (ctx, b, m) {
   var s = S();
@@ -812,6 +959,32 @@ MODALS.report = function (ctx, b, m) {
     text(ctx, items[i].v, ix + 8, iy + 19, { size: 12.5, weight: 800, color: items[i].c, maxW: cw - 16 });
   }
   y += Math.ceil(items.length / cols) * 44 + 8;
+
+  /* 环比：只给绝对数字，玩家看不出今天是变好还是变差 */
+  var pr = s.prevReport;
+  if (pr && num(pr.day) !== num(r.day)) {
+    var ds = [];
+    var mk = function (label, cur, pv, opt) {
+      var dt = deltaStr(cur, pv, opt);
+      if (dt) ds.push({ label: label, d: dt });
+    };
+    mk('营收', r.revenue, pr.revenue, { unit: '¥' });
+    mk('杯数', r.served, pr.served);
+    mk('流失', r.lost, pr.lost, { inverse: true });
+    mk('净利', r.net, pr.net, { unit: '¥' });
+    if (ds.length) { drawDeltas(ctx, x, y, '📊 较 Day ' + num(pr.day), ds); y += 19; }
+  }
+  /* 营销是当日一次性投入，打烊即归零 —— 不说清楚玩家会以为钱白花了 */
+  if (num(r.marketing) > 0) {
+    text(ctx, '📢 营销 ' + money(r.marketing) + ' 当天有效，明日需重新设置',
+      x, y, { size: 10.5, color: T.amber, maxW: w });
+    y += 16;
+  }
+  if (s.endless && num(r.pressure) > 1) {
+    text(ctx, '⚡ 无尽第 ' + num(s.milestone) + ' 阶：工资与租金 ×' + num(r.pressure).toFixed(2),
+      x, y, { size: 10.5, color: T.red, maxW: w });
+    y += 16;
+  }
 
   var advs2 = adviceOf(s) || [];
   if (advs2.length) {
@@ -1067,7 +1240,16 @@ function drawEnd(ctx, L) {
       { kind: 'cyan', act: 'endless', size: 11, r: 9, pressed: isPressed('endless') });
     by += 52;
   }
-  GFX.button(ctx, x, by, w, 44, '🔄 再来一局', { kind: 'primary', act: 'again', size: 14 });
+  /* 分享：抖音生态里这是最便宜的拉新手段，也必须是玩家点击直接触发。
+     宿主不支持时连按钮都不给，避免「点了没反应」。 */
+  if (CAPS.shareOn()) {
+    GFX.button(ctx, x, by, (w - 10) / 2, 44, '📤 分享战绩',
+      { kind: 'amber', act: 'share', size: 12.5, pressed: isPressed('share') });
+    GFX.button(ctx, x + (w - 10) / 2 + 10, by, (w - 10) / 2, 44, '🔄 再来一局',
+      { kind: 'primary', act: 'again', size: 12.5, pressed: isPressed('again') });
+  } else {
+    GFX.button(ctx, x, by, w, 44, '🔄 再来一局', { kind: 'primary', act: 'again', size: 14 });
+  }
   GFX.button(ctx, x, by + 52, w, 40, '🏠 回到主菜单', { kind: 'ghost', act: 'home', size: 12.5 });
 }
 
@@ -1131,13 +1313,23 @@ function drawTutorial(ctx, L) {
     GFX.rr(ctx, r.x - 4, r.y - 4, r.w + 8, r.h + 8, 10);
     ctx.stroke();
   }
-  var ch = 150;
+  /* 等待型步骤要把「请做什么」明确写出来 ——
+     只给正文不说动作，玩家根本不知道这一步要他点哪里。 */
+  var hint = (step.advance && step.advance !== 'next') ? (step.hint || '') : '';
+  var ch = hint ? 172 : 150;
   var cy = H - ch - 24 - L.padBottom;
   GFX.fillRR(ctx, 16, cy, W - 32, ch, 18, T.bg2, T.line2);
   text(ctx, (VIEW.tut.step + 1) + '/' + TUTORIAL.length, 30, cy + 12, { size: 10, color: T.txt3 });
   text(ctx, step.title, 30, cy + 26, { size: 14, weight: 900, color: T.txt, maxW: W - 70 });
-  para(ctx, step.text.replace(/<br>/g, ' ').replace(/<[^>]+>/g, ''), 30, cy + 48,
+  var ty = cy + 48;
+  ty += para(ctx, step.text.replace(/<br>/g, ' ').replace(/<[^>]+>/g, ''), 30, ty,
     { size: 11.5, color: T.txt2, maxW: W - 70, lineH: 17 });
+  if (hint) {
+    ty += 6;
+    ty += para(ctx, hint + (step.advance === 'rush'
+      ? '（' + Math.min(3, (VIEW.tutRush || 0) + 1) + '/3）' : ''),
+      30, ty, { size: 11.5, weight: 700, color: T.amber, maxW: W - 70, lineH: 16 });
+  }
   GFX.button(ctx, 30, cy + ch - 46, (W - 78) / 2, 36, '跳过引导', { kind: 'ghost', act: 'tutskip', size: 11.5 });
   GFX.button(ctx, 30 + (W - 78) / 2 + 16, cy + ch - 46, (W - 78) / 2, 36, '下一步 →',
     { kind: 'primary', act: 'tutnext', size: 11.5 });

@@ -397,6 +397,7 @@ const capTT = {
     capCalls.push('createInterstitialAd');
     return { onClose() { }, show() { return Promise.resolve(); } };
   },
+  shareAppMessage: o => { capCalls.push('share:' + (o.title || '')); if (o.success) o.success({}); },
   requestGamePayment: o => {
     capCalls.push('pay:' + o.buyQuantity);
     if (o.success) o.success({});
@@ -462,6 +463,17 @@ check(capCalls.indexOf('pay:60') >= 0, '① 点击后调用了支付下单接口
 check(cap.MG.S.cash >= cashBeforePay + 1200,
   `① 支付成功后发放道具（现金 +${Math.round(cap.MG.S.cash - cashBeforePay)}）`);
 
+/* ⑥ 分享：结局页入口 + 点击同步调用 tt.shareAppMessage */
+check(C.shareOn(), '⑥ 宿主支持分享时入口判定为真');
+cap.V.screen = 'end'; cap.V.end = { kind: 'finish' }; cap.frames(1);
+check(!!cap.findHit('share'), '⑥ 结局页有「分享战绩」按钮');
+cap.tap('share'); cap.frames(1);
+const shareCall = capCalls.filter(c => c.indexOf('share:') === 0).pop() || '';
+check(shareCall.length > 6, '⑥ 点击后确实调用了 tt.shareAppMessage');
+check(/¥/.test(shareCall) && !/\{/.test(shareCall),
+  '⑥ 分享标题已把净资产填进模板（没有留下 {worth} 占位符）：' + shareCall.slice(6));
+cap.V.screen = 'game'; cap.frames(1);
+
 /* 侧边栏复访完整链路：从侧边栏启动 → 可领奖 → 只能领一次 */
 cap.MG.doAct('gift'); cap.frames(1);
 check(!cap.findHit('sidebarclaim'),
@@ -510,6 +522,7 @@ check(!qe.frameErr, `绘制任务卡后主循环仍无异常${qe.frameErr ? '：
 const le = makeEnv(390, 844);
 le.frames(2);
 check(!!le.findHit('login'), '标题页「连续登录」有可点区域');
+check(!!le.findHit('export'), '标题页「导出」有可点区域（与导入成对，不再只能进不能出）');
 const cashPend0 = le.MG.META.pendingCash || 0;
 le.tap('login'); le.frames(1);
 const pend = le.MG.META.pendingCash || 0;
@@ -569,6 +582,141 @@ check(Math.round(f2.inCtx('invUsed(_S)')) === capT,
 /* 无尽模式在小游戏必须可达（原来 startEndless 没有任何调用点） */
 f2.MG.doAct('endless'); f2.frames(1);
 check(f2.MG.S.endless === true, '「无尽模式」在小游戏有可达入口');
+
+/* 音效：小游戏没有 WebAudio，只能走 tt.createInnerAudioContext + 音频文件。
+   文件缺失 / 宿主不支持时必须静默降级，绝不能影响玩法。 */
+const sfxCalls = [];
+const sfxTT = {
+  createInnerAudioContext: o => {
+    sfxCalls.push('create:' + o.src);
+    return {
+      src: o.src,
+      stop() { }, seek() { }, play() { sfxCalls.push('play:' + o.src); },
+      onError() { }, destroy() { },
+    };
+  },
+};
+const sfx = makeEnv(390, 844, null, sfxTT);
+sfx.frames(2);
+check(sfx.MG.audio && sfx.MG.audio.available === true,
+  '宿主提供 createInnerAudioContext 时音效可用（不再是永久静音）');
+check(sfxCalls.filter(c => c.indexOf('create:audio/') === 0).length === 3,
+  '加载了 3 个音效文件：' + sfxCalls.filter(c => c.indexOf('create:') === 0).map(c => c.slice(7)).join(' / '));
+sfx.MG.audio.play('up', 880, 0.07);     /* 连点出杯：高频 → tap */
+sfx.MG.audio.play('up', 660, 0.12);     /* 升级：中频 → up */
+sfx.MG.audio.play('down', 140, 0.16);   /* 负反馈：低频 → down */
+const played = sfxCalls.filter(c => c.indexOf('play:') === 0).map(c => c.slice(5));
+check(played.join(',') === 'audio/tap.wav,audio/up.wav,audio/down.wav',
+  '按频率挑对了音效文件：' + played.join(' / '));
+/* 没有音频 API 的宿主：静默降级，不报错 */
+const mute = makeEnv(390, 844);
+mute.frames(2);
+check(mute.MG.audio && mute.MG.audio.available === false,
+  '浏览器/无音频宿主下静默降级为静音（不抛错、不开开关）');
+check(mute.V.sound === false, '不可用时音效开关自动关闭（不给一个点了没反应的开关）');
+
+/* 本机战绩榜：跨局保留最好的 5 局，两版一致 */
+const lb = makeEnv(390, 844);
+lb.frames(2);
+lb.tap('start'); lb.frames(1);
+lb.tap('tutskip'); lb.frames(1);
+lb.inCtx('pushRunRecord(_META, _S, "finish")');
+check((lb.MG.META.runsTop || []).length === 1, '小游戏收官也会记进本机战绩榜');
+for (let i = 0; i < 8; i++) lb.inCtx('pushRunRecord(_META, _S, "finish")');
+check((lb.MG.META.runsTop || []).length === lb.inCtx('CFG.RUN_TOP_N'),
+  `战绩榜截断到 ${lb.inCtx('CFG.RUN_TOP_N')} 条（不会无限增长）`);
+lb.V.screen = 'title'; lb.frames(1);
+check(!lb.frameErr, `标题页绘制战绩榜无异常${lb.frameErr ? '：' + lb.frameErr : ''}`);
+lb.V.screen = 'game';
+
+/* N22 出杯位超屏：旧写法 `if (sy + sh > L.H - 96) break;` 会让超屏工位
+   既不绘制也不登记命中区，玩家看得见订单却点不到工位，加速不了只能眼看客人流失。 */
+const stE = makeEnv(390, 844);
+stE.frames(2);
+stE.tap('start'); stE.frames(1);
+stE.tap('tutskip'); stE.frames(1);
+stE.MG.S.cash = 300000;
+/* 直接造工位：8 名员工 + 4 家店 = 1 + 8 + 3 = 12 个出杯位 */
+stE.inCtx('_S.staff = [];'
+  + 'for (var i=0;i<8;i++) _S.staff.push({ name:"员"+i, emoji:"🙂", skill:1, trait:null, wage:60, stamina:100 });'
+  + '_S.shops = 4;');
+stE.MG.doAct('open'); stE.frames(1);
+const stn = stE.MG.S.sim.stations;
+check(stn.length === 12, `造出 ${stn.length} 个出杯位（1 老板 + 8 员工 + 3 分店）`);
+const firstScreen = (stE.G.hits || []).filter(h => h.act === 'rush').length;
+check(firstScreen >= 8, `自适应网格让首屏能点到 ${firstScreen} 个工位（旧写法固定 2 列 76 高）`);
+/* 逐个工位验证可达性：在 0 → stageMax 之间扫一遍，id 必须全部出现过 */
+const seen = new Set();
+const STEPS = 24;
+for (let k = 0; k <= STEPS; k++) {
+  stE.V.stageScroll = (stE.V.stageMax * k) / STEPS;
+  stE.frames(1);
+  (stE.G.hits || []).forEach(h => { if (h.act === 'rush') seen.add(h.id); });
+}
+check(seen.size === stn.length,
+  `滑动过程中 ${stn.length} 个工位全部可达（实际可达 ${seen.size} 个，旧写法会漏掉超屏的）`);
+check(!stE.frameErr, `超屏工位绘制无异常${stE.frameErr ? '：' + stE.frameErr : ''}`);
+
+/* 小屏上必须真的走滑动兜底（自适应装不下 → 压高度 → 仍装不下 → 可滑动） */
+const stS = makeEnv(320, 568);
+stS.frames(2);
+stS.tap('start'); stS.frames(1);
+stS.tap('tutskip'); stS.frames(1);
+stS.MG.S.cash = 300000;
+stS.inCtx('_S.staff = [];'
+  + 'for (var i=0;i<16;i++) _S.staff.push({ name:"员"+i, emoji:"🙂", skill:1, trait:null, wage:60, stamina:100 });'
+  + '_S.shops = 4;');
+stS.MG.doAct('open'); stS.frames(1);
+check(stS.V.stageMax > 0,
+  `320×568 小屏上 20 个工位装不下时开启滑动（stageMax=${Math.round(stS.V.stageMax)}）`);
+const seenS = new Set();
+for (let k = 0; k <= STEPS; k++) {
+  stS.V.stageScroll = (stS.V.stageMax * k) / STEPS;
+  stS.frames(1);
+  (stS.G.hits || []).forEach(h => { if (h.act === 'rush') seenS.add(h.id); });
+}
+check(seenS.size === stS.MG.S.sim.stations.length,
+  `小屏滑动后 ${stS.MG.S.sim.stations.length} 个工位全部可达（实际 ${seenS.size} 个）`);
+
+/* 装得下时不该出现滑动（不能为了修 bug 把正常情况也改坏） */
+const stF = makeEnv(390, 844);
+stF.frames(2);
+stF.tap('start'); stF.frames(1);
+stF.tap('tutskip'); stF.frames(1);
+stF.MG.S.cash = 3000;
+stF.MG.doAct('open'); stF.frames(1);
+const stnF = stF.MG.S.sim.stations.length;
+check(stF.V.stageMax === 0, `只有 ${stnF} 个工位时不开启滑动（stageMax=0，手感不变）`);
+check((stF.G.hits || []).filter(h => h.act === 'rush').length === stnF,
+  `工位少时 ${stnF} 个全部直接可点`);
+
+/* N24 引导自动推进：等待型步骤做出对应动作后应自动前进，
+   以前小游戏一律吞掉事件，玩家只能靠「下一步」把引导硬念完。 */
+const tg = makeEnv(390, 844);
+tg.frames(2);
+tg.tap('start'); tg.frames(1);
+check(tg.V.tut.on, '开局自动进入引导');
+/* 手动推到「③ 低价囤货」那一步（advance: 'buy'） */
+let tgGuard = 0;
+while (tg.V.tut.on && tg.inCtx('TUTORIAL[VIEW.tut.step].advance') !== 'buy' && tgGuard++ < 20) {
+  tg.tap('tutnext'); tg.frames(1);
+}
+const buyStep = tg.V.tut.step;
+check(tg.inCtx('TUTORIAL[VIEW.tut.step].advance') === 'buy',
+  `已推到等待「买入」的引导步骤（第 ${buyStep + 1} 步）`);
+/* 非目标动作仍然要被吞掉，不能在引导里误触 */
+const cashBeforeGuard = tg.MG.S.cash;
+tg.tap('tab', 'staff'); tg.frames(1);
+check(tg.V.tut.step === buyStep && tg.V.tab === 'manage',
+  '引导进行中误触的其它按钮仍被拦截（不会乱切面板）');
+/* 目标动作放行 + 自动推进 */
+check(!!tg.findHit('buy', 'tea'), '等待「买入」时原料按钮放行了（否则玩家做不出动作）');
+tg.MG.S.cash = 5000;
+tg.tap('buy', 'tea'); tg.frames(1);
+check(tg.V.tut.step === buyStep + 1,
+  `买入成功后引导自动前进到第 ${tg.V.tut.step + 1} 步（无需点「下一步」）`);
+check(tg.V.tutRush === 0, '推进时连点计数已复位');
+check(!tg.frameErr, `引导自动推进无异常${tg.frameErr ? '：' + tg.frameErr : ''}`);
 
 /* 一项都没配 → 入口完全不出现 */
 const plain = makeEnv(390, 844);

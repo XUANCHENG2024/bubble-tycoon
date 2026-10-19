@@ -56,6 +56,13 @@ var CAPS = (function () {
        否则下单会被拒（平台校验 数量 × 单价 = 限定价格等级）。 */
     iap: false,
     iapZoneId: '1',
+
+    /* ⑥ 分享：无需后台配置，宿主支持就显示入口。
+       抖音的分享卡片取的是 screenshot 或 imageUrl，这里只给标题与文案。 */
+    share: true,
+    /* {worth} 会被 money() 的结果替换（自带 ¥），别在这里再加一个 ¥ */
+    shareTitle: '我在奶茶星球第 {day} 天做到了净资产 {worth}，你能超过我吗？',
+    shareDesc: '🧋 低价囤货、招人扩产能、连点加速出杯 —— 来开一家奶茶店',
     iapGoods: [
       /* 示例，按需改：
       { id: 'pearl60',  name: '60 珍珠',  qty: 60,  price: 600,  grantCash: 1200, grantIng: 60 },
@@ -356,6 +363,34 @@ var CAPS = (function () {
       || iapList().length > 0;
   }
 
+  /* ============================================================
+   *  ⑥ 分享
+   *  tt.shareAppMessage 与 addShortcut 同属「必须由用户点击同步触发」的 API，
+   *  只能在触摸回调里调（doAct 正是由 tt.onTouchEnd 直接驱动），不能包异步，
+   *  否则真机会报 must be invoked by user gesture。
+   * ========================================================== */
+  function shareOn() {
+    return !!(isTT && CFG.share && typeof tt.shareAppMessage === 'function');
+  }
+  /** vars 用来把净资产之类的数字填进标题模板 */
+  function share(vars) {
+    if (!shareOn()) return false;
+    var v = vars || {};
+    var title = String(CFG.shareTitle || '')
+      .replace('{worth}', v.worth != null ? v.worth : '')
+      .replace('{day}', v.day != null ? v.day : '');
+    try {
+      tt.shareAppMessage({
+        title: title,
+        desc: CFG.shareDesc || '',
+        query: '',
+        success: function () { },
+        fail: function () { },
+      });
+      return true;
+    } catch (e) { return false; }
+  }
+
   /** 福利卡副标题：一眼看清今天还剩什么可领 */
   function summary() {
     var bits = [];
@@ -387,6 +422,8 @@ var CAPS = (function () {
     adLeft: adLeft, markAd: markAd,
     /* ① */
     iapList: iapList, pay: pay,
+    /* ⑥ */
+    shareOn: shareOn, share: share,
     /* 测试用：注入启动参数，模拟「从侧边栏回来」 */
     _onShow: onShowInfo,
   };

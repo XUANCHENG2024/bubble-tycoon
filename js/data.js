@@ -9,6 +9,7 @@ const CFG = {
   SAVE_SLOTS: 3,
   META_KEY: 'bubbleTycoonMetaV3',
   DAYS: 30,
+  RUN_TOP_N: 5,            // 本机战绩榜保留的局数
   DAY_DURATION: 26,        // 营业阶段实时秒数
   LAST_CALL: 6,            // 打烊清场宽限秒数
   BASE_SERVICE: 1.35,      // 单杯基准耗时（秒）
@@ -451,6 +452,14 @@ function endlessGoal(baseGoal, milestone) {
   return Math.round(baseGoal * (1 + 0.55 * milestone));
 }
 
+/* ---------- 中期目标 ----------
+   30 天只有一个终点太远：中间三周玩家根本不知道自己是领先还是落后，
+   于是既不焦虑也不上心。每 5 天给一个锚点，达成即发一点声望。
+   比例取自 sim.js 的逐日净资产曲线再各下调一点 ——
+   锚点要「好好打就能过」，它的作用是告知节奏，不是再设一道关卡。 */
+const MILESTONE_EVERY = 5;
+const MILESTONE_RATIO = [0.09, 0.17, 0.28, 0.42, 0.58, 1.0];
+
 /* ============================================================
  *  新手引导脚本
  *  sel    : 要高亮的 CSS 选择器（为空则居中顯示）
@@ -499,7 +508,7 @@ const TUTORIAL = [
   },
   {
     key: 'station', tab: '', sel: '#stations', advance: 'rush',
-    hint: '👉 有订单时疯狂点击！连点 5 次试试',
+    hint: '👉 有订单时疯狂点击！连点 3 次试试',
     title: '⑦ 点击加速（核心手感）',
     text: '每个方块是一个<b>出杯位</b>，有订单时<b>狂点它</b>可立即推进 30% 进度。<br>每次点击都有<b>小费</b>，连续点击累积 <b>🔥 连击</b>，小费最高翻倍。<br><br>⚠️ 排队超过等位座或等太久，客人会跑掉并扣口碑；<br>原料不够也会赶客，可用底部「🚚 紧急进货」救场。',
   },

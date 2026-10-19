@@ -465,8 +465,25 @@ UI.renderManage = function () {
     </div>
     <div id="mktForecast" style="font-size:10.5px;color:var(--txt3);margin-top:7px;line-height:1.6">
       预计客流 <b style="color:var(--cyan)">${trafficOf(s)} 人</b> · 出杯位 <b style="color:var(--cyan)">${stationCount(s)} 个</b> · 单杯耗时 ${(CFG.BASE_SERVICE / (1 + .2 * s.up.speed) / (1 + .12 * s.up.training)).toFixed(2)}s
+      ${s.lastMarketing > 0
+        ? `<br><span style="color:var(--amber)">📢 昨日投入 ${money(s.lastMarketing)} 已用完 —— 营销只当天有效，今天要重新投。</span>`
+        : `<br><span style="color:var(--txt3)">营销只在当天生效，打烊后归零。</span>`}
     </div>
   </div>`;
+
+  /* 中期目标：30 天只有一个终点太远，这里给出当前这个 5 天窗口的锚点 */
+  const ms = milestoneOf(s);
+  if (ms) {
+    const mp = pct(num(netWorth(s)) / Math.max(1, ms.worth) * 100);
+    h += `<div class="card"><div class="card-h">🎯 中期目标
+      <span class="ch-sub">Day ${ms.day} 前净资产 ${money(ms.worth)}</span></div>
+      <div class="ms-bar"><i style="width:${mp}%;background:${ms.hit ? 'var(--green)' : 'linear-gradient(90deg,var(--cyan),var(--purple))'}"></i></div>
+      <div style="font-size:11.5px;color:${ms.hit ? 'var(--green)' : 'var(--txt2)'};margin-top:6px;line-height:1.6">
+        ${ms.hit
+          ? `✅ 已达成（当前 ${money(netWorth(s))}）· 声望 +1 已记账`
+          : `还差 <b style="color:var(--amber)">${money(ms.gap)}</b>（当前 ${money(netWorth(s))}，进度 ${mp.toFixed(0)}%）`}
+      </div></div>`;
+  }
 
   /* 今日体检（注意：客流/产能/库存统一按「人次」口径比较，杯数另列） */
   const trfN = trafficOf(s);                    /* 人 */
@@ -986,12 +1003,29 @@ UI.stageEnd = function () {
 };
 
 /* ---------------- 结算弹窗 ---------------- */
+/* 结算页「较昨日」的小标签。
+   inverse = 该指标越小越好（流失人数），涨跌配色要反过来。 */
+function deltaTag(cur, prev, opt) {
+  if (prev == null || !isFinite(prev)) return '';
+  const d = (Number(cur) || 0) - (Number(prev) || 0);
+  const unit = (opt && opt.unit) || '';
+  if (Math.abs(d) < ((opt && opt.eps) || 0.5)) return '<i class="dt dt-flat">持平</i>';
+  const up = d > 0;
+  const good = (opt && opt.inverse) ? !up : up;
+  const abs = Math.abs(d);
+  const v = abs >= 1000 ? Math.round(abs) : (abs % 1 ? abs.toFixed(1) : abs);
+  return `<i class="dt ${good ? 'dt-good' : 'dt-bad'}">${up ? '▲' : '▼'}${unit}${v}</i>`;
+}
+
 UI.showReport = function () {
   const s = window.S; const r = s.report;
   /* 第一天打烊 = 核心循环已走完，引导到此结束（避免挡住结算按钮） */
   if (typeof TUT !== 'undefined' && TUT.active) TUT.markDone(false);
   const nw = netWorth(s);
   let note = '';
+  /* 营销是当日一次性投入，打烊后归零。不说明的话玩家会以为那笔钱白花了。 */
+  if (r.marketing > 0) note += `📢 营销投入 ${money(r.marketing)} 当天有效，明日需重新设置。<br>`;
+  if (s.endless && r.pressure > 1) note += `⚡ 无尽第 ${s.milestone} 阶：工资与租金 ×${r.pressure.toFixed(2)}。<br>`;
   if (r.lost > 0) note += `😥 今天流失了 <b>${r.lost}</b> 位顾客` + (r.stockout ? `（缺料 ${r.stockout} 位）` : '') + (r.priceLost ? `、嫌贵 ${r.priceLost} 位` : '') + '。<br>';
   if (r.stockout > 0) note += `📦 缺料会直接赶走客人，明天记得提前备货。<br>`;
   if (r.priceLost > r.lost * 0.4 && r.priceLost > 3) note += `💸 有不少人被价格劝退了，试试把倍率调回 1.0 附近，或上架更便宜的款。<br>`;
@@ -1014,6 +1048,17 @@ UI.showReport = function () {
       <div class="rep-i"><div class="ri-k">口碑</div><div class="ri-v ${r.repDelta >= 0 ? 'p' : 'n'}">${Math.round(r.repAfter)} (${r.repDelta >= 0 ? '+' : ''}${r.repDelta.toFixed(1)})</div></div>
     </div>
     <div class="rep-note">${note}</div>
+    ${(() => {
+      const p = s.prevReport;
+      if (!p || p.day === r.day) return '';
+      return `<div class="rep-note">📊 较 Day ${p.day}：`
+        + `营收 ${deltaTag(r.revenue, p.revenue, { unit: '¥' })}`
+        + ` · 杯数 ${deltaTag(r.served, p.served)}`
+        + ` · 流失 ${deltaTag(r.lost, p.lost, { inverse: true })}`
+        + ` · 净利 ${deltaTag(r.net, p.net, { unit: '¥' })}`
+        + ` · 口碑 ${deltaTag(r.repAfter, p.repAfter, { eps: 0.05 })}`
+        + `</div>`;
+    })()}
     ${(() => {
       const all = CUSTOMER_TYPES.filter(t => (r.typeServed[t.id] || 0) || (r.typeLost[t.id] || 0));
       if (!all.length) return '';
@@ -1340,8 +1385,13 @@ UI.showEnd = function (result) {
 
 /* ---------------- 导入 / 导出存档 ---------------- */
 UI.showExport = function () {
-  const s = window.S;
+  /* 入口在标题页，而标题页通常没有 window.S（还没开局）。
+     这时导出当前存档槽里的进度 —— 否则按钮点了只会给出一段空码。 */
+  let s = window.S;
+  if (!s) { try { s = loadGame(); } catch (e) { s = null; } }
+  if (!s) { UI.toast('还没有可导出的存档，先开始或继续一局', 'err'); return; }
   const code = exportSave(s);
+  if (!code) { UI.toast('存档导出失败，请重试', 'err'); return; }
   UI.modal(`<button class="close-x" onclick="UI.closeModal()">×</button>
     <div class="m-title">📤 导出存档</div>
     <div class="m-sub">复制下面的文本，在另一台设备的「导入存档」中粘贴</div>
