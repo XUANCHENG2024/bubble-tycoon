@@ -475,6 +475,43 @@ cap.V.modal = null; cap.frames(1);
 cap.MG.doAct('nextday'); cap.frames(1);
 check(capCalls.indexOf('createInterstitialAd') >= 0, '⑤ 进入下一天时触发插屏广告（自然断点）');
 
+/* 每日任务（Canvas 版）：面板画得出来 + 达成即到账 + 有提示气泡 */
+const qe = makeEnv(390, 844);
+qe.frames(2);
+qe.tap('start'); qe.frames(1);
+qe.tap('tutskip'); qe.frames(1);
+const qS = qe.MG.S;
+check((qS.quests || []).length === 3,
+  `开局抽到 3 条每日任务（${(qS.quests || []).map(q => q.id).join('/')}）`);
+const qHits = qe.frameHits[qe.frameHits.length - 1];
+check(qHits > 0, `经营面板（含任务卡）绘制出 ${qHits} 个命中区，无异常`);
+/* 造一条必定达成的任务，走「引擎发奖 → step 消费 → 弹提示」的完整链路 */
+qS.quests = [{ id: 'q_cups', goal: 1, prog: 0, done: false, got: 0 }];
+qS.newQuests = [];
+const qCash0 = qS.cash;
+qe.inCtx('bumpQuest(_S, "cups", 1)');
+qe.frames(1);
+check(qS.cash > qCash0, `每日任务达成即时到账（+${Math.round(qS.cash - qCash0)}）`);
+check(qS.quests[0].done, '任务被标记为已完成');
+check((qe.V.toasts || []).some(t => (t.msg || '').indexOf('🎯') >= 0),
+  '达成后弹出了任务提示气泡');
+check(!qe.frameErr, `绘制任务卡后主循环仍无异常${qe.frameErr ? '：' + qe.frameErr : ''}`);
+
+/* 连续登录：标题页签到 → 开局结转 */
+const le = makeEnv(390, 844);
+le.frames(2);
+check(!!le.findHit('login'), '标题页「连续登录」有可点区域');
+const cashPend0 = le.MG.META.pendingCash || 0;
+le.tap('login'); le.frames(1);
+const pend = le.MG.META.pendingCash || 0;
+check(pend > cashPend0, `签到后创业基金入账（+${Math.round(pend - cashPend0)}）`);
+check(le.MG.META.loginStreak === 1, '首次签到连登天数为 1');
+check(!le.findHit('login'), '签过之后按钮不再登记命中（不能重复领）');
+le.tap('start'); le.frames(1);
+le.tap('tutskip'); le.frames(1);
+check(le.MG.META.pendingCash === 0, '开局后创业基金已结转（pendingCash 清零）');
+check(le.MG.S.loginBonus === pend, `创业基金落进本局现金（+${Math.round(pend)}）`);
+
 /* 一项都没配 → 入口完全不出现 */
 const plain = makeEnv(390, 844);
 plain.frames(2);

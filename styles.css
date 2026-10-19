@@ -263,6 +263,29 @@ body::before {
 .mkt-btns { display: flex; gap: 4px; }
 .mkt-btns .btn { padding: 5px 8px; font-size: 11px; border-radius: 8px; }
 
+/* 每日任务条 */
+.quest {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 0; border-bottom: 1px solid rgba(255, 255, 255, .06);
+}
+.quest:last-child { border-bottom: none; }
+.quest .q-e { font-size: 19px; width: 24px; text-align: center; flex: none; }
+.quest .q-n { width: 68px; font-weight: 700; font-size: 12.5px; flex: none; }
+.quest .q-bar {
+  flex: 1; height: 6px; min-width: 34px;
+  background: rgba(255, 255, 255, .1); border-radius: 9px; overflow: hidden;
+}
+.quest .q-bar i {
+  display: block; height: 100%; border-radius: 9px;
+  background: linear-gradient(90deg, var(--cyan), var(--purple));
+  transition: width .3s ease;
+}
+.quest .q-v { width: 86px; font-size: 11px; color: var(--txt3); text-align: right; flex: none; }
+.quest .q-r { width: 56px; font-size: 11px; font-weight: 800; color: var(--amber); text-align: right; flex: none; }
+.quest.done .q-n, .quest.done .q-v { color: var(--txt3); }
+.quest.done .q-bar i { background: var(--green); }
+.quest.done .q-r { color: var(--green); }
+
 /* 配方卡 */
 .rc {
   background: var(--card2); border: 1.5px solid transparent; border-radius: var(--r1);
@@ -709,6 +732,13 @@ body::before {
     background: rgba(38, 18, 68, .82);
   }
   .modal-mask { -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(8, 3, 18, .88); }
+
+  /* 每日任务条是「emoji + 名字 + 进度条 + 数值 + 奖金」五段横排，
+     320px 屏上固定宽度加起来会顶破卡片，这里整体收紧。 */
+  .quest { gap: 5px; }
+  .quest .q-n { width: 56px; font-size: 11.5px; }
+  .quest .q-v { width: 68px; font-size: 10px; }
+  .quest .q-r { width: 44px; font-size: 10px; }
 }
 
 /* 矮屏（小屏安卓 / 横屏）：把标题页压缩，避免开始菜单滚半天 */

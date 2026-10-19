@@ -40,25 +40,43 @@ function renderTitle() {
     bd.classList.toggle('btn-ghost', played);
     bd.classList.toggle('btn-amber', !played);
   }
+  /* 连续登录 */
+  const lg = loginState(m);
+  const bl = $('btnLogin');
+  if (bl) {
+    bl.textContent = !lg.claimed
+      ? `🔥 连登 ${lg.streak} 天 · 签到领 ${money(lg.next)}`
+      : (lg.pending > 0 ? `🎁 已领 ${money(lg.pending)} · 开局到账`
+        : `🔥 连登 ${lg.streak} 天 · 明日 ${money(lg.next)}`);
+    bl.classList.toggle('btn-amber', !lg.claimed);
+    bl.classList.toggle('btn-ghost', lg.claimed);
+    bl.disabled = !!lg.claimed;
+  }
   $('titleTip').textContent = pick(TIPS);
 }
 
 /* ---------------- 开局 ---------------- */
 /** keepSeed=true 时保留种子随机（每日挑战需要整局可复现） */
 function startGame(diff, loaded, keepSeed) {
-  if (!loaded && !keepSeed) RNG.clear();
+  if (!loaded && !keepSeed) { RNG.clear(); QUEST_RNG.clear(); }
   const s = loaded || newGame(diff, window.META.bp);
   window.S = s;
   if (!loaded) {
     window.META.runs++;
     saveMeta(window.META);
   }
+  /* 连续登录的创业基金在这里落进这一局（没签到会自动补签） */
+  const lb = takeLoginBonus(s, window.META);
   UI.showScreen('screen-game');
   UI.setTab('manage');
   UI.renderHUD();
   autoSave(s);
   /* 新手指引：首次游玩自动开启；读档则续上未完成的进度 */
   SFX.resume();
+  if (lb) {
+    UI.toast(`🔥 连续登录 ${lb.streak} 天，创业基金 +${money(lb.cash)}`, 'gold');
+    SFX.coin();
+  }
   setTimeout(() => {
     if (loaded) {
       if (s.tut && !s.tut.done && s.tut.step > 0 && s.tut.step < TUT.steps.length) TUT.start(s.tut.step);
@@ -89,8 +107,20 @@ function pump() {
       UI.confetti(22); SFX.ach();
     }, i * 400));
   }
+  emitQuests();
   UI.renderAll();
   autoSave(s);
+}
+
+/** 弹出每日任务达成提示。s.newQuests 由引擎在达成时写入，这里消费掉避免重复弹 */
+function emitQuests() {
+  const s = window.S;
+  if (!s || !s.newQuests || !s.newQuests.length) return;
+  const got = s.newQuests; s.newQuests = [];
+  got.forEach((q, i) => setTimeout(() => {
+    UI.toast(`🎯 ${q.emoji} ${q.name} 达成  +${money(q.cash)}`, 'ok');
+    SFX.coin();
+  }, i * 340));
 }
 
 /* ---------------- 一天结束 ---------------- */
@@ -98,6 +128,7 @@ function onDayEnd() {
   const s = window.S;
   UI.stageEnd();
   UI.renderHUD();
+  emitQuests();          /* 打烊时结算的「越少越好」型任务在这里弹 */
   emitAchievements();
   autoSave(s);
 
@@ -166,9 +197,20 @@ function doAct(act, el) {
       return;
     }
 
+    /* --- 连续登录签到 --- */
+    case 'login': {
+      const r = claimLogin(window.META);
+      if (!r) { UI.toast('今天已经签过啦，明天再来', 'ok'); return; }
+      SFX.coin(); UI.confetti(18);
+      UI.toast(`🔥 连续登录 ${r.streak} 天，创业基金 +${money(r.cash)}（开局到账）`, 'gold');
+      renderTitle();
+      return;
+    }
+
     /* --- 每日挑战（日期种子，全网同一局） --- */
     case 'daily': {
       RNG.setSeed(seedFromText('bubble-' + todayKey()));
+      QUEST_RNG.setSeed(seedFromText('bubble-quest-' + todayKey()));
       const st = newGame('normal', window.META.bp);
       st.daily = true;
       startGame('normal', st, true);
@@ -390,7 +432,7 @@ function doAct(act, el) {
     case 'again': {
       const d = s ? s.diff : chosenDiff;
       clearSave();
-      RNG.clear();
+      RNG.clear(); QUEST_RNG.clear();
       startGame(d);
       return;
     }
@@ -509,6 +551,8 @@ function loop(now) {
     tick(s, dt);
     UI.stageSync();
     UI.renderHUD();
+    /* 出杯/流失是在 tick 里发生的，不走 doAct，所以营业中途达成的任务要在这里补弹 */
+    emitQuests();
     if (s.phase === 'report') onDayEnd();
   }
 }

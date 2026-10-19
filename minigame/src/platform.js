@@ -157,6 +157,17 @@ var PLAT = (function () {
     installStore: installStore,
     bindTouch: bindTouch,
     createAudio: createAudio,
+    /* 触感反馈。
+       本作核心是连点出杯位，这类玩法最吃「按下去有回弹」。
+       抖音有 tt.vibrateShort / vibrateLong；浏览器没有对应能力，直接 no-op ——
+       触感永远不该影响任何游戏逻辑，调用方也不需要判环境。 */
+    vibrate: function (kind) {
+      try {
+        if (!isTT) return;
+        if (kind === 'long' && typeof tt.vibrateLong === 'function') tt.vibrateLong();
+        else if (typeof tt.vibrateShort === 'function') tt.vibrateShort();
+      } catch (e) { /* 部分机型没有马达，忽略 */ }
+    },
     /* 复制到剪贴板：小游戏有原生 API，浏览器走异步 Clipboard */
     copy: function (text) {
       try {

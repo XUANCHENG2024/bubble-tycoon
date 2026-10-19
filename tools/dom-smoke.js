@@ -79,7 +79,8 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + '\n;globalThis.__D={CFG,ING,RECIPES,UPGRADES,TRAITS,EVENTS,ACHIEVEMENTS,DIFFICULTY,TAGS,SHOP_COSTS,WEATHERS,NEWS,UI,TUT,SFX,'
   + 'adviceOf,maxCupsFromStock,maxOrdersFromStock,dailyOrderCapacity,dailyClickOrderCapacity,avgCupsPerOrder,typeWeightOf,'
   + 'CUSTOMER_TYPES,CUSTOMER_FACES,RIVAL_ACTIONS,RIVAL_NAMES,TYPE_WEATHER_BIAS,isWeekend,endlessGoal,'
-  + 'RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalLevel,rivalAction,updateRival,money,clamp,pick,rnd,'
+  + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalLevel,rivalAction,updateRival,money,clamp,pick,rnd,'
+  + 'QUESTS,QUEST_COUNT,questById,questPool,questGoalOf,questRewardOf,rollQuests,bumpQuest,closeQuests,questViews,'
   + 'goalOf,startEndless,togglePause,slotInfo,hasAnySave,getSlot,setSlot,exportSave,importSave};';
 vm.createContext(ctx);
 vm.runInContext(src, ctx, { filename: 'bundle.js' });
@@ -308,6 +309,8 @@ ok(`无尽模式：目标 ${E.money(baseGoal)} → ${E.money(eg)}，isFinished �
 /* 20. 每日挑战：同种子必须完全可复现 */
 function playWithSeed(seed) {
   E.RNG.setSeed(seed);
+  /* 每日任务走独立随机流，不一起播种就成了「同种子不可复现」 */
+  E.QUEST_RNG.setSeed(seed ^ 0x9e3779b9);
   const a = E.newGame('normal', 0);
   for (let d = 0; d < 5; d++) {
     a.menu = ['boba']; a.ratios.boba = 1;
@@ -317,7 +320,7 @@ function playWithSeed(seed) {
     E.nextDay(a);
   }
   const out = { worth: Math.round(E.netWorth(a)), rep: Math.round(a.rep), cups: a.stats.totalCups };
-  E.RNG.clear();
+  E.RNG.clear(); E.QUEST_RNG.clear();
   return out;
 }
 const runA = playWithSeed(12345), runB = playWithSeed(12345), runC = playWithSeed(999);
@@ -355,5 +358,126 @@ if (!card) throw new Error('战绩卡片生成失败');
 UI.showEnd('finish');
 checkHTML('结局页', E.document.getElementById('endWrap').innerHTML);
 ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
+
+
+/* 24. 每日任务：抽取 / 发奖 / 跨天 / 存档 */
+{
+  const qs = s3.quests || [];
+  if (qs.length !== E.QUEST_COUNT) throw new Error('每日任务数量应为 ' + E.QUEST_COUNT + '，实际 ' + qs.length);
+  const ids = new Set(qs.map(q => q.id));
+  if (ids.size !== qs.length) throw new Error('同一天抽到了重复任务');
+  for (const it of qs) if (!E.questById(it.id)) throw new Error('任务 id 不在池子里: ' + it.id);
+
+  /* 目标随天数上抬，且夹在 [min,max] */
+  const g1 = E.questGoalOf(E.questById('q_cups'), { day: 1 });
+  const g20 = E.questGoalOf(E.questById('q_cups'), { day: 20 });
+  const g99 = E.questGoalOf(E.questById('q_cups'), { day: 99 });
+  if (!(g20 > g1)) throw new Error('任务目标没有随天数上抬');
+  if (g99 !== E.questById('q_cups').max) throw new Error('任务目标没有封顶');
+
+  /* 达成即时到账 */
+  const t = E.newGame('normal', 0);
+  t.quests = [{ id: 'q_cups', goal: 5, prog: 0, done: false, got: 0 }];
+  t.newQuests = [];
+  const cash0 = t.cash;
+  const got = E.bumpQuest(t, 'cups', 5);
+  if (got.length !== 1) throw new Error('达到目标却没有判定达成');
+  if (t.cash - cash0 <= 0) throw new Error('达成任务没有即时到账现金');
+  if (!t.quests[0].done) throw new Error('任务未标记完成');
+  /* 重复推进不应二次发奖 */
+  const cash1 = t.cash;
+  if (E.bumpQuest(t, 'cups', 50).length !== 0) throw new Error('已完成任务被重复发奖');
+  if (t.cash !== cash1) throw new Error('已完成任务重复加钱');
+
+  /* 越少越好型：达标发、超了不发 */
+  const a = E.newGame('normal', 0);
+  a.quests = [{ id: 'q_nolost', goal: 3, prog: 1, done: false, got: 0 }];
+  if (E.closeQuests(a).length !== 1) throw new Error('流失未超限却没有发奖');
+  const b = E.newGame('normal', 0);
+  b.quests = [{ id: 'q_nolost', goal: 3, prog: 9, done: false, got: 0 }];
+  if (E.closeQuests(b).length !== 0) throw new Error('流失超限却发了奖');
+
+  /* 跨天换血 */
+  const c = E.newGame('normal', 0);
+  E.nextDay(c);
+  if (c.questDay !== c.day) throw new Error('跨天后 questDay 没跟上');
+  if ((c.quests || []).some(q => q.prog !== 0 || q.done)) throw new Error('跨天后任务进度没有清零');
+
+  /* 存档往返：进度保留 */
+  const d = E.newGame('normal', 0);
+  d.quests = [{ id: 'q_trend', goal: 8, prog: 5, done: false, got: 0 },
+               { id: 'q_clicks', goal: 20, prog: 1, done: false, got: 0 },
+               { id: 'q_cups', goal: 12, prog: 0, done: false, got: 0 }];
+  d.questDay = d.day;
+  E.setSlot(1); E.saveGame(d);
+  const d2 = E.loadGame(1);
+  if (d2.quests.length !== 3) throw new Error('任务没有随存档保留');
+  const tq = d2.quests.find(q => q.id === 'q_trend');
+  if (!tq || tq.prog !== 5) throw new Error('任务进度读档后丢失');
+
+  /* 旧存档（无 quests 字段）自动补一份，不能是空数组 */
+  const legacy = E.sanitizeState({ v: 2, day: 1, diff: 'normal', cash: 700, rep: 26 });
+  if (!legacy || legacy.quests.length !== E.QUEST_COUNT) throw new Error('旧存档没有补发每日任务');
+
+  /* 脏数据：未知 id / 负数进度 */
+  const dirty = E.sanitizeState(Object.assign({}, legacy, {
+    quests: [{ id: '不存在', goal: -3, prog: -9, done: true, got: -1 }], questDay: 1,
+  }));
+  if (dirty.quests.length !== E.QUEST_COUNT) throw new Error('脏任务数据没有被替换');
+  if (dirty.quests.some(q => q.prog < 0 || q.goal < 1)) throw new Error('脏任务数据没有被夹到合法区间');
+
+  /* 展示模型 */
+  const vs = E.questViews(d);
+  if (vs.length !== 3) throw new Error('questViews 条数不对');
+  if (vs.some(v => !isFinite(v.ratio) || v.ratio < 0 || v.ratio > 1)) throw new Error('questViews 进度比例越界');
+  ok(`每日任务：3 条/天 · 目标随天数上抬并封顶 · 达成即时到账 · 跨天换血 · 存档往返 · 旧档补发`);
+}
+
+/* 25. 连续登录 */
+{
+  const m = E.newMeta();
+  if (m.loginDate !== '' || m.loginStreak !== 0) throw new Error('新 Meta 的登录字段不是初始值');
+
+  const r1 = E.claimLogin(m);
+  if (!r1 || r1.streak !== 1) throw new Error('首次签到连登天数应为 1，实际 ' + (r1 && r1.streak));
+  if (!(r1.cash > 0)) throw new Error('首次签到没有发钱');
+  if (E.claimLogin(m) !== null) throw new Error('同一天重复签到竟然成功了');
+
+  /* 断签：把日期改成前天 → 连登重置为 1 */
+  const m2 = E.newMeta();
+  m2.loginDate = '2000-01-01'; m2.loginStreak = 9; m2.loginBest = 9;
+  const r2 = E.claimLogin(m2);
+  if (r2.streak !== 1) throw new Error('断签后连登没有重置');
+  if (m2.loginBest !== 9) throw new Error('最高连登记录被覆盖了');
+
+  /* 续签：昨天 → +1 */
+  const m3 = E.newMeta();
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  const yk = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`;
+  m3.loginDate = yk; m3.loginStreak = 4;
+  const r3 = E.claimLogin(m3);
+  if (r3.streak !== 5) throw new Error('续签没有 +1');
+  if (!r3.cont) throw new Error('续签没有标记为连续');
+
+  /* 奖励封顶 */
+  if (E.loginCashOf(1) >= E.loginCashOf(30)) throw new Error('连登奖励没有随天数增长');
+  if (E.loginCashOf(30) !== E.loginCashOf(99)) throw new Error('连登奖励没有封顶');
+
+  /* 开局到账：没签到自动补签，已签到把 pending 落进这一局 */
+  const m4 = E.newMeta();
+  const g = E.newGame('normal', 0);
+  const cash0 = g.cash;
+  const took = E.takeLoginBonus(g, m4);
+  if (!took || !(took.cash > 0)) throw new Error('开局没有领到创业基金');
+  if (g.cash - cash0 !== took.cash) throw new Error('创业基金没有进现金');
+  if (m4.pendingCash !== 0) throw new Error('pendingCash 没有被清掉');
+  const again = E.takeLoginBonus(g, m4);
+  if (again !== null) throw new Error('同一局重复领取了创业基金');
+
+  /* 只读快照不落盘也不改状态 */
+  const snap = E.loginState(m4);
+  if (snap.streak !== 1 || !snap.claimed) throw new Error('loginState 快照不对');
+  ok(`连续登录：首签 ${r1.cash} 元 · 断签重置 · 续签 +1 · 奖励封顶 · 开局到账且不可重复领`);
+}
 
 console.log('\n✅ 全部冒烟测试通过，无运行时异常');

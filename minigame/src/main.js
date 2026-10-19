@@ -42,6 +42,8 @@ function toast(msg) {
   if (VIEW.toasts.length > 4) VIEW.toasts.shift();
 }
 function floater(x, y, txt, kind) {
+  /* 上限：出杯是高频事件，不封顶的话一次爆单能把飘字堆到几百条 */
+  if (VIEW.floaters.length > 24) VIEW.floaters.shift();
   VIEW.floaters.push({ x: x, y: y, text: txt, kind: kind || 'good', life: 800 });
 }
 function confetti(n) {
@@ -61,6 +63,16 @@ var AUDIO = null;
 function beep(kind, freq, dur) {
   if (!VIEW.sound || !AUDIO) return;
   AUDIO.play(kind, freq, dur);
+}
+
+/* 触感。出杯是每秒好几次的高频事件，不节流会变成持续抖动 ——
+   既烦人又费电，所以短震动统一做 250ms 节流。 */
+var lastBuzz = 0;
+function buzz(kind) {
+  var now = Date.now();
+  if (kind !== 'long' && now - lastBuzz < 250) return;
+  lastBuzz = now;
+  PLAT.vibrate(kind);
 }
 
 /* ---------------- 主循环 ---------------- */
@@ -92,6 +104,9 @@ function step(dt) {
     syncStageFeel(s);
     if (s.phase === 'report') onDayEnd();
   }
+  /* 出杯/流失发生在 tick 里、进货研发发生在 doAct 里，两条路都可能达成任务，
+     统一在这里收口最省事（空数组时开销就是一次长度判断）。 */
+  emitQuests();
   if (s && s.phase === 'prep' && s.pendingEvent && !VIEW.modal) {
     VIEW.modal = { type: 'event' };
   }
@@ -119,13 +134,14 @@ function step(dt) {
   }
 }
 
-/** 出杯 / 流失的即时反馈：音效 + 飘字。模拟「点一下有反应」的手感来源 */
+/** 出杯 / 流失的即时反馈：音效 + 飘字 + 触感。模拟「点一下有反应」的手感来源 */
 function syncStageFeel(s) {
   if (!s.sim) return;
   var served = Math.round(num(s.sim.cups));
   if (served !== VIEW.lastServed) {
     if (served > VIEW.lastServed) {
       beep('up', 660, 0.09);
+      buzz('short');
       for (var k = 0; k < served - VIEW.lastServed; k++) {
         floater(40 + Math.random() * (CW - 80), CH * 0.42, '+', 'good');
       }
@@ -134,8 +150,22 @@ function syncStageFeel(s) {
   }
   var lost = Math.round(num(s.sim.lost));
   if (lost !== VIEW.lastLost) {
-    if (lost > VIEW.lastLost) beep('down', 140, 0.16);
+    if (lost > VIEW.lastLost) { beep('down', 140, 0.16); buzz('short'); }
     VIEW.lastLost = lost;
+  }
+
+  /* 引擎侧的三类负反馈（太贵了 / 缺料 / 走了）由 engine 推进 sim.floaters，
+     H5 版在 ui.js 里渲染并清空；小游戏版以前漏了这一步 ——
+     结果玩家看不到客人为什么走，而这个游戏的核心策略恰恰是
+     「产能 vs 客流 vs 定价」的赛跑，看不到流失原因就学不会调参。
+     不 drain 的话它还会一整天只增不减。 */
+  var fl = s.sim.floaters;
+  if (fl && fl.length) {
+    for (var j = 0; j < fl.length; j++) {
+      floater(30 + Math.random() * (CW - 60), CH * 0.5 + (Math.random() * 44 - 22),
+        fl[j].text, fl[j].kind);
+    }
+    fl.length = 0;
   }
 }
 
@@ -201,8 +231,16 @@ function doAct(act, id, extra) {
     if (off) { VIEW.modal = { type: 'confirm', title: '🕐 离线收益', text: offText(off), okText: '收下', okKind: 'amber', okAct: 'close' }; }
     return;
   }
+  if (act === 'login') {
+    var lr = claimLogin(_META);
+    if (!lr) { toast('今天已经签过啦，明天再来'); return; }
+    confetti(18); buzz('short');
+    toast('🔥 连续登录 ' + lr.streak + ' 天，创业基金 +' + money(lr.cash) + '（开局到账）');
+    return;
+  }
   if (act === 'daily') {
     RNG.setSeed(seedFromText('bubble-' + todayKey()));
+    QUEST_RNG.setSeed(seedFromText('bubble-quest-' + todayKey()));
     var ds = newGame('normal', _META.bp);
     ds.daily = true;
     _META.runs++;
@@ -434,7 +472,7 @@ function doAct(act, id, extra) {
     return;
   }
   if (act === 'boss') {
-    if (bossSkill(s)) { beep('up', 900, 0.18); toast('⚡ 老板亲自上阵！全员加速'); }
+    if (bossSkill(s)) { beep('up', 900, 0.18); buzz('long'); toast('⚡ 老板亲自上阵！全员加速'); }
     return;
   }
   if (act === 'pause') { var p = togglePause(s); toast(p ? '⏸ 已暂停' : '▶ 继续营业'); return; }
@@ -454,7 +492,7 @@ function doAct(act, id, extra) {
   if (act === 'again') {
     var d = s ? s.diff : VIEW.diff;
     clearSave();
-    RNG.clear();
+    RNG.clear(); QUEST_RNG.clear();
     startGame(d, null, false);
     return;
   }
@@ -507,7 +545,7 @@ function grantIap(g) {
 
 /* ---------------- 流程 ---------------- */
 function startGame(diff, loaded, keepSeed) {
-  if (!loaded && !keepSeed) RNG.clear();
+  if (!loaded && !keepSeed) { RNG.clear(); QUEST_RNG.clear(); }
   var s = loaded || newGame(diff, _META.bp);
   _S = s;
   if (!loaded) { _META.runs++; saveMeta(_META); }
@@ -515,7 +553,10 @@ function startGame(diff, loaded, keepSeed) {
   VIEW.tab = 'manage';
   VIEW.scroll = { manage: 0, lab: 0, up: 0, staff: 0, rival: 0, ach: 0 };
   VIEW.modal = null;
+  /* 连续登录的创业基金在这里落进这一局（没签到会自动补签） */
+  var lb = takeLoginBonus(s, _META);
   autoSave(s);
+  if (lb) { toast('🔥 连续登录 ' + lb.streak + ' 天，创业基金 +' + money(lb.cash)); confetti(16); buzz('short'); }
   /* 首次游玩自动开引导；读档则续上未完成的进度 */
   if (loaded && s.tut && !s.tut.done && s.tut.step > 0 && s.tut.step < TUTORIAL.length) {
     tutStart(s.tut.step);
@@ -542,6 +583,18 @@ function onDayEnd() {
   if (isFinished(s)) { finishRun('finish'); return; }
   if (s.endlessLevelUp) toast('🏆 里程碑达成！新目标 ' + money(goalOf(s)));
   VIEW.modal = { type: 'report', day: s.day };
+}
+
+/** 每日任务达成提示。s.newQuests 由引擎在达成时写入，这里消费掉避免重复弹 */
+function emitQuests() {
+  var s = _S;
+  if (!s || !s.newQuests || !s.newQuests.length) return;
+  var got = s.newQuests; s.newQuests = [];
+  for (var i = 0; i < got.length; i++) {
+    toast('🎯 ' + got[i].emoji + ' ' + got[i].name + ' 达成  +' + money(got[i].cash));
+  }
+  confetti(14);
+  buzz('short');
 }
 
 function emitAchievements(s) {

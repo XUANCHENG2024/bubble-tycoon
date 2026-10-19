@@ -109,10 +109,18 @@ function drawTitle(ctx, L) {
     GFX.button(ctx, x, y, w, 40, '📅 每日挑战',
       { kind: 'amber', act: 'daily', pressed: isPressed('daily') });
   }
-  y += 50;
-  GFX.button(ctx, x, y, bw, 38, '📖 玩法说明', { kind: 'ghost', act: 'help', pressed: isPressed('help') });
-  GFX.button(ctx, x + bw + 10, y, bw, 38, '📥 导入存档', { kind: 'ghost', act: 'import', pressed: isPressed('import') });
   y += 48;
+
+  /* 连续登录：和「玩法说明 / 导入存档」挤在同一行做三等分，
+     标题页在小屏（640 高）上已经没有余量再单独加一行了。 */
+  var lg = loginState(m);
+  var bw3 = (w - 16) / 3;
+  GFX.button(ctx, x, y, bw3, 38,
+    !lg.claimed ? '🔥 签到 ' + money(lg.next) : '🎁 已签',
+    { kind: lg.claimed ? 'ghost' : 'amber', act: 'login', size: 10.5, disabled: !!lg.claimed, pressed: isPressed('login') });
+  GFX.button(ctx, x + bw3 + 8, y, bw3, 38, '📖 玩法说明', { kind: 'ghost', act: 'help', size: 10.5, pressed: isPressed('help') });
+  GFX.button(ctx, x + (bw3 + 8) * 2, y, bw3, 38, '📥 导入存档', { kind: 'ghost', act: 'import', size: 10.5, pressed: isPressed('import') });
+  y += 46;
 
   /* 存档槽 */
   text(ctx, '💾 存档槽', x, y, { size: 11, color: T.txt3 });
@@ -135,6 +143,11 @@ function drawTitle(ctx, L) {
   /* 元信息 */
   text(ctx, '🌟 声望 ' + m.bp + ' ★   🏆 最高 ' + money(m.best.normal || 0) + '   🎮 已玩 ' + m.runs + ' 局',
     W / 2, y, { size: 10.5, align: 'center', color: T.txt2 });
+  y += 17;
+  text(ctx, lg.claimed
+    ? '🔥 连登 ' + lg.streak + ' 天 · 明日 ' + money(lg.next) + (lg.pending > 0 ? '（' + money(lg.pending) + ' 开局到账）' : '')
+    : '🔥 连登 ' + lg.streak + ' 天 · 今天还没签到',
+    W / 2, y, { size: 10.5, align: 'center', color: lg.claimed ? T.amber : T.txt3 });
   y += 18;
   if (!STORAGE_OK) {
     text(ctx, '⚠️ 存储不可用，本局进度无法保存', W / 2, y,
@@ -269,6 +282,33 @@ function panelManage(ctx, x, y, w, s) {
   intel(ctx, x + cw * 2 + 4, y + 8, cw - 10, '明日预告',
     s.trendKnown ? (nextTag.emoji || '') + ' ' + (nextTag.name || '—') : '❓ 未知');
   y += ih + 10;
+
+  /* 每日任务：与 H5 版同一张卡，位置也一致（情报下面、采购上面）。
+     达成即到账现金，是「再开一天」的具体理由。 */
+  var qv = questViews(s);
+  if (qv.length) {
+    var qh = 30 + qv.length * 30;
+    GFX.card(ctx, x, y, w, qh);
+    text(ctx, '🎯 今日任务', x + 10, y + 8, { size: 12.5, weight: 800 });
+    text(ctx, '达成即到账', x + w - 10, y + 9, { size: 10, align: 'right', color: T.txt3 });
+    var qy = y + 30;
+    for (var qi = 0; qi < qv.length; qi++) {
+      var q = qv[qi];
+      text(ctx, q.emoji, x + 12, qy + 6, { size: 14 });
+      text(ctx, q.name, x + 32, qy + 8, { size: 11, color: q.done ? T.txt3 : T.txt, maxW: 60 });
+      GFX.bar(ctx, x + 98, qy + 11, w - 98 - 80, 6, q.ratio, { color: q.done ? T.green : T.cyan });
+      var qshow = q.done ? '已达成'
+        : (q.dir === 'down'
+          /* 越少越好型的数字是「上限」，直接写 x/y 会被读成「已完成 x 个」 */
+          ? '剩 ' + Math.max(0, q.goal - Math.round(q.prog)) + q.unit
+          : q.prefix + Math.round(q.prog) + '/' + q.prefix + q.goal + q.unit);
+      text(ctx, qshow, x + w - 74, qy + 8, { size: 9.5, color: T.txt3, align: 'right', maxW: 64 });
+      text(ctx, (q.done ? '✅ ' : '') + '+' + money(q.reward), x + w - 10, qy + 8,
+        { size: 10, weight: 800, align: 'right', color: q.done ? T.green : T.amber });
+      qy += 30;
+    }
+    y += qh + 10;
+  }
 
   /* 采购 */
   var rows = ING.length;

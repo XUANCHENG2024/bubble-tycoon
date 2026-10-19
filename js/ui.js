@@ -371,6 +371,28 @@ UI.renderManage = function () {
     ${s.news ? `<div style="margin-top:9px;font-size:11.5px;color:var(--amber)">📰 ${s.news.text}</div>` : ''}
   </div>`;
 
+  /* 今日任务 */
+  const qs = questViews(s);
+  if (qs.length) {
+    h += `<div class="card" data-tut="quest"><div class="card-h">🎯 今日任务
+        <span class="ch-sub">达成即到账 · 每天刷新</span></div>`;
+    for (const q of qs) {
+      const show = q.done ? '已达成'
+        : (q.dir === 'down'
+          /* 越少越好型的含义是「上限」，直接写 x/y 会被读成「已完成 x 个」 */
+          ? `还可流失 ${Math.max(0, q.goal - Math.round(q.prog))}${q.unit}`
+          : `${q.prefix}${Math.round(q.prog)}/${q.prefix}${q.goal}${q.unit}`);
+      h += `<div class="quest${q.done ? ' done' : ''}">
+        <span class="q-e">${q.emoji}</span>
+        <span class="q-n">${q.name}</span>
+        <span class="q-bar"><i style="width:${(q.ratio * 100).toFixed(1)}%"></i></span>
+        <span class="q-v">${show}</span>
+        <span class="q-r">${q.done ? '✅ ' : ''}+${money(q.reward)}</span>
+      </div>`;
+    }
+    h += `</div>`;
+  }
+
   /* 今日建议 */
   const adv = adviceOf(s);
   h += `<div class="card" data-tut="advice"><div class="card-h">📌 今日建议

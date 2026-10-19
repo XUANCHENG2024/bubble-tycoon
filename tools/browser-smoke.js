@@ -245,6 +245,57 @@ const tick = () => new Promise(r => setTimeout(r, 0));
   check(typeof stageFresh.sim.cups === 'number' && isFinite(stageFresh.sim.cups),
     `营业中「已卖」可读到有限数字：${stageFresh.sim.cups} 杯`);
 
+  /* ---------- 32. 每日任务卡（H5 DOM 版） ---------- */
+  window.eval('window.__Q = { questViews, loginState, claimLogin };');
+  const Q = window.__Q;
+  const stQ = window.S;
+  if (stQ) {
+    stQ.quests = [
+      { id: 'q_cups', goal: 20, prog: 6, done: false, got: 0 },
+      { id: 'q_nolost', goal: 4, prog: 1, done: false, got: 0 },
+      { id: 'q_clicks', goal: 24, prog: 24, done: true, got: 28 },
+    ];
+    window.eval('UI.renderManage()');
+  }
+  const qRows = doc.querySelectorAll('#panel-manage .quest').length;
+  check(qRows === 3, `经营面板渲染出 3 行每日任务（实际 ${qRows} 行）`);
+  const qDone = doc.querySelectorAll('#panel-manage .quest.done').length;
+  check(qDone === 1, `已完成的任务单独标记（${qDone} 行）`);
+  const qTxt = Array.from(doc.querySelectorAll('#panel-manage .quest .q-v'))
+    .map(e => e.textContent).join(' | ');
+  check(!/NaN|undefined|Infinity/.test(qTxt), '任务进度文案无 NaN/undefined：' + qTxt);
+  const qBar = doc.querySelector('#panel-manage .quest .q-bar i');
+  check(qBar && /^\d+(\.\d+)?%$/.test(qBar.style.width),
+    '任务进度条宽度是合法百分比：' + (qBar ? qBar.style.width : '缺失'));
+  const qView = Q.questViews(stQ);
+  check(qView.length === 3 && qView.every(v => v.ratio >= 0 && v.ratio <= 1),
+    'questViews 进度比例都在 0~1（含「越少越好」型）');
+
+  /* ---------- 33. 连续登录 ---------- */
+  const bl = $('btnLogin');
+  check(!!bl, '标题页存在连续登录按钮');
+  if (bl) {
+    check(/连登|已领|签到/.test(bl.textContent),
+      '连续登录按钮文案可读：' + bl.textContent.trim());
+  }
+  /* 把 META 重置回「今天没签到」，再走一次真实点击，验证 data-act 接线 */
+  window.META.loginDate = ''; window.META.pendingCash = 0; window.META.loginStreak = 0;
+  window.eval('renderTitle()');
+  const bl2 = $('btnLogin');
+  check(bl2 && bl2.getAttribute('data-act') === 'login',
+    '连续登录按钮已接线 data-act="login"');
+  const errBeforeLogin = errors.length;
+  if (bl2) bl2.click();
+  check(errors.length === errBeforeLogin, '点击签到按钮不产生脚本错误');
+  check((window.META.pendingCash || 0) > 0,
+    `点击签到按钮真的发奖（+${Math.round(window.META.pendingCash || 0)}）`);
+  check(window.META.loginStreak === 1, '签到后连登天数写进了 META');
+
+  const mNow = window.META || {};
+  const ls = Q.loginState(mNow);
+  check(typeof ls.streak === 'number' && typeof ls.next === 'number' && ls.next > 0,
+    `连续登录快照可读（连登 ${ls.streak} 天 · 下次 ${ls.next}）`);
+
   console.log('');
   if (failed === 0 && errors.length === 0) console.log('✅ 真实 DOM 冒烟全部通过（' + step + ' 项）');
   else console.log(`❌ 失败 ${failed} 项；脚本错误 ${errors.length} 条` + (errors.length ? '\n   ' + errors.slice(0, 5).join('\n   ') : ''));

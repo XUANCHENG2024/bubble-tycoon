@@ -342,6 +342,35 @@ const ACHIEVEMENTS = [
     check: s => !!(s.endless && (s.milestone || 0) >= 3) },
 ];
 
+/* ---------- 每日任务池 ----------
+ * 每天开局刷 3 条，达成即即时到账现金 —— 给玩家一个「再开一天」的具体理由，
+ * 也是同赛道产品里最常见的日活钩子。
+ *
+ * metric : engine 里 bumpQuest() 的计数键，跨天清零
+ * dir    : 'up' 越多越好（达到目标即达成）/ 'down' 越少越好（打烊时结算，破功才拿不到）
+ * min/mul/max : 目标值 = clamp(min + mul * (day - 1), min, max)，随天数平滑上抬
+ * reward : 基准奖金，实际发放按天数再放大（见 engine 的 questRewardOf）。
+ *          刻意压得比同额经营收益低一档 —— 任务是「再开一天的理由」，不是第二收入来源。
+ *          实测（tools/sim.js 30 天脚本 AI）把奖励定在翻倍水平会让净资产虚高 27%，
+ *          直接把标准难度的达标率从 81% 抬到 103%，等于悄悄改了关卡难度。
+ * when   : 可选抽取条件，不满足的当天不进池（例如配方已全解锁就不再出「新品研发」）
+ */
+const QUESTS = [
+  { id: 'q_cups',     emoji: '🥤', name: '出杯达标',   metric: 'cups',     dir: 'up',   min: 12,  mul: 3.2,  max: 120,  reward: 32,  unit: '杯' },
+  { id: 'q_revenue',  emoji: '💸', name: '营业额冲高', metric: 'revenue',  dir: 'up',   min: 220, mul: 62,   max: 6000, reward: 38,  unit: '',   prefix: '¥' },
+  { id: 'q_profit',   emoji: '📈', name: '净利达标',   metric: 'profit',   dir: 'up',   min: 90,  mul: 30,   max: 2600, reward: 52,  unit: '',   prefix: '¥' },
+  { id: 'q_clicks',   emoji: '👆', name: '手速营业',   metric: 'clicks',   dir: 'up',   min: 24,  mul: 6,    max: 200,  reward: 28,  unit: '次' },
+  { id: 'q_trend',    emoji: '🌟', name: '踩中潮流',   metric: 'trend',    dir: 'up',   min: 6,   mul: 1.6,  max: 60,   reward: 42,  unit: '杯' },
+  { id: 'q_restock',  emoji: '📦', name: '备货充足',   metric: 'restock',  dir: 'up',   min: 3,   mul: 0.1,  max: 6,    reward: 24,  unit: '次' },
+  { id: 'q_upgrade',  emoji: '🔧', name: '设备升级',   metric: 'upgrade',  dir: 'up',   min: 1,   mul: 0.1,  max: 3,    reward: 49,  unit: '次' },
+  { id: 'q_research', emoji: '🧪', name: '新品研发',   metric: 'research', dir: 'up',   min: 1,   mul: 0,    max: 1,    reward: 66,  unit: '款',
+    when: s => s.recipes.length < RECIPES.length },
+  { id: 'q_hire',     emoji: '🤝', name: '招兵买马',   metric: 'hire',     dir: 'up',   min: 1,   mul: 0,    max: 1,    reward: 46,  unit: '人',
+    when: s => s.staff.length < 4 && s.candidates.length > 0 },
+  { id: 'q_nolost',   emoji: '🎯', name: '一个都不跑', metric: 'lost',     dir: 'down', min: 4,   mul: 0.15, max: 10,   reward: 60,  unit: '人' },
+];
+const QUEST_COUNT = 3;
+
 /* ---------- 难度 ---------- */
 const DIFFICULTY = {
   easy:   { key: 'easy',   name: '佛系躺赢', emoji: '🌱', cash: 1100, goal: 22000, traffic: 1.15, costMult: 0.88, rentMult: 0.8,
@@ -518,6 +547,7 @@ const WEATHER_INDEX = buildIndex(WEATHERS, 'id');
 const EVENT_INDEX = buildIndex(EVENTS, 'id');
 const CUSTOMER_TYPE_INDEX = buildIndex(CUSTOMER_TYPES, 'id');
 const RIVAL_ACTION_INDEX = buildIndex(RIVAL_ACTIONS, 'id');
+const QUEST_INDEX = buildIndex(QUESTS, 'id');
 
 /** 取值一律返回 undefined（而不是抛错），调用方按需兜底 —— 与原来的 Array#find 行为一致 */
 function ingById(id) { return ING_INDEX.get(id); }
@@ -528,6 +558,7 @@ function weatherById(id) { return WEATHER_INDEX.get(id); }
 function eventById(id) { return EVENT_INDEX.get(id); }
 function customerTypeById(id) { return CUSTOMER_TYPE_INDEX.get(id); }
 function rivalActionById(id) { return RIVAL_ACTION_INDEX.get(id); }
+function questById(id) { return QUEST_INDEX.get(id); }
 
 /**
  * 味觉标签列表 → 中文串。

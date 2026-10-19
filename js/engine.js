@@ -21,9 +21,33 @@ function seedFromText(str) {
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
   return h >>> 0;
 }
-function todayKey() {
-  const d = new Date();
+
+/* 每日任务专用的第二条随机流（算法与 RNG 完全一致，独立播种）。
+ * 为什么不直接用主 RNG：抽任务发生在 newGame / nextDay，多吃几个 next()
+ * 会把整局经济（客流、天气、事件、价格）的随机序列整体挤位 —— 结果就是
+ * 「加个留存钩子」顺手改掉了关卡难度，而且平衡脚本的 A/B 对照也跟着失效。
+ * 独立流只在「每日挑战」时跟主 RNG 一起播种，保证同一局依旧可复现。 */
+const QUEST_RNG = {
+  seeded: false, _s: 0,
+  setSeed(seed) { this.seeded = true; this._s = (seed >>> 0) || 1; },
+  clear() { this.seeded = false; },
+  next() {
+    if (!this.seeded) return Math.random();
+    this._s = (this._s + 0x6D2B79F5) | 0;
+    let t = Math.imul(this._s ^ (this._s >>> 15), 1 | this._s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  },
+};
+function keyOfDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function todayKey() { return keyOfDate(new Date()); }
+/** 昨天：连续登录要判断「断没断签」。用 setDate 让 Date 自己处理跨月跨年 */
+function yesterdayKey() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return keyOfDate(d);
 }
 
 /* ---------------- 基础工具 ---------------- */
@@ -207,11 +231,13 @@ function newGame(diffKey, bpBonus) {
     flags: {}, ach: {}, log: [],
     tut: { active: false, step: 0, done: false },
     history: [], endless: false, milestone: 0, daily: false,
+    quests: [], questDay: 1, newQuests: [],
   };
   for (const g of ING) { s.prices[g.id] = g.base; s.prevPrices[g.id] = g.base; s.avgCost[g.id] = g.base; }
   rollWeather(s); rollTrend(s); rollNews(s);
   refreshCandidates(s, true);
   initRival(s);
+  rollQuests(s);
   pushLog(s, '🎉 你的第一家奶茶店开张了！');
   pushLog(s, `🏙️ 隔壁开了家「${s.rival.name}」，生意还不错…`);
   return s;
@@ -339,6 +365,7 @@ function buyIng(s, id, qty, markup) {
   s.inv[id] = old + qty;
   s.cash -= cost;
   if (!markup && unit <= ingById(id).base * 0.7) s.flags.bargain = true;
+  bumpQuest(s, 'restock', 1);
   return { ok: true, cost, qty };
 }
 function autoFill(s) {
@@ -414,6 +441,7 @@ function doResearch(s, rid) {
   for (const k in r.research.ing) s.inv[k] -= r.research.ing[k];
   s.recipes.push(rid);
   s.flags['researched'] = (s.flags['researched'] || 0) + 1;
+  bumpQuest(s, 'research', 1);
   pushLog(s, `🧪 研发成功：${r.emoji} ${r.name}`);
   return { ok: true, recipe: r };
 }
@@ -431,6 +459,7 @@ function doUpgrade(s, id) {
   if (s.cash < c) return { ok: false, msg: '现金不足' };
   s.cash -= c; s.invested += c; s.up[id]++;
   const u = upgradeById(id);
+  bumpQuest(s, 'upgrade', 1);
   pushLog(s, `⬆️ ${u.emoji} ${u.name} 升至 Lv.${s.up[id]}`);
   return { ok: true, cost: c };
 }
@@ -457,6 +486,7 @@ function hireStaff(s, idx) {
   const st = { id: s.nextStaffId++, name: c.name, emoji: c.emoji, skill: c.skill, trait: c.trait, wage: c.wage, stamina: 100 };
   s.staff.push(st);
   s.candidates.splice(idx, 1);
+  bumpQuest(s, 'hire', 1);
   pushLog(s, `👤 雇佣了 ${st.emoji} ${st.name}`);
   return { ok: true, staff: st };
 }
@@ -544,6 +574,7 @@ function spawnCustomer(s) {
   if (sim.queue.length >= queueCap(s)) {
     sim.lost++; sim.repGain += CFG.LOST_REP;
     sim.typeLost[type.id] = (sim.typeLost[type.id] || 0) + 1;
+    bumpQuest(s, 'lost', 1);
     return;
   }
   /* 价格接受度：客群容忍度不同，定价过高会被当场劝退 */
@@ -552,6 +583,7 @@ function spawnCustomer(s) {
   if (RNG.next() > accept) {
     sim.lost++; sim.priceLost++;
     sim.repGain += CFG.LOST_REP * 0.6;
+    bumpQuest(s, 'lost', 1);
     sim.typeLost[type.id] = (sim.typeLost[type.id] || 0) + 1;
     sim.floaters.push({ text: '太贵了…', kind: 'bad' });
     return;
@@ -575,6 +607,7 @@ function assignOrder(s, st, c) {
     else {
       sim.lost++; sim.stockout++; sim.repGain += CFG.STOCKOUT_REP;
       sim.typeLost[c.type] = (sim.typeLost[c.type] || 0) + 1;
+      bumpQuest(s, 'lost', 1);
       sim.floaters.push({ text: '缺料!', kind: 'bad' });
       return false;
     }
@@ -604,6 +637,9 @@ function completeOrder(s, st) {
   s.stats.totalRevenue += income;
   sim.typeServed[o.type] = (sim.typeServed[o.type] || 0) + cups;
   st.order = null;
+  bumpQuest(s, 'cups', cups);
+  bumpQuest(s, 'revenue', income);
+  if (trendHit) bumpQuest(s, 'trend', cups);
   sim.floaters.push({ text: '+' + money(income), kind: 'good' });
   if (trendHit && sim.trendCups >= 20) s.flags.trendMaster = true;
   if (cups >= 4) s.flags.bigOrder = true;
@@ -624,6 +660,7 @@ function rushStation(s, idx) {
   st.order.progress += CFG.RUSH_BOOST * bonus;
   sim.clicks++;
   s.stats.clicks++;
+  bumpQuest(s, 'clicks', 1);
   const t = st.order.price * CFG.RUSH_TIP * bonus;
   s.cash += t; sim.revenue += t; sim.tips += t;
   if (st.order.progress >= 1) completeOrder(s, st);
@@ -676,6 +713,7 @@ function tick(s, dt) {
       sim.lost++;
       sim.repGain += CFG.LOST_REP;
       sim.typeLost[c.type] = (sim.typeLost[c.type] || 0) + 1;
+      bumpQuest(s, 'lost', 1);
       sim.floaters.push({ text: '走了…', kind: 'bad' });
     }
   }
@@ -700,6 +738,7 @@ function tick(s, dt) {
       sim.lost++;
       sim.repGain += CFG.LOST_REP * 0.5;
       sim.typeLost[c.type] = (sim.typeLost[c.type] || 0) + 1;
+      bumpQuest(s, 'lost', 1);
     }
     sim.queue = [];
     endDay(s);
@@ -771,6 +810,10 @@ function endDay(s) {
   if ((sim.typeServed && (sim.typeServed.influencer || 0) >= 5)) s.flags.starMagnet = true;
   if (s.rival && s.rival.rep <= 10) s.flags.rivalDown = true;
 
+  /* 净利型任务在此刻才结算得出来，随后统一终判「越少越好」型 */
+  bumpQuest(s, 'profit', net);
+  closeQuests(s);
+
   updateRival(s);
   s.newAchList = checkAchievements(s);
 
@@ -805,6 +848,7 @@ function nextDay(s) {
   refreshMarket(s);
   for (const st of s.staff) st.stamina = clamp(st.stamina + 34, 0, 100);
   refreshCandidates(s, false);
+  rollQuests(s);
   if (RNG.next() < 0.42 && !s.pendingEvent) {
     s.pendingEvent = pick(EVENTS.filter(e => !s.doneEvents || !s.doneEvents.includes(e.id))) || null;
     (s.doneEvents = s.doneEvents || []).push(s.pendingEvent ? s.pendingEvent.id : '');
@@ -882,6 +926,109 @@ function checkAchievements(s) {
 function prestigeGain(s) {
   const nw = Math.max(0, netWorth(s));
   return Math.max(1, Math.floor(Math.sqrt(nw / 220)));
+}
+
+/* ============================================================
+ *  每日任务
+ *  每天开局刷 QUEST_COUNT 条，达成即时到账现金。
+ *  进度只在当天有效：跨天由 rollQuests() 整体换血，不做增量续接。
+ * ============================================================ */
+
+/** 目标值随天数线性上抬并夹在 [min, max] —— 后期客流变大，不抬就没有挑战 */
+function questGoalOf(q, s) {
+  const t = Math.max(0, (s.day || 1) - 1);
+  return Math.max(1, Math.round(Math.min(q.max, q.min + q.mul * t)));
+}
+/** 奖金随天数放大（最多 2 倍），否则第 20 天的几十块毫无吸引力 */
+function questRewardOf(q, s) {
+  return Math.round(q.reward * (1 + Math.min(1.0, ((s.day || 1) - 1) * 0.045)));
+}
+/** 当前可抽取的池子：when 不满足的（配方全解锁、没候选人）直接出局 */
+function questPool(s) {
+  return QUESTS.filter(q => {
+    if (!q.when) return true;
+    try { return !!q.when(s); } catch (e) { return false; }
+  });
+}
+
+/**
+ * 抽一整天的新任务（无放回）。
+ * 只在 newGame / nextDay 里调用 —— 中途重复调用会把玩家已经做出的进度抹掉。
+ */
+function rollQuests(s) {
+  const pool = questPool(s);
+  const out = [];
+  while (out.length < QUEST_COUNT && pool.length) {
+    const q = pool.splice(Math.floor(QUEST_RNG.next() * pool.length), 1)[0];
+    out.push({ id: q.id, goal: questGoalOf(q, s), prog: 0, done: false, got: 0 });
+  }
+  s.quests = out;
+  s.questDay = s.day;
+  return out;
+}
+
+/** 发奖并入账；返回一条可供 UI 弹提示的记录 */
+function grantQuest(s, it) {
+  const q = questById(it.id);
+  if (!q) return null;
+  const cash = questRewardOf(q, s);
+  s.cash += cash;
+  it.got = cash;
+  s.stats.questCash = (s.stats.questCash || 0) + cash;
+  s.stats.questDone = (s.stats.questDone || 0) + 1;
+  pushLog(s, `✅ 每日任务达成：${q.emoji} ${q.name} +${money(cash)}`);
+  return { id: q.id, name: q.name, emoji: q.emoji, cash };
+}
+
+/**
+ * 推进进度并对「越多越好」型即时发奖。
+ * 传回来的数组是本轮新达成的任务（可能为空），UI 拿它弹提示。
+ */
+function bumpQuest(s, metric, n) {
+  if (!s.quests || !s.quests.length) return [];
+  const add = num(n, 0);
+  const got = [];
+  for (const it of s.quests) {
+    const q = questById(it.id);
+    /* 已达成 / 指标不匹配 / 未知 id（旧存档或改过表）一律跳过 */
+    if (!q || q.metric !== metric || it.done) continue;
+    it.prog = Math.max(0, num(it.prog, 0) + add);
+    if (q.dir === 'down') continue;          /* 越少越好型留给 closeQuests 判定 */
+    if (it.prog >= it.goal) { it.done = true; got.push(grantQuest(s, it)); }
+  }
+  if (got.length) s.newQuests = (s.newQuests || []).concat(got);
+  return got;
+}
+
+/** 打烊时对「越少越好」型（流失人数）做终判，破功就作废 */
+function closeQuests(s) {
+  const got = [];
+  for (const it of (s.quests || [])) {
+    const q = questById(it.id);
+    if (!q || it.done || q.dir !== 'down') continue;
+    if (num(it.prog, 0) <= it.goal) { it.done = true; got.push(grantQuest(s, it)); }
+  }
+  if (got.length) s.newQuests = (s.newQuests || []).concat(got);
+  return got;
+}
+
+/** 给 UI 的展示模型：把静态表与当日进度拼成一行行可直接渲染的对象 */
+function questViews(s) {
+  const list = [];
+  for (const it of (s.quests || [])) {
+    const q = questById(it.id);
+    if (!q) continue;
+    const goal = Math.max(1, num(it.goal, 1));
+    const prog = Math.max(0, num(it.prog, 0));
+    list.push({
+      id: q.id, emoji: q.emoji, name: q.name, unit: q.unit || '', prefix: q.prefix || '',
+      dir: q.dir, goal, prog,
+      /* 越少越好型的进度条按「剩余额度」画，方向反过来才符合直觉 */
+      ratio: q.dir === 'down' ? clamp(1 - prog / (goal + 1), 0, 1) : clamp(prog / goal, 0, 1),
+      done: !!it.done, reward: it.got || questRewardOf(q, s),
+    });
+  }
+  return list;
 }
 
 /* ---------------- 存档（3 槽位 + 导入导出 + 降级提示） ---------------- */
@@ -1020,6 +1167,7 @@ function sanitizeState(s) {
   s.invested = pos(s.invested, 0);
   s.shopSpend = pos(s.shopSpend, 0);
   s.bpBonus = pos(s.bpBonus, 0);
+  s.loginBonus = pos(s.loginBonus, 0);
   s.eventTrafficMul = num(s.eventTrafficMul, 1);
   s.endless = !!s.endless;
   s.daily = !!s.daily;
@@ -1094,6 +1242,7 @@ function sanitizeState(s) {
     totalProfit: num(st0.totalProfit, 0), bestDayProfit: num(st0.bestDayProfit, 0),
     totalLost: pos(st0.totalLost, 0), totalServed: pos(st0.totalServed, 0),
     clicks: pos(st0.clicks, 0), days: pos(st0.days, 0),
+    questCash: pos(st0.questCash, 0), questDone: pos(st0.questDone, 0),
   };
   s.history = arr(s.history).slice(-400).map(h => ({
     day: int(h && h.day, 0), revenue: num(h && h.revenue, 0), net: num(h && h.net, 0),
@@ -1104,6 +1253,21 @@ function sanitizeState(s) {
   s.ach = obj(s.ach);
   s.flags = obj(s.flags);
   s.doneEvents = arr(s.doneEvents).map(e => str(e, 40));
+
+  /* 每日任务：只认池子里还存在的 id，进度夹到非负；
+     旧存档没有这个字段、或天数对不上（异常数据），直接按当天重抽一份。 */
+  s.quests = arr(s.quests)
+    .filter(it => it && questById(it.id))
+    .slice(0, QUEST_COUNT)
+    .map(it => ({
+      id: it.id,
+      goal: Math.max(1, int(it.goal, 1)),
+      prog: pos(it.prog, 0),
+      done: !!it.done,
+      got: pos(it.got, 0),
+    }));
+  if (s.quests.length !== QUEST_COUNT || int(s.questDay, 0) !== s.day) rollQuests(s);
+  else s.questDay = s.day;
 
   /* 引导状态：读档一律不自动续播，避免指向不存在的元素 */
   s.tut = Object.assign({ active: false, step: 0, done: false }, obj(s.tut));
@@ -1121,6 +1285,7 @@ function sanitizeState(s) {
 
   /* 运行时字段 */
   s.sim = null;
+  s.newQuests = [];
   /* 营业中途的存档无法恢复现场，一律退回准备阶段 */
   s.phase = (s.phase === 'report' || s.phase === 'over') ? s.phase : 'prep';
   s.report = (s.report && typeof s.report === 'object') ? s.report : null;
@@ -1229,7 +1394,11 @@ function importSave(b64) {
 /* 认识的默认 Meta：原先在 loadMeta 的成功/失败两条分支里各写了一遍，
    改字段时很容易只改一处导致两边行为不一致。提成工厂函数保证唯一来源。 */
 function newMeta() {
-  return { best: {}, bp: 0, runs: 0, ach: {}, maxBpEarned: 0, sound: true, tutDone: false };
+  return {
+    best: {}, bp: 0, runs: 0, ach: {}, maxBpEarned: 0, sound: true, tutDone: false,
+    /* 连续登录：跨局数据，跟某一局的进度无关 */
+    loginDate: '', loginStreak: 0, loginBest: 0, pendingCash: 0,
+  };
 }
 function loadMeta() {
   const raw = storageGet(CFG.META_KEY);
@@ -1242,6 +1411,61 @@ function loadMeta() {
   } catch (e) { return newMeta(); }
 }
 function saveMeta(m) { storageSet(CFG.META_KEY, JSON.stringify(m)); }
+
+/* ============================================================
+ *  连续登录
+ *  放在 META 而不是存档里：这是「打开游戏」的奖励，开新局、读旧档、
+ *  破产重来都该算数，跟某一局的经营进度无关。
+ *  奖励是现金而不是声望点 —— 声望点永久加客流，拿来当签到奖励会把
+ *  长期玩家的难度悄悄改掉。
+ * ============================================================ */
+const LOGIN_CAP_CASH = 200;
+/** 第 n 天的创业基金：线性上抬，7 天后封顶，避免开局现金被长期玩家堆失控 */
+function loginCashOf(streak) {
+  return Math.min(LOGIN_CAP_CASH, 30 + 25 * Math.max(1, Math.round(num(streak, 1))));
+}
+/** 给标题页用的只读快照（不落盘、不改动） */
+function loginState(m) {
+  m = m || newMeta();
+  const claimed = m.loginDate === todayKey();
+  const streak = pos(m.loginStreak, 0);
+  return {
+    streak, best: Math.max(pos(m.loginBest, 0), streak),
+    claimed, pending: pos(m.pendingCash, 0),
+    /* 下一次签到能拿多少（已签到时 streak 已经加过了，所以是「明日」） */
+    next: loginCashOf(streak + 1),
+  };
+}
+/** 签到：一天一次。已签过返回 null（幂等，重复调用不会刷钱） */
+function claimLogin(m) {
+  if (!m) return null;
+  const key = todayKey();
+  if (m.loginDate === key) return null;
+  const cont = m.loginDate === yesterdayKey();
+  m.loginStreak = cont ? pos(m.loginStreak, 0) + 1 : 1;
+  m.loginBest = Math.max(pos(m.loginBest, 0), m.loginStreak);
+  m.loginDate = key;
+  const cash = loginCashOf(m.loginStreak);
+  m.pendingCash = pos(m.pendingCash, 0) + cash;
+  saveMeta(m);
+  return { streak: m.loginStreak, cash, cont };
+}
+/**
+ * 开局时把已签到的创业基金落进这一局。
+ * 没签到会顺手补签 —— 玩家都把游戏打开了，不该因为没点那个按钮就少拿钱。
+ */
+function takeLoginBonus(s, m) {
+  if (!s || !m) return null;
+  if (m.loginDate !== todayKey()) claimLogin(m);
+  const cash = pos(m.pendingCash, 0);
+  if (!(cash > 0)) return null;
+  m.pendingCash = 0;
+  saveMeta(m);
+  s.cash += cash;
+  s.loginBonus = cash;
+  pushLog(s, `🔥 连续登录 ${pos(m.loginStreak, 0)} 天，创业基金 +${money(cash)}`);
+  return { streak: pos(m.loginStreak, 0), cash };
+}
 
 /* ============================================================
  *  智能建议系统（纯逻辑，给新手与卡关玩家指路）
