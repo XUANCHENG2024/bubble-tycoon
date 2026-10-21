@@ -483,13 +483,15 @@ function doAct(act, id, extra) {
   }
   if (act === 'vprovNext') {
     var rvp = nextProvince(s);
-    if (rvp.ok) { toast('📍 ' + rvp.cityName); beep('up', 700, 0.06); }
+    /* ★ 把 msg 也播出来 —— 切到直辖市时「市」不变，
+       只播城市名会让玩家以为没生效。 */
+    if (rvp.ok) { toast('📍 ' + rvp.cityName + (rvp.msg ? '（' + rvp.msg + '）' : '')); beep('up', 700, 0.06); }
     else toast(rvp.msg || '切换失败');
     return;
   }
   if (act === 'vcityNext') {
     var rvc = nextCity(s);
-    if (rvc.ok) { toast('📍 ' + rvc.cityName); beep('up', 700, 0.06); }
+    if (rvc.ok) { toast('📍 ' + rvc.cityName + (rvc.msg ? '（' + rvc.msg + '）' : '')); beep('up', 700, 0.06); }
     else toast(rvc.msg || '切换失败');
     return;
   }
@@ -735,6 +737,74 @@ function doAct(act, id, extra) {
       title: '从「' + st14.name + '」提现', branch: st14.branch, act: 'sdraw',
       hint: '店铺现金 ' + money(st14.cash), max: Math.floor(st14.cash), min: 1,
     });
+    return;
+  }
+
+  /* ---------- V13 城市地图 ---------- */
+  if (act === 'mapopen') {
+    /* 打开城市地图弹窗（Canvas 一屏装不下 300px 的地图） */
+    VIEW.modal = { type: 'map' };
+    return;
+  }
+  if (act === 'mapcity') {
+    /* 点地图上的城市 → 弹城市详情（不直接切换，避免误触） */
+    var mc = cityById(id);
+    if (!mc) { toast('城市不存在'); return; }
+    var mp = provinceById(mc.prov);
+    var mcu = cuisinesOfCity(mc.id);
+    var mings = ingsOfCity(mc.id);
+    var isCur = (__MINIGAME.S.venue || {}).cityId === id;
+    VIEW.modal = {
+      type: 'cityinfo',
+      title: '📍 ' + mc.name,
+      sub: (mp ? mp.name : '') + (cityGeoOf(id) ? ' · ' + cityGeoOf(id).lng.toFixed(2) + 'E ' + cityGeoOf(id).lat.toFixed(2) + 'N' : ''),
+      lines: [
+        '本地菜系：' + (mcu.length ? mcu.map(function (cid) {
+          var c = cuisineById(cid); return c ? c.emoji + c.name : cid;
+        }).join('、') : '暂无（走通用菜系）'),
+        '本地原料：' + (mings.length ? mings.map(function (g) { return g.emoji + g.name; }).join('、') : '暂无'),
+      ],
+      isCur: isCur, cityId: id,
+    };
+    return;
+  }
+  if (act === 'mapgoto') {
+    /* 「切换城市」→ 打开城市列表弹窗（Canvas 无 select） */
+    VIEW.modal = { type: 'citylist', idx: 0 };
+    return;
+  }
+  if (act === 'citylist-next') {
+    /* 城市列表：按「有坐标的城市」循环（44 个），
+       没坐标的城市仍可从「经营信息」里选（那边有完整省市切换）。*/
+    var cl = VIEW.modal;
+    if (cl && cl.type === 'citylist') {
+      var mvv = cityMapView(__MINIGAME.S);
+      cl.idx = (cl.idx + 1) % Math.max(1, mvv.points.length);
+      cl.curId = mvv.points[cl.idx] ? mvv.points[cl.idx].id : '';
+    }
+    return;
+  }
+  if (act === 'citylist-ok') {
+    var cl2 = VIEW.modal;
+    var cid2 = cl2 && cl2.curId;
+    VIEW.modal = null;
+    if (!cid2) { toast('请先选择城市'); return; }
+    var rmv = setVenueCity(__MINIGAME.S, cid2);
+    if (!rmv.ok) { toast(rmv.msg); return; }
+    beep('up', 760, 0.12);
+    toast('📍 ' + (rmv.cityName || cid2));
+    return;
+  }
+  if (act === 'cityinfo-ok') {
+    var ci = VIEW.modal;
+    var cid3 = ci && ci.cityId;
+    VIEW.modal = null;
+    if (!cid3) return;
+    if (ci.isCur) { toast('你已经在该城市经营了'); return; }
+    var rci = setVenueCity(__MINIGAME.S, cid3);
+    if (!rci.ok) { toast(rci.msg); return; }
+    beep('up', 760, 0.12);
+    toast('📍 ' + (rci.cityName || cid3));
     return;
   }
 

@@ -25,10 +25,27 @@ function check(cond, msg) {
   console.log(`  ${cond ? '✔' : '✘'} ${msg}`);
   if (!cond) failed++;
 }
-/* 有没有被解析成真正的元素 / 事件属性 */
+/* 有没有被解析成真正的元素 / 事件属性
+   ★ V13：城市地图用 <svg> 绘制（可点、不失真），
+     而攻击 payload 里恰好也有 '<svg onload=alert(1)>' ——
+     原来的检测器统计**所有** <svg> 元素，
+     于是把**我们自己画的地图**误判成注入（假阳性）。
+
+   ★ 修法不能是「排除所有 svg」—— 那会让真的 <svg onload=...> 注入漏过。
+     精确判据：只统计**没有 class 的** svg（注入的 payload 是裸 <svg>，
+     我们自己的地图 svg 一定带 class="map-svg"），
+     且**任何带事件属性的 svg 都算注入**（不管有没有 class）。 */
 function evilCount(el) {
   const q = s => el.querySelectorAll(s).length;
-  return { img: q('img'), script: q('script'), svg: q('svg'), onerror: q('[onerror]'), onload: q('[onload]') };
+  const allSvg = el.querySelectorAll('svg');
+  let bareSvg = 0;
+  for (const sv of allSvg) {
+    if (!sv.getAttribute('class')) bareSvg++;
+  }
+  return {
+    img: q('img'), script: q('script'), svg: bareSvg,
+    onerror: q('[onerror]'), onload: q('[onload]'),
+  };
 }
 function total(c) { return c.img + c.script + c.svg + c.onerror + c.onload; }
 

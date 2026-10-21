@@ -1216,3 +1216,62 @@ body::before {
   background: rgba(139, 92, 255, .09); border: 1px solid rgba(139, 92, 255, .22);
 }
 .store-former-t { font-size: 10.5px; color: #c4a8ff; margin-bottom: 2px; }
+
+/* ---------- V13：城市地图 ---------- */
+.map-wrap {
+  margin: 8px 0; border-radius: 12px; overflow: hidden;
+  background: rgba(0, 0, 0, .22); border: 1px solid rgba(255, 255, 255, .07);
+}
+.map-svg { display: block; width: 100%; height: auto; }
+.map-bg { fill: rgba(120, 90, 200, .06); }
+.map-grid { stroke: rgba(255, 255, 255, .05); stroke-width: 1; stroke-dasharray: 3 4; }
+.map-dot { cursor: pointer; }
+.map-dot circle { fill: var(--cyan); opacity: .75; transition: opacity .12s, r .12s; }
+.map-dot:hover circle { opacity: 1; }
+.map-dot.cur circle { fill: var(--amber); opacity: 1; }
+.map-halo {
+  fill: none; stroke: var(--amber); stroke-width: 2; opacity: .45;
+}
+.map-dish { font-size: 9px; }
+.map-info {
+  padding: 8px 10px; border-radius: 10px; margin-bottom: 8px;
+  background: rgba(255, 194, 71, .08); border: 1px solid rgba(255, 194, 71, .2);
+}
+.map-info-n { font-size: 12.5px; font-weight: 800; color: var(--txt); }
+.map-info-s { font-size: 10.5px; color: var(--txt2); margin-top: 2px; }
+.map-info-a { display: flex; gap: 6px; margin-top: 7px; }
+.map-legend {
+  display: flex; gap: 12px; flex-wrap: wrap; font-size: 10px;
+  color: var(--txt3); margin-bottom: 8px;
+}
+.map-lg {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--cyan); margin-right: 4px; vertical-align: middle;
+}
+.map-lg.cur { background: var(--amber); }
+.map-lg.dish { background: var(--pink); }
+.map-provs {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 3px 8px;
+}
+.map-prov { display: flex; justify-content: space-between; font-size: 10px; color: var(--txt3); }
+.map-prov.cur { color: var(--amber); font-weight: 700; }
+.map-prov-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-prov-s { flex: none; opacity: .8; }
+
+/* 城市选择器 */
+.cp-list { max-height: 58vh; overflow-y: auto; margin-top: 8px; }
+.cp-prov {
+  font-size: 10.5px; font-weight: 800; color: var(--txt3);
+  margin: 8px 0 3px; padding-bottom: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, .07);
+}
+.cp-cities { display: flex; flex-wrap: wrap; gap: 4px; }
+.cp-city {
+  font-size: 11px; padding: 4px 8px; border-radius: 8px; cursor: pointer;
+  background: rgba(255, 255, 255, .07); border: 1px solid transparent;
+  color: var(--txt2);
+}
+.cp-city:hover { background: rgba(255, 255, 255, .13); color: var(--txt); }
+.cp-city.cur { background: rgba(255, 194, 71, .2); border-color: rgba(255, 194, 71, .4); color: var(--amber); }
+.cp-city i { font-style: normal; margin-left: 2px; }

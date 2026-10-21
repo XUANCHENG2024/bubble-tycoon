@@ -593,6 +593,149 @@ function openStoreModalHtml(s) {
     </div>`;
 }
 
+/** 城市地图面板（V13·H5 端）
+ *
+ *  ★ 布局：地图本体 + 右侧/下方的省份信息列表。
+ *    地图用 SVG 画散点（按经纬度归一化后的坐标），
+ *    当前经营城市高亮并放大，可点击直接切换经营城市。
+ *
+ *  ★ 地图只画 44 个**有精确坐标**的城市（见 engine.cityMapView 的说明），
+ *    但省份信息是完整的 34 个 —— 玩家从地图上能看���全貌，
+ *    没有坐标的城市仍可从省份列表进入（列表里有城市按钮）。
+ */
+function cityMapPanelHtml(s) {
+  const mv = cityMapView(s);
+  const W = 320, H = 240;      /* viewBox 尺寸（会等比缩放到容器宽） */
+  const pad = 16;
+  const px = x => pad + x * (W - pad * 2);
+  const py = y => pad + y * (H - pad * 2);
+
+  /* --- 城市点 --- */
+  let dots = '';
+  for (const p of mv.points) {
+    const cx = px(p.x), cy = py(p.y);
+    const r = p.isCurrent ? 7 : 4.5;
+    const cls = p.isCurrent ? 'map-dot cur' : 'map-dot';
+    const dish = p.hasCuisine ? '🍜' : '';
+    dots += `<g class="${cls}" data-act="mapcity" data-id="${p.id}" tabindex="0"
+      role="button" aria-label="${esc(p.name)}">
+      <title>${esc(p.name)}（${esc(p.provName)}）${p.hasCuisine ? ' · 有本地特色' : ''}</title>
+      ${p.isCurrent ? `<circle class="map-halo" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="11"/>` : ''}
+      <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}"/>
+      ${dish ? `<text class="map-dish" x="${cx.toFixed(1)}" y="${(cy - 8).toFixed(1)}" text-anchor="middle">${dish}</text>` : ''}
+    </g>`;
+  }
+
+  /* --- 当前城市信息卡 --- */
+  const cur = cityById(mv.currentCityId);
+  const curCuis = cur ? hasCityCuisine(cur) : null;
+  const curProv = cur ? provinceById(cur.prov) : null;
+  let info = '';
+  if (cur) {
+    const cuList = curCuis ? cuisinesOfCity(cur.id) : [];
+    info = `<div class="map-info">
+      <div class="map-info-n">📍 ${esc(cur.name)}${curProv ? ' · ' + esc(curProv.name) : ''}</div>
+      <div class="map-info-s">${cuList.length
+      ? '本地特色：' + cuList.map(id => {
+        const c = cuisineById(id);
+        return c ? c.emoji + c.name : id;
+      }).join('、')
+      : '该城市暂无本地特色菜系（走通用菜系）'}</div>
+      <div class="map-info-a">
+        <button class="btn btn-xs btn-primary" data-act="mapgoto">🗺️ 去这里经营</button>
+        <button class="btn btn-xs" data-act="mapcitylist" data-id="${cur.id}">查看城市详情</button>
+      </div>
+    </div>`;
+  }
+
+  /* --- 省份列表 --- */
+  let provList = '';
+  for (const p of mv.provs) {
+    const cu = p.geoCount > 0;
+    provList += `<div class="map-prov${p.isCurrent ? ' cur' : ''}">
+      <span class="map-prov-n">${esc(p.name)}</span>
+      <span class="map-prov-s">${p.cityCount} 市${cu ? '' : '（无精确坐标）'}</span>
+    </div>`;
+  }
+
+  return `<div class="card"><div class="card-h">🗺️ 城市地图
+      <span class="ch-sub">${mv.geoTotal} 个有坐标城市 · ${mv.cityTotal} 市 · ${mv.provs.length} 省</span></div>
+    <div class="map-wrap">
+      <svg class="map-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet"
+        role="group" aria-label="全国城市分布地图">
+        <rect class="map-bg" x="0" y="0" width="${W}" height="${H}" rx="12"/>
+        <line class="map-grid" x1="${W / 2}" y1="0" x2="${W / 2}" y2="${H}"/>
+        <line class="map-grid" x1="0" y1="${H / 2}" x2="${W}" y2="${H / 2}"/>
+        ${dots}
+      </svg>
+    </div>
+    ${info}
+    <div class="map-legend">
+      <span><i class="map-lg cur"></i>当前经营城市</span>
+      <span><i class="map-lg"></i>可切换城市</span>
+      <span><i class="map-lg dish"></i>有本地特色菜系</span>
+    </div>
+    <div class="map-provs">${provList}</div>
+  </div>`;
+}
+
+/** 城市选择器弹窗（V13）
+ *
+ *  ★ 为什么地图之外还要这个列表：
+ *    地图只画 44 个**有精确坐标**的城市，而 272 个市都能经营。
+ *    只给地图当入口，玩家会以为"只能在这 44 个城市里选"——
+ *    而实际上去成都、拉萨、三亚都能开。
+ *    所以地图是"可视化入口"，列表才是"完整入口"。
+ *
+ *  ★ 按省份分组：272 个市平铺要找很久，
+ *    分组后即使不知道在哪个省，也能顺着省名找。
+ */
+function cityPickerModalHtml(s) {
+  const cur = (s.venue && s.venue.cityId) || '';
+  let h = `<div class="m-title">🗺️ 选择经营城市</div>
+    <div class="m-sub">${PROVINCES.length} 省 · ${PROVINCES.reduce((a, p) => a + p.cities.length, 0)} 个市</div>
+    <div class="cp-list">`;
+  for (const p of PROVINCES) {
+    h += `<div class="cp-prov">${esc(p.name)}</div><div class="cp-cities">`;
+    for (const cid of p.cities) {
+      const c = cityById(cid);
+      if (!c) continue;
+      const cu = hasCityCuisine(c);
+      h += `<button class="cp-city${cid === cur ? ' cur' : ''}" data-act="mappick" data-id="${cid}">
+        ${esc(c.name)}${cu ? '<i>🍜</i>' : ''}</button>`;
+    }
+    h += `</div>`;
+  }
+  h += `</div>`;
+  return h;
+}
+
+/** 城市详情弹窗内容 */
+function cityDetailModalHtml(s, cityId) {
+  const c = cityById(cityId);
+  if (!c) return '<div class="m-title">城市不存在</div>';
+  const p = provinceById(c.prov);
+  const g = cityGeoOf(cityId);
+  const cu = cuisinesOfCity(cityId);
+  const ings = ingsOfCity(cityId);
+  const cur = (s.venue && s.venue.cityId) === cityId;
+  return `<div class="m-title">📍 ${esc(c.name)}</div>
+    <div class="m-sub">${p ? esc(p.name) : ''}${g ? ` · ${g.lng.toFixed(2)}E ${g.lat.toFixed(2)}N（${GEO.COORD_SYS}）` : ' · 暂无精确坐标'}</div>
+    <div style="margin:12px 0;font-size:12px;line-height:1.8;color:var(--txt2)">
+      <div>本地菜系：${cu.length ? cu.map(id => {
+    const cc = cuisineById(id);
+    return cc ? cc.emoji + cc.name : id;
+  }).join('、') : '<span style="color:var(--txt3)">暂无（走通用菜系）</span>'}</div>
+      <div>本地原料：${ings.length ? ings.map(x => x.emoji + x.name).join('、') : '<span style="color:var(--txt3)">暂无</span>'}</div>
+      <div>区级：${districtsOfCity(cityId).length ? '已收录' : '未收录（可选到市级）'}</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-ghost" style="flex:1" data-act="modal-close">关闭</button>
+      ${cur ? '<button class="btn btn-primary" style="flex:1" disabled>当前经营城市</button>'
+      : `<button class="btn btn-primary" style="flex:1" data-act="mapset" data-id="${cityId}">设为经营城市</button>`}
+    </div>`;
+}
+
 /** 店长与分店编制面板（V11）
  *
  *  ★ 面板放在「原料市场」之后 —— 它是"人事管理"，比"进物料"更靠后，
@@ -1205,6 +1348,10 @@ function venuePanelHtml(s) {
       <select class="vsel" data-act="vprov" data-id="prov">${provOpts}</select>
       <select class="vsel" data-act="vcity" data-id="city">${cityOpts}</select>
     </div>
+    ${citiesOfProvince(v.provId).length <= 1
+      ? `<div style="font-size:10.5px;color:var(--txt3);margin-top:3px">
+           该省仅 1 个城市（直辖市/特别行政区）· 换省可选其他城市</div>`
+      : ''}
     <div class="vrow">${districtHtml}</div>
 
     <div class="vlabel">经营地图位置<span class="vhint">用于标记经营地点</span></div>
@@ -1376,6 +1523,10 @@ UI.renderRival = function () {
      店铺与商圈是同一语义（在哪、开什么店），
      放在这一页比塞进管理页或升级页都自然。
      放最前面是因为它是这一页的**主功能**，竞争对手只是背景信息。*/
+  /* ★ V13：城市地图放在最前面 ——
+     「🏙️ 商圈」这一页的主功能就是"在哪经营"，地图是它的第一入口。
+     店铺列表在其后，竞争对手在最后（背景信息）。*/
+  h += cityMapPanelHtml(s);
   h += storesPanelHtml(s);
   if (!r) { $('panel-rival').innerHTML = h + '<div class="card">暂无竞争对手</div>'; return; }
 

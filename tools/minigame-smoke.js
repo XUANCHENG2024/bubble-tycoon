@@ -1429,6 +1429,53 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
       `Canvas 关店后店长留档且可免费请回（${fmRes}）`);
   }
 
+  /* ---- V13 对等：Canvas 城市地图 + 经营城市可点性 ----
+     ★ 重点是「经营城市点击必须生效」——
+       直辖市只有 1 个市，循环 `(i+1)%1` 永远回到自己，
+       表现是「点了没反应、也不报错」，而默认城市恰恰是北京。 */
+  {
+    const cEnv = makeEnv(390, 844);
+    cEnv.frames(2);
+    cEnv.tap('start'); cEnv.frames(2);
+    cEnv.tap('tutskip'); cEnv.frames(1);
+    cEnv.MG.S.cash = 300000;
+    cEnv.inCtx('__MINIGAME.VIEW.tab = "up"');
+    cEnv.frames(3);
+
+    /* ① 城市按钮的命中区必须存在 */
+    const cityHits = (cEnv.G.hits || []).filter(h => h.act === 'vcityNext');
+    check(cityHits.length >= 1, `Canvas 经营城市按钮有 ${cityHits.length} 个命中区`);
+
+    /* ② ★ 点它必须真的换城市（默认城市是北京 = 只有 1 个市的省）*/
+    const beforeCity = cEnv.inCtx('__MINIGAME.S.venue.cityId');
+    cEnv.tap('vcityNext'); cEnv.frames(1);
+    const afterCity = cEnv.inCtx('__MINIGAME.S.venue.cityId');
+    check(afterCity !== beforeCity,
+      `★ Canvas 点「经营城市」真的换城市了（${beforeCity} → ${afterCity}）`);
+
+    /* ③ 地图入口条 */
+    cEnv.inCtx('__MINIGAME.VIEW.tab = "rival"');
+    cEnv.frames(3);
+    drawnTexts.length = 0;
+    cEnv.frames(1);
+    const rivalText = drawnTexts.join(' ');
+    check(/城市地图/.test(rivalText), 'Canvas 商圈页有「城市地图」入口');
+    check(/打开地图/.test(rivalText), 'Canvas 地图入口有「打开地图」按钮');
+    const mapHit = (cEnv.G.hits || []).filter(h => h.act === 'mapopen');
+    check(mapHit.length >= 1, `Canvas 「打开地图」有 ${mapHit.length} 个命中区`);
+
+    /* ④ 打开地图弹窗 → 城市点有命中区（画出来不等于点得到）*/
+    cEnv.tap('mapopen'); cEnv.frames(2);
+    const mapCityHits = (cEnv.G.hits || []).filter(h => h.act === 'mapcity');
+    check(mapCityHits.length >= 40,
+      `Canvas 地图画出 ${mapCityHits.length} 个可点的城市点`);
+    drawnTexts.length = 0;
+    cEnv.frames(1);
+    const mapText = drawnTexts.join(' ');
+    check(/有坐标城市/.test(mapText), 'Canvas 地图弹窗说明坐标覆盖范围');
+    check(/省份概览/.test(mapText), 'Canvas 地图弹窗有省份概览');
+  }
+
   /* ---- V10 对等：Canvas 研发页也要有城市标示与研发树 ----
      ★ 这条守的是「两版功能对等」：
        H5 端有 cityBar（城市 + 可用菜系）与研发树分组，

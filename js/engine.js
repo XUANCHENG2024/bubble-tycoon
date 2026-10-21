@@ -3327,14 +3327,48 @@ function nextProvince(s) {
   const first = p && citiesOfProvince(p.id)[0];
   if (!p || !first) return { ok: false, msg: '没有可用的城市' };
   const r = setVenueCity(s, first.id);
-  return r.ok ? { ok: true, provId: p.id, cityName: first.name } : r;
+  /* ★ 切到直辖市（北京/天津/上海/重庆）时，**市**不会变
+     （该省本来就只有这一个市）—— 只提示省份变化会让玩家以为没生效，
+     所以明确说清「已切换到 XX 省（该省仅 1 个市）」。*/
+  const single = citiesOfProvince(p.id).length === 1;
+  return r.ok
+    ? { ok: true, provId: p.id, cityName: first.name,
+      msg: single ? `已切换到${p.name}（该省仅 1 个市）` : '' }
+    : r;
 }
 
-/** 市级：在**当前省内**循环切换 */
+/**
+ * 市级：在**当前省内**循环切换。
+ *
+ * ★ 直辖市/特别行政区只有 1 个市（北京、天津、上海、重庆…），
+ *   原来的循环 `(i+1) % list.length` 在长度为 1 时**永远回到自己** ——
+ *   表现为「点了没反应、也不报错」。
+ *   而默认城市恰恰就是北京，所以新玩家第一次点就中招。
+ *
+ * ★ 修法：省内只有 1 个城市时，**跨省继续找下一个有多个市的省**，
+ *   仍然停在同省时给出明确提示（而不是静默无效）。
+ */
 function nextCity(s) {
   const v = s.venue || {};
   const list = citiesOfProvince(v.provId);
   if (!list.length) return { ok: false, msg: '该省暂无可选城市' };
+  if (list.length === 1) {
+    /* 该省只有这一个市 → 跨省找下一个「有多个市」的省 */
+    for (let k = 1; k <= PROVINCES.length; k++) {
+      const pid = PROVINCES[(PROVINCES.findIndex(p => p.id === v.provId) + k) % PROVINCES.length].id;
+      const l2 = citiesOfProvince(pid);
+      if (l2.length <= 1) continue;
+      const c2 = l2[0];
+      const r2 = setVenueCity(s, c2.id);
+      if (r2.ok) {
+        return {
+          ok: true, cityId: c2.id, cityName: c2.name,
+          msg: `${citiesOfProvince(v.provId)[0].name}是该省唯一城市，已跳到${c2.name}`,
+        };
+      }
+    }
+    return { ok: false, msg: '该省只有一个城市，可先切换省份' };
+  }
   const i = list.findIndex(c => c.id === v.cityId);
   const c = list[(i + 1 + list.length) % list.length];
   const r = setVenueCity(s, c.id);
@@ -3489,6 +3523,75 @@ function venueView(s) {
     hasDistrictData: districtsOfCity(c && c.id).length > 0,
     geo: g, hasGeo: !!g,
     coordSys: GEO.COORD_SYS,
+  };
+}
+
+/**
+ * 城市地图视图（V13）
+ *
+ * ★ 为什么地图只画 **44 个有坐标的城市**：
+ *   CITY_CENTERS 只收录了 44 个城市的 GCJ-02 坐标（覆盖 31/34 个省）。
+ *   272 个市全画出来需要 272 套坐标 ——
+ *   而坐标是**合规数据**（GCJ-02 口径，见 data.js 的说明），
+ *   不该用插值/近似值糊弄（那会让「门店定位」落到隔壁街区）。
+ *   所以地图 = 「有精确坐标的城市」+「按省聚合的完整信息」。
+ *   省份信息是完整的（272 个市都能选），只是**没坐标的不画点**。
+ *
+ * ★ 投影：经纬度**分别**归一化（不用单一缩放因子）。
+ *   中国境内经差约 62°、纬差约 50°，
+ *   若按经度等比缩放，高纬度城市会明显偏西 —— 地图形状会失真。
+ *
+ * @returns 地图视图：省份列表（含聚合信息）+ 城市点列表（含归一化坐标）
+ */
+function cityMapView(s) {
+  const cur = (s.venue && s.venue.cityId) || CITY_DEFAULT;
+  const provs = [];
+  const points = [];
+  /* 收集所有有坐标的城市 */
+  for (const p of PROVINCES) {
+    let n = 0, withGeo = 0;
+    for (const cid of p.cities) {
+      const c = cityById(cid);
+      if (!c) continue;
+      n++;
+      const g = cityGeoOf(cid);
+      if (!g) continue;
+      withGeo++;
+      points.push({
+        id: cid, name: c.name, provId: p.id, provName: p.name,
+        lng: g.lng, lat: g.lat,
+        isCurrent: cid === cur,
+        hasCuisine: hasCityCuisine(c),
+      });
+    }
+    provs.push({
+      id: p.id, name: p.name, cityCount: n, geoCount: withGeo,
+      isCurrent: p.id === ((s.venue && s.venue.provId) || ''),
+    });
+  }
+  /* 归一化：经纬各自缩放到 0~1 */
+  let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+  for (const pt of points) {
+    if (pt.lng < minLng) minLng = pt.lng;
+    if (pt.lng > maxLng) maxLng = pt.lng;
+    if (pt.lat < minLat) minLat = pt.lat;
+    if (pt.lat > maxLat) maxLat = pt.lat;
+  }
+  const spanLng = Math.max(0.001, maxLng - minLng);
+  const spanLat = Math.max(0.001, maxLat - minLat);
+  for (const pt of points) {
+    pt.x = (pt.lng - minLng) / spanLng;      /* 0=西 1=东 */
+    pt.y = 1 - (pt.lat - minLat) / spanLat;  /* 0=南 1=北 */
+  }
+  /* 排序：西→东，保证绘制顺序稳定（Canvas 上重叠点不闪） */
+  points.sort((a, b) => (a.x - b.x) || (a.y - b.y));
+  return {
+    provs, points,
+    bounds: { minLng, maxLng, minLat, maxLat },
+    currentCityId: cur,
+    currentCityName: (cityById(cur) || {}).name || '',
+    geoTotal: points.length,
+    cityTotal: provs.reduce((a, p) => a + p.cityCount, 0),
   };
 }
 

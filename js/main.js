@@ -552,6 +552,60 @@ function doAct(act, el) {
       else UI.toast(r.msg, 'err');
       break;
     }
+    /* ---------- V13 城市地图 ---------- */
+    case 'mapcity': {
+      /* 地图上点城市 → 弹出详情（不直接切换，避免误触） */
+      UI.modal(cityDetailModalHtml(s, id));
+      break;
+    }
+    case 'mapcitylist': {
+      UI.modal(cityDetailModalHtml(s, id));
+      break;
+    }
+    case 'mapset': {
+      /* 从地图详情设为经营城市 */
+      const r = setVenueCity(s, id);
+      if (!r.ok) { UI.toast(r.msg, 'err'); break; }
+      UI.closeModal();
+      const parts = [`已切换到${r.cityName || id}`];
+      if (r.dropped && r.dropped.length) parts.push(`${r.dropped.length} 款本地菜下架`);
+      if (r.cityCuisines && r.cityCuisines.length) {
+        parts.push('当地特色：' + r.cityCuisines.map(cid => {
+          const c = cuisineById(cid);
+          return c ? c.name : cid;
+        }).join('、'));
+      }
+      UI.toast(parts.join(' · '), 'ok');
+      SFX.click();
+      pump();
+      break;
+    }
+    case 'mapgoto': {
+      /* 「切换经营城市」→ 打开城市选择器。
+         ★ 为什么不是直接切：地图只画 44 个有精确坐标的城市，
+           而 272 个市都能经营 —— 地图上的点只是「有坐标的那些」，
+           入口必须给全量城市，否则玩家会以为"只能在这 44 个城市里选"。 */
+      UI.modal(cityPickerModalHtml(s));
+      break;
+    }
+    case 'mappick': {
+      /* 从城市选择器里选定一个城市 */
+      const r = setVenueCity(s, id);
+      if (!r.ok) { UI.toast(r.msg, 'err'); break; }
+      UI.closeModal();
+      const parts = [`已切换到${r.cityName || id}`];
+      if (r.dropped && r.dropped.length) parts.push(`${r.dropped.length} 款本地菜下架`);
+      if (r.cityCuisines && r.cityCuisines.length) {
+        parts.push('当地特色：' + r.cityCuisines.map(cid => {
+          const c = cuisineById(cid);
+          return c ? c.name : cid;
+        }).join('、'));
+      }
+      UI.toast(parts.join(' · '), 'ok');
+      SFX.click();
+      pump();
+      break;
+    }
     case 'stbuy': {
       /* 店铺级升级（每店独立） */
       const r = buyStoreUpgrade(s, +br, id);

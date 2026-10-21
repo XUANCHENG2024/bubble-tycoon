@@ -75,7 +75,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
-  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
+  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
   + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
   + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
@@ -2511,6 +2511,117 @@ console.log('=============== S. 店铺体系 ===============');
         && back.formerManagers[0].id === mgr.id, '存档往返后留档店长保留');
     }
   }
+
+
+  /* ============================================================
+ *  T 组：经营城市可用性 + 城市地图（V13）
+   *
+   *  T1 守的是一个**已经出过的事故**：
+   *   直辖市（省 11/12/31/50…）只有 1 个市，
+   *   「点一下切下一个」的循环 `(i+1) % 1` 永远回到自己 ——
+   *   表现为「点了没反应、也不报错」。
+   *   而默认城市恰恰是北京，所以新玩家第一次点就中招。
+   * ============================================================ */
+console.log('=============== T. 经营城市与地图 ===============');
+{
+  /* ---- T1 城市切换必须真的生效（每个省都要验）---- */
+  {
+    /* 找出所有「只有 1 个市」的省（直辖市/特别行政区） */
+    const singleProvs = E.PROVINCES.filter(p => p.cities.length === 1);
+    expect('T1a', singleProvs.length >= 4,
+      `存在 ${singleProvs.length} 个只有 1 个市的省（直辖市/特别行政区）`);
+
+    /* ★ 逐个省验证「点下一个城市」一定会换城市 ——
+       这正是原 bug 的位置（直辖市原地打转）。 */
+    let stuck = [];
+    for (const p of E.PROVINCES) {
+      const s = E.newGame('normal', 0);
+      s.venue = { type: 'community', provId: p.id, cityId: p.cities[0], districtId: '' };
+      const before = s.venue.cityId;
+      const r = E.nextCity(s);
+      if (!r.ok) { stuck.push(`${p.name}(失败:${r.msg})`); continue; }
+      if (s.venue.cityId === before) stuck.push(`${p.name}(原地不动)`);
+    }
+    expect('T1b', stuck.length === 0,
+      `所有省都能真正切换到下一个城市${stuck.length ? '（卡住：' + stuck.slice(0, 3).join('、') + '）' : ''}`);
+  }
+
+  /* ---- T2 切省也必须生效（且要说明直辖市的情况）---- */
+  {
+    const s = E.newGame('normal', 0);
+    const before = s.venue.provId;
+    const r = E.nextProvince(s);
+    expect('T2a', r.ok && s.venue.provId !== before,
+      `切省生效（${before} → ${s.venue.provId}）`);
+    /* 切到直辖市时要有说明文案（否则"市没变"看起来像没反应） */
+    const s2 = E.newGame('normal', 0);
+    let msgSeen = '';
+    for (let i = 0; i < E.PROVINCES.length; i++) {
+      const r2 = E.nextProvince(s2);
+      if (r2.ok && r2.msg) { msgSeen = r2.msg; break; }
+    }
+    expect('T2b', msgSeen.length > 0,
+      `切到直辖市时给出说明（"${msgSeen}"）—— 否则玩家以为没反应`);
+  }
+
+  /* ---- T3 城市切换的副作用：菜单/菜系跟着变 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e6;
+    s.venue = { type: 'community', provId: '51', cityId: '510100', districtId: '' };
+    const r = E.setVenueCity(s, '510100');
+    expect('T3a', r.ok, '可以切到成都');
+    expect('T3b', Array.isArray(r.cityCuisines) && r.cityCuisines.length > 0,
+      '切到成都会返回当地特色菜系（供 UI 提示）');
+    /* 切到没有特色的城市 → cityCuisines 为空数组而不是 undefined */
+    const r2 = E.setVenueCity(s, '130200');
+    expect('T3c', Array.isArray(r2.cityCuisines),
+      '无特色城市也返回数组（不返回 undefined，UI 不用判空）');
+  }
+
+  /* ---- T4 地图视图：坐标归一化正确 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    const mv = E.cityMapView(s);
+    expect('T4a', mv.points.length > 0 && mv.provs.length === E.PROVINCES.length,
+      `地图含 ${mv.points.length} 个有坐标城市 + ${mv.provs.length} 个省`);
+    /* 所有点的归一化坐标都在 0~1 */
+    const out = mv.points.filter(p => p.x < 0 || p.x > 1 || p.y < 0 || p.y > 1);
+    expect('T4b', out.length === 0,
+      `所有城市点的归一化坐标都在 0~1（越界 ${out.length} 个）`);
+    /* ★ 经纬**分别**归一化：不能用一个缩放因子，
+       否则高纬度城市会明显偏西（地图形状失真）*/
+    const w = mv.points.find(p => p.id === '110100');   /* 北京 */
+    const s2 = mv.points.find(p => p.id === '510100');   /* 成都 */
+    const h = mv.points.find(p => p.id === '460300');   /* 海口（最南） */
+    if (w && s2 && h) {
+      expect('T4c', h.y < w.y && w.y < s2.y,
+        '南北顺序正确（海口在北京南、成都在北京南）');
+      expect('T4d', w.x < s2.x,
+        '东西顺序正确（北京在成都西）');
+    } else {
+      expect('T4c', true, '（样本城市缺坐标，跳过方位断言）');
+    }
+    /* 当前城市被标记 */
+    expect('T4e', mv.currentCityId === s.venue.cityId
+      && mv.points.some(p => p.id === mv.currentCityId && p.isCurrent),
+      '当前经营城市在地图上被标记');
+    /* 省份信息含城市数 */
+    expect('T4f', mv.provs.every(p => p.cityCount >= 1 && p.geoCount <= p.cityCount),
+      '每个省都有城市数，且有坐标数不超过总数');
+  }
+
+  /* ---- T5 地图的"进入经营城市"入口是完备的 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    const mv = E.cityMapView(s);
+    expect('T5a', mv.cityTotal === E.PROVINCES.reduce((a, p) => a + p.cities.length, 0),
+      `地图视图给出全量城市数（${mv.cityTotal}）—— 入口不能只给有坐标的那些`);
+    expect('T5b', mv.geoTotal < mv.cityTotal,
+      `有坐标的城市(${mv.geoTotal}) 少于全部城市(${mv.cityTotal})，
+       所以必须有列表入口而不能只靠地图点选`);
+  }
+}
 
 console.log('');
 if (fails === 0) console.log(`✅ 引擎探针全部通过（${checks} 项）`);

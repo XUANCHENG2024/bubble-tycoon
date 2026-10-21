@@ -236,6 +236,7 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     storeUpLevel, storeUpCost, buyStoreUpgrade, storeTrafficBonus, STORE_UPGRADES,
     storeById, playerStores, syncStoreManagers, venueTrafficMul,
     managerOfBranch, managerById, managerCount, managerRank, managerTrait,
+    cityMapView, cityPickerModalHtml, cityDetailModalHtml, setVenueCity, PROVINCES,
   };`);
   const T = window.__T;
 
@@ -1038,6 +1039,61 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     const html2 = doc.getElementById('panel-rival').innerHTML;
     check(/待聘店长/.test(html2) && /待聘老店长/.test(html2),
       'V12.1 有留档店长时面板显示待聘区');
+  }
+
+  /* ---- V13 城市地图 + 经营城市入口 ---- */
+  {
+    const s = window.S;
+    window.UI.setTab('rival'); window.UI.renderAll();
+    const html = doc.getElementById('panel-rival').innerHTML;
+    check(/城市地图/.test(html), 'V13 商圈页有「城市地图」区块');
+    check(/<svg[^>]*class="map-svg"/.test(html), 'V13 地图用 SVG 绘制');
+    /* 城市点：每个有坐标的城市一个可点的 <g> */
+    const dots = doc.querySelectorAll('#panel-rival .map-dot');
+    check(dots.length >= 40, `V13 地图画出 ${dots.length} 个城市点`);
+    check(dots.length === doc.querySelectorAll('#panel-rival .map-dot.cur').length + dots.length - 1
+      || doc.querySelectorAll('#panel-rival .map-dot.cur').length === 1,
+    'V13 当前城市在地图上高亮（恰好 1 个 .cur）');
+    /* 每个点都要有 data-act 与 data-id（可点） */
+    const noAct = Array.from(dots).filter(d => !d.getAttribute('data-act') || !d.getAttribute('data-id'));
+    check(noAct.length === 0, 'V13 每个城市点都带 data-act/data-id（可点）');
+    /* 省份概览 */
+    check(/省份概览|map-prov/.test(html), 'V13 地图显示省份信息');
+    /* 「切换城市」入口 */
+    check(/切换经营城市|mapgoto/.test(html), 'V13 有进入「经营城市」的入口');
+  }
+
+  /* 城市选择器弹窗：列出全部城市（不只是有坐标的） */
+  {
+    const r = window.eval(`(function(){
+      var s = window.S;
+      var h = cityPickerModalHtml(s);
+      var n = (h.match(/data-act="mappick"/g) || []).length;
+      var total = PROVINCES.reduce(function(a,p){ return a + p.cities.length; }, 0);
+      return [n, total, /选择经营城市/.test(h)].join('/');
+    })()`);
+    const p = String(r).split('/');
+    check(p[0] === p[1] && Number(p[0]) > 200,
+      `V13 城市选择器列出全部 ${p[1]} 个市（实际 ${p[0]}）—— 不能只给有坐标的 44 个`);
+    check(p[2] === 'true', 'V13 城市选择器有标题');
+  }
+
+  /* 地图点城市 → 详情弹窗 → 设为经营城市 */
+  {
+    const r = window.eval(`(function(){
+      var s = window.S;
+      var before = s.venue.cityId;
+      /* 找一个不是当前的城市点 */
+      var mv = cityMapView(s);
+      var pt = mv.points.filter(function(p){ return p.id !== before && p.hasCuisine; })[0]
+        || mv.points.filter(function(p){ return p.id !== before; })[0];
+      if (!pt) return 'no-point';
+      var rr = setVenueCity(s, pt.id);
+      return [rr.ok ? 1 : 0, s.venue.cityId === pt.id ? 1 : 0, pt.name].join('/');
+    })()`);
+    const p = String(r).split('/');
+    check(p[0] === '1' && p[1] === '1',
+      `V13 从地图可切换经营城市（${r}）`);
   }
 
   /* ---- V11 店长与分店编制 ---- */

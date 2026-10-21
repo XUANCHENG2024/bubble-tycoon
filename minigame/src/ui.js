@@ -1220,6 +1220,84 @@ function panelStaff(ctx, x, y, w, s) {
  *  与 H5 端 storesPanelHtml 对等。Canvas 上没有 tooltip，
  *  所以店铺现金/营收/店长/模式等关键信息都得画出来。
  */
+/** 城市地图（V13·Canvas 端）
+ *  与 H5 端 cityMapPanelHtml 对等：同一份数据（engine.cityMapView），
+ *  只是 SVG 换成 ctx 绘制。
+ */
+function panelCityMap(ctx, x, y, w, s) {
+  var mv = cityMapView(s);
+  var mh = 200;
+  /* 弹窗内容：从 y 开始画（外层由 drawModal 的 sheet 提供） */
+  text(ctx, mv.geoTotal + ' 个有坐标城市 · ' + mv.cityTotal + ' 市 · ' + mv.provs.length + ' 省',
+    x + 10, y + 8, { size: FS.xs, color: T.txt3, maxW: w - 20 });
+  y += 24;
+
+  /* 地图区 */
+  var mhH = 168;
+  GFX.card(ctx, x, y, w, mhH);
+  var pad = 12;
+  var iw = w - pad * 2, ih = mhH - pad * 2;
+  /* 十字参考线 */
+  ctx.fillStyle = 'rgba(255,255,255,.05)';
+  ctx.fillRect(x + pad + iw / 2 - 0.5, y + pad, 1, ih);
+  ctx.fillRect(x + pad, y + pad + ih / 2 - 0.5, iw, 1);
+  /* 城市点 */
+  for (var i = 0; i < mv.points.length; i++) {
+    var p = mv.points[i];
+    var px2 = x + pad + p.x * iw;
+    var py2 = y + pad + (1 - p.y) * ih;
+    var r = p.isCurrent ? 6 : 3.5;
+    ctx.fillStyle = p.isCurrent ? T.amber : T.cyan;
+    ctx.globalAlpha = p.isCurrent ? 1 : 0.8;
+    ctx.beginPath();
+    ctx.arc(px2, py2, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    if (p.isCurrent) {
+      ctx.strokeStyle = T.amber; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(px2, py2, 10, 0, Math.PI * 2); ctx.stroke();
+    }
+    /* 命中区：半径放大到 12px（手指点得中） */
+    GFX.addHit(px2 - 12, py2 - 12, 24, 24, 'mapcity', p.id, null);
+  }
+  y += mhH + 8;
+
+  /* 当前城市信息 */
+  var cur = cityById(mv.currentCityId);
+  if (cur) {
+    GFX.card(ctx, x, y, w, 46);
+    text(ctx, '📍 ' + cur.name, x + 10, y + 8, { size: FS.md, weight: 800, color: T.amber });
+    var cu = cuisinesOfCity(cur.id);
+    text(ctx, cu.length ? '本地特色：' + cu.map(function (id) {
+      var c = cuisineById(id); return c ? c.emoji + c.name : id;
+    }).join('、') : '暂无本地特色菜系（走通用菜系）',
+      x + 10, y + 26, { size: FS.xs, color: T.txt3, maxW: w - 90 });
+    GFX.button(ctx, x + w - 80, y + 12, 70, 22, '切换城市', {
+      kind: 'primary', act: 'mapgoto', size: FS.xs, r: 7,
+    });
+    y += 54;
+  }
+
+  /* 省份概览（两列） */
+  var cols = 2;
+  var rows = Math.ceil(mv.provs.length / cols);
+  var ph = rows * 15 + 26;
+  GFX.card(ctx, x, y, w, ph);
+  text(ctx, '省份概览', x + 10, y + 8, { size: FS.sm, weight: 800, color: T.txt3 });
+  for (var pi = 0; pi < mv.provs.length; pi++) {
+    var pv = mv.provs[pi];
+    var col = pi % cols, row = (pi / cols) | 0;
+    var tx = x + 10 + col * ((w - 20) / cols);
+    var ty = y + 24 + row * 15;
+    text(ctx, pv.name, tx, ty, {
+      size: FS.xs, color: pv.isCurrent ? T.amber : T.txt3, maxW: (w - 20) / cols - 40,
+    });
+    text(ctx, pv.cityCount + ' 市', tx + (w - 20) / cols - 42, ty,
+      { size: FS.xs, color: T.txt3, opacity: 0.75 });
+  }
+  return y + ph + 8;
+}
+
 function panelStores(ctx, x, y, w, s) {
   var stores = allStores(s);
   var cost = shopCost(s);
@@ -1357,7 +1435,26 @@ function panelStores(ctx, x, y, w, s) {
 }
 
 function panelRival(ctx, x, y, w, s) {
-  /* ★ V12：店铺地图放在商圈页最前面（与 H5 端同位置、同语义） */
+  /* ★ V13：城市地图入口（**紧凑条**，详细内容进弹窗）。
+     ★ 为什么 Canvas 端不能像 H5 那样把地图铺在页面上：
+       Canvas 一屏只有约 600px，而「地图(300+) + 店铺列表(每店 118px)」
+       必然超出 —— 超出部分被裁剪区切掉，
+       下方按钮**画出来了但点不到**（GFX.addHit 在裁剪区外不登记）。
+       实测就出现过：地图一加，店铺页的开店/注资/升级按钮命中区全变 0。
+       所以 Canvas 端用「入口条 + 弹窗」，H5 端用「直接铺开」（H5 可滚动，没这个问题）。
+       —— 两版的**信息与功能对等**，呈现形态按各自平台的约束调整。 */
+  var mv0 = cityMapView(s);
+  GFX.card(ctx, x, y, w, 44);
+  text(ctx, '🗺️ 城市地图', x + 10, y + 8, { size: FS.md, weight: 800, color: T.txt });
+  text(ctx, mv0.geoTotal + ' 城 · ' + mv0.provs.length + ' 省', x + 92, y + 9,
+    { size: FS.xs, color: T.cyan });
+  text(ctx, '当前：' + mv0.currentCityName, x + 10, y + 26,
+    { size: FS.xs, color: T.txt3, maxW: w - 110 });
+  GFX.button(ctx, x + w - 88, y + 10, 78, 24, '打开地图', {
+    kind: 'primary', act: 'mapopen', size: FS.xs, r: 7,
+  });
+  y += 52;
+  /* ★ V12：店铺地图紧随其后 */
   y = panelStores(ctx, x, y, w, s);
   var rv = s.rival || {};
   var share = num(rivalShare(s));
@@ -1792,6 +1889,71 @@ MODALS.confirm = function (ctx, b, m) {
   GFX.cardBtn(ctx, b.x + 16 + bw + 8, y, bw, 32, [{ t: '确定', size: FS.md }],
     { act: m.act || 'confirm-ok', r: 10 });
   return y + 42;
+};
+
+/** 城市详情弹窗（V13·Canvas 端） */
+MODALS.cityinfo = function (ctx, b, m) {
+  var y = b.y + 28;
+  text(ctx, m.title, b.x + 16, y, { size: FS.lg, weight: 800, color: T.txt, maxW: b.w - 32 });
+  y += 22;
+  if (m.sub) {
+    text(ctx, m.sub, b.x + 16, y, { size: FS.xs, color: T.txt3, maxW: b.w - 32 });
+    y += 18;
+  }
+  for (var i = 0; i < (m.lines || []).length; i++) {
+    text(ctx, m.lines[i], b.x + 16, y, { size: FS.sm, color: T.txt2, maxW: b.w - 32 });
+    y += 20;
+  }
+  y += 12;
+  var bw = (b.w - 32 - 8) / 2;
+  GFX.cardBtn(ctx, b.x + 16, y, bw, 32, [{ t: '关闭', size: FS.md }],
+    { act: 'close', r: 10 });
+  GFX.cardBtn(ctx, b.x + 16 + bw + 8, y, bw, 32,
+    [{ t: m.isCur ? '当前城市' : '设为经营城市', size: FS.md }],
+    { act: m.isCur ? 'close' : 'cityinfo-ok', r: 10, disabled: m.isCur });
+  return y + 42;
+};
+
+/** 城市列表弹窗（V13·Canvas 端）：循环切换有坐标的城市 */
+MODALS.citylist = function (ctx, b, m) {
+  var y = b.y + 28;
+  text(ctx, '🗺️ 切换经营城市', b.x + 16, y, { size: FS.lg, weight: 800, color: T.txt });
+  y += 24;
+  var mvv = cityMapView(__MINIGAME.S);
+  var pt = mvv.points[m.idx] || null;
+  GFX.card(ctx, b.x + 16, y, b.w - 32, 44);
+  text(ctx, pt ? pt.name : '（无）', b.x + b.w / 2, y + 12,
+    { size: FS.xl, weight: 800, align: 'center', color: T.txt, maxW: b.w - 40 });
+  text(ctx, pt ? pt.provName + ' · ' + pt.lng.toFixed(2) + 'E ' + pt.lat.toFixed(2) + 'N' : '',
+    b.x + b.w / 2, y + 30, { size: FS.xs, align: 'center', color: T.txt3 });
+  y += 54;
+  var bw = (b.w - 32 - 8) / 2;
+  GFX.cardBtn(ctx, b.x + 16, y, bw, 30, [{ t: '◀ 上一个', size: FS.sm }],
+    { act: 'citylist-next', r: 9 });
+  GFX.cardBtn(ctx, b.x + 16 + bw + 8, y, bw, 30, [{ t: '下一个 ▶', size: FS.sm }],
+    { act: 'citylist-next', r: 9 });
+  y += 38;
+  GFX.cardBtn(ctx, b.x + 16, y, b.w - 32, 32, [{ t: '设为经营城市', size: FS.md }],
+    { act: 'citylist-ok', r: 10 });
+  y += 40;
+  text(ctx, '仅列出有精确坐标的 ' + mvv.geoTotal + ' 个城市；完整 ' + mvv.cityTotal + ' 市见「经营信息」',
+    b.x + b.w / 2, y, { size: FS.xs, align: 'center', color: T.txt3, maxW: b.w - 32 });
+  return y + 20;
+};
+
+/** 城市地图弹窗（V13·Canvas 端）
+ *  内容由 panelCityMap 画（与 rival 页的入口条共用同一份数据）。
+ *  ★ 弹窗可以滚动（drawModal 支持），所以 300px 的地图放得下。
+ */
+MODALS.map = function (ctx, b, m) {
+  var y = b.y + 20;
+  text(ctx, '🗺️ 城市地图', b.x + 16, y, { size: FS.lg, weight: 800, color: T.txt });
+  y += 26;
+  y = panelCityMap(ctx, b.x + 16, y, b.w - 32, __MINIGAME.S);
+  y += 6;
+  GFX.cardBtn(ctx, b.x + 16, y, b.w - 32, 30, [{ t: '关闭', size: FS.md }],
+    { act: 'close', r: 10 });
+  return y + 40;
 };
 
 MODALS.report = function (ctx, b, m) {
