@@ -388,7 +388,7 @@ function storesPanelHtml(s) {
   let h = `<div class="card"><div class="card-h">🗺️ 店铺地图
     <span class="ch-sub">${stores.length} 家店 · ${managerCount(s)} 名店长</span></div>`;
 
-  h += `<div style="font-size:11.5px;color:var(--txt3);line-height:1.6;margin-bottom:10px">
+  h += `<div style="font-size:var(--fs-md);color:var(--txt3);line-height:1.6;margin-bottom:10px">
     开设分店需支付 <b>${money(shopCost(s) || 0)}</b>（可开 ${Math.max(0, (SHOP_COSTS.length || 0) + 1 - stores.length)} 家）。
     店铺拥有<b>独立的资金、库存与经营数据</b>；指派店长后该店可交给店长自动打理，
     未指派店长的店由你亲自经营。</div>`;
@@ -721,7 +721,7 @@ function cityDetailModalHtml(s, cityId) {
   const cur = (s.venue && s.venue.cityId) === cityId;
   return `<div class="m-title">📍 ${esc(c.name)}</div>
     <div class="m-sub">${p ? esc(p.name) : ''}${g ? ` · ${g.lng.toFixed(2)}E ${g.lat.toFixed(2)}N（${GEO.COORD_SYS}）` : ' · 暂无精确坐标'}</div>
-    <div style="margin:12px 0;font-size:12px;line-height:1.8;color:var(--txt2)">
+    <div style="margin:12px 0;font-size:var(--fs-md);line-height:1.8;color:var(--txt2)">
       <div>本地菜系：${cu.length ? cu.map(id => {
     const cc = cuisineById(id);
     return cc ? cc.emoji + cc.name : id;

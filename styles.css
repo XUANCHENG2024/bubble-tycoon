@@ -1155,14 +1155,14 @@ body::before {
 .store-card.main { border-color: rgba(255, 194, 71, .35); background: rgba(255, 194, 71, .05); }
 .store-card.auto { border-color: rgba(139, 92, 255, .3); }
 .store-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
-.store-e { font-size: 20px; line-height: 1.1; }
+.store-e { font-size: var(--fs-xl); line-height: 1.1; }
 .store-title { flex: 1; min-width: 0; }
-.store-name { font-size: 13px; font-weight: 800; color: var(--txt); }
-.store-sub { font-size: 10.5px; color: var(--txt3); margin-top: 1px; }
+.store-name { font-size: var(--fs-lg); font-weight: 800; color: var(--txt); }
+.store-sub { font-size: var(--fs-xs); color: var(--txt3); margin-top: 1px; }
 .store-mode { flex: none; }
 .store-badge {
   display: inline-block; margin-left: 5px; padding: 1px 6px; border-radius: 8px;
-  font-size: 9.5px; font-weight: 700; vertical-align: middle;
+  font-size: var(--fs-xs); font-weight: 700; vertical-align: middle;
   background: rgba(255, 255, 255, .1); color: var(--txt2);
 }
 .store-badge.main { background: rgba(255, 194, 71, .2); color: var(--amber); }
@@ -1173,16 +1173,16 @@ body::before {
   padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, .06);
   border-bottom: 1px solid rgba(255, 255, 255, .06);
 }
-.store-kv { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--txt3); }
+.store-kv { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--txt3); }
 .store-kv b { color: var(--txt); font-weight: 700; }
 .store-kv b.up { color: var(--green); }
 .store-kv b.down { color: var(--red); }
-.store-mgr { font-size: 11px; color: var(--txt2); margin-top: 6px; }
-.store-mgr-lv { margin-left: 5px; font-size: 9.5px; color: var(--txt3); }
-.store-mgr-tr { margin-left: 6px; font-size: 10px; color: var(--amber); }
-.store-mgr-w { margin-left: 6px; font-size: 10px; color: var(--txt3); }
+.store-mgr { font-size: var(--fs-sm); color: var(--txt2); margin-top: 6px; }
+.store-mgr-lv { margin-left: 5px; font-size: var(--fs-xs); color: var(--txt3); }
+.store-mgr-tr { margin-left: 6px; font-size: var(--fs-xs); color: var(--amber); }
+.store-mgr-w { margin-left: 6px; font-size: var(--fs-xs); color: var(--txt3); }
 .store-none { color: var(--txt3); }
-.store-rpt { font-size: 10.5px; color: var(--txt3); margin-top: 5px; line-height: 1.5; }
+.store-rpt { font-size: var(--fs-xs); color: var(--txt3); margin-top: 5px; line-height: 1.5; }
 .store-rpt b.up { color: var(--green); }
 .store-rpt b.down { color: var(--red); }
 .store-acts { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
@@ -1193,9 +1193,9 @@ body::before {
   padding: 5px 8px; border-radius: 9px; cursor: pointer;
   background: rgba(255, 255, 255, .04);
 }
-.store-up-t { font-size: 11px; font-weight: 700; color: var(--txt2); }
-.store-up-s { font-size: 10px; color: var(--txt3); }
-.store-up-arrow { margin-left: auto; font-size: 13px; color: var(--txt3); }
+.store-up-t { font-size: var(--fs-sm); font-weight: 700; color: var(--txt2); }
+.store-up-s { font-size: var(--fs-xs); color: var(--txt3); }
+.store-up-arrow { margin-left: auto; font-size: var(--fs-lg); color: var(--txt3); }
 .store-up-list {
   margin-top: 5px; padding: 5px 7px; border-radius: 9px;
   background: rgba(0, 0, 0, .18);
@@ -1203,19 +1203,19 @@ body::before {
 .store-up-row {
   display: flex; align-items: center; gap: 7px; padding: 4px 0;
 }
-.store-up-e { font-size: 15px; width: 20px; text-align: center; }
+.store-up-e { font-size: var(--fs-lg); width: 20px; text-align: center; }
 .store-up-info { flex: 1; min-width: 0; }
-.store-up-n { font-size: 11px; font-weight: 700; color: var(--txt); }
+.store-up-n { font-size: var(--fs-sm); font-weight: 700; color: var(--txt); }
 .store-up-lv {
-  margin-left: 4px; font-size: 9.5px; color: var(--txt3); font-weight: 400;
+  margin-left: 4px; font-size: var(--fs-xs); color: var(--txt3); font-weight: 400;
 }
-.store-up-d { font-size: 10px; color: var(--txt3); }
-.store-up-max { font-size: 10px; color: var(--amber); }
+.store-up-d { font-size: var(--fs-xs); color: var(--txt3); }
+.store-up-max { font-size: var(--fs-xs); color: var(--amber); }
 .store-former {
   margin-top: 7px; padding: 5px 7px; border-radius: 9px;
   background: rgba(139, 92, 255, .09); border: 1px solid rgba(139, 92, 255, .22);
 }
-.store-former-t { font-size: 10.5px; color: #c4a8ff; margin-bottom: 2px; }
+.store-former-t { font-size: var(--fs-xs); color: #c4a8ff; margin-bottom: 2px; }
 
 /* ---------- V13：城市地图 ---------- */
 .map-wrap {
@@ -1232,16 +1232,16 @@ body::before {
 .map-halo {
   fill: none; stroke: var(--amber); stroke-width: 2; opacity: .45;
 }
-.map-dish { font-size: 9px; }
+.map-dish { font-size: var(--fs-xs); }
 .map-info {
   padding: 8px 10px; border-radius: 10px; margin-bottom: 8px;
   background: rgba(255, 194, 71, .08); border: 1px solid rgba(255, 194, 71, .2);
 }
-.map-info-n { font-size: 12.5px; font-weight: 800; color: var(--txt); }
-.map-info-s { font-size: 10.5px; color: var(--txt2); margin-top: 2px; }
+.map-info-n { font-size: var(--fs-md); font-weight: 800; color: var(--txt); }
+.map-info-s { font-size: var(--fs-xs); color: var(--txt2); margin-top: 2px; }
 .map-info-a { display: flex; gap: 6px; margin-top: 7px; }
 .map-legend {
-  display: flex; gap: 12px; flex-wrap: wrap; font-size: 10px;
+  display: flex; gap: 12px; flex-wrap: wrap; font-size: var(--fs-xs);
   color: var(--txt3); margin-bottom: 8px;
 }
 .map-lg {
@@ -1254,7 +1254,7 @@ body::before {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 3px 8px;
 }
-.map-prov { display: flex; justify-content: space-between; font-size: 10px; color: var(--txt3); }
+.map-prov { display: flex; justify-content: space-between; font-size: var(--fs-xs); color: var(--txt3); }
 .map-prov.cur { color: var(--amber); font-weight: 700; }
 .map-prov-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .map-prov-s { flex: none; opacity: .8; }
@@ -1262,13 +1262,13 @@ body::before {
 /* 城市选择器 */
 .cp-list { max-height: 58vh; overflow-y: auto; margin-top: 8px; }
 .cp-prov {
-  font-size: 10.5px; font-weight: 800; color: var(--txt3);
+  font-size: var(--fs-xs); font-weight: 800; color: var(--txt3);
   margin: 8px 0 3px; padding-bottom: 2px;
   border-bottom: 1px solid rgba(255, 255, 255, .07);
 }
 .cp-cities { display: flex; flex-wrap: wrap; gap: 4px; }
 .cp-city {
-  font-size: 11px; padding: 4px 8px; border-radius: 8px; cursor: pointer;
+  font-size: var(--fs-sm); padding: 4px 8px; border-radius: 8px; cursor: pointer;
   background: rgba(255, 255, 255, .07); border: 1px solid transparent;
   color: var(--txt2);
 }

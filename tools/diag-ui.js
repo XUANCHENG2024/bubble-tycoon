@@ -136,12 +136,82 @@ console.log('\n=============== 字号令牌两版一致性 ===============');
     ? '  ✔ 无「var(--x)px」这类非法声明（CSS 会静默忽略，不报错）'
     : `  ✘ 存在非法声明：${badVar.join('；')}`);
 
-  /* H5 端不该再有 <10px 的正文（展示级 Logo 特例除外） */
-  const tiny = Array.from(css.matchAll(/font-size:\s*([0-9.]+)px/g))
-    .map(m => parseFloat(m[1])).filter(v => v < 10);
-  console.log(tiny.length === 0
-    ? '  ✔ H5 端无小于 10px 的字号'
-    : `  ✘ H5 端仍有 ${tiny.length} 处小于 10px：${[...new Set(tiny)].join(', ')}`);
+  /* ★★ 禁止绕过字号令牌 —— P0-2，机制性的防线。
+     *
+     * 为什么要加这条：上一轮刚把 Canvas 端 66 处 <10px 全部提到 10px，
+     * 并建立了 6 档字号令牌体系。但**令牌建好不等于新代码会用它** ——
+     * 紧接着写 V12/V13 时，又手写了 4 处 `font-size: 9.5px` / `9px`
+     * （全在 js/ui.js 的**内联 style** 里）。
+     *
+     * ★ 所以光扫 styles.css 是不够的 —— 那个断言当时是绿的，
+     *   因为问题在内联 style 里。两处都要扫。
+     *
+     * ★ 检查范围比「有没有 <10px」更宽：
+     *   凡是**该用令牌**的字号（10~22px 区间）都应写成 var(--fs-*)。
+     *   允许的例外只有两种：
+     *     ① 令牌定义本身（--fs-xs: 10px 这类）
+     *     ② 明显超出令牌范围的展示级字号（>22px，如 Logo 74px）
+     */
+  {
+    /* ★ 范围：只卡**新增代码**（V12 段之后 + V12/V13 新增的函数）。
+     *
+     * 为什么不卡全部：历史遗留有 10 处（19px 的 emoji 图标、14.5px 的表头…），
+     *   一次全查 = 断言一上线就是红的 = **等于没有断言**
+     *   （大家会习惯性忽略红色，这条防线就废了）。
+     *   历史遗留单列在《界面评估与优化建议-第二轮.md》，作为可选清理项。
+     *
+     * 为什么要卡新增：V12/V13 的 24 处字面量**全部是这两批新代码带来的**，
+     *   而它们是在「字号令牌体系已建立」之后写的 ——
+     *   说明体系存在 ≠ 会被遵守。所以防线要卡在新增上。
+     */
+    const V12_MARK = 'V12：店铺地图';           /* styles.css 里的分段标记 */
+    const NEW_FUNCS = [                         /* js/ui.js 里 V12/V13 新增的函数 */
+      'function cityMapPanelHtml', 'function cityPickerModalHtml',
+      'function cityDetailModalHtml', 'function storeUpgradeHtml',
+      'function storeFormerHtml', 'function storesPanelHtml',
+    ];
+    const offenders = [];
+    /* styles.css：从 V12 段之后开始 */
+    {
+      const src = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
+      const lines = src.split('\n');
+      let from = 0;
+      lines.forEach((ln, i) => { if (ln.indexOf(V12_MARK) >= 0) from = i + 1; });
+      lines.forEach((ln, i) => {
+        if (i + 1 <= from) return;
+        if (/--fs-[a-z]+\s*:/.test(ln)) return;
+        for (const m of ln.matchAll(/font-size:\s*([0-9.]+)px/g)) {
+          /* ★ 判据是「**任何**字面量都不该出现在这里」，
+             而不是「小于 10px 的不行」。
+             初版写的是 `v >= 10 && v <= 22`（只拦令牌区间内的值）——
+             结果 9.5px 被放过了，而 9.5px 恰恰是这次要修的问题本身！
+             也就是说那条断言**抓不到自己要抓的东西**。
+             正确判据：字面量一律不行，除了 >22px 的展示级特例（Logo 74px 等）。*/
+          const v = parseFloat(m[1]);
+          if (v <= 22) offenders.push(`styles.css:${i + 1} ${m[1]}`);
+        }
+      });
+    }
+    /* js/ui.js：只扫 V12/V13 新增的函数体 */
+    {
+      const src = fs.readFileSync(path.join(root, 'js/ui.js'), 'utf8');
+      const lines = src.split('\n');
+      let inNew = false;
+      lines.forEach((ln, i) => {
+        if (NEW_FUNCS.some(t => ln.indexOf(t) >= 0)) inNew = true;
+        else if (inNew && ln.charAt(0) === '}') inNew = false;
+        if (!inNew) return;
+        for (const m of ln.matchAll(/font-size:\s*([0-9.]+)px/g)) {
+          /* 同上：字面量一律不行（>22px 的展示级特例除外） */
+          const v = parseFloat(m[1]);
+          if (v <= 22) offenders.push(`js/ui.js:${i + 1} ${m[1]}`);
+        }
+      });
+    }
+    console.log(offenders.length === 0
+      ? '  ✔ 新增代码（V12 段之后 + V12/V13 函数）字号全部走 var(--fs-*)'
+      : `  ✘ ${offenders.length} 处字号该用令牌却写了字面量：\n      ${offenders.slice(0, 8).join('\n      ')}`);
+  }
 }
 
 console.log('\n=============== 响应式断点 ===============');
