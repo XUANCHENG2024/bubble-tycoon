@@ -1257,6 +1257,41 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
   check(tabBottom <= expectBottom + 1,
     `Tab 命中区在 Tab 栏内（底部 ${Math.round(tabBottom)} ≤ bodyY ${expectBottom}）`);
 
+  /* ---- V12 对等：Canvas 商圈页要有店铺地图 ----
+     ★ 与 H5 端对等：店铺列表、开店入口、店长/托管信息、经营数据。 */
+  const stEnv = makeEnv(390, 844);
+  stEnv.frames(2);
+  stEnv.tap('start'); stEnv.frames(2);
+  stEnv.tap('tutskip'); stEnv.frames(1);
+  stEnv.MG.S.cash = 300000;
+  stEnv.inCtx('__MINIGAME.VIEW.tab = "rival"');
+  stEnv.frames(2);
+
+  drawnTexts.length = 0;
+  stEnv.frames(1);
+  const stText = drawnTexts.join(' ');
+  check(/店铺地图/.test(stText), 'Canvas 商圈页有「店铺地图」区块');
+  check(/总店/.test(stText), 'Canvas 店铺列表显示总店');
+  check(/亲自经营/.test(stText), 'Canvas 显示未托管店的「亲自经营」状态');
+  check(/现金/.test(stText) && /营收/.test(stText), 'Canvas 显示店铺经营数据');
+  check(/开设新店/.test(stText), 'Canvas 有开店入口');
+
+  /* 按钮命中区必须存在（Canvas 上画出来但被裁剪区吃掉 = 点不到） */
+  const stHits = (stEnv.G.hits || []).filter(h => h.act === 'sopen');
+  check(stHits.length >= 1, `Canvas 店铺页渲染出 ${stHits.length} 个开店按钮命中区`);
+
+  /* 开店 → 店数 +1（两版行为一致） */
+  const opened = stEnv.inCtx(`(function(){
+    var s = __MINIGAME.S;
+    var before = s.stores.length;
+    var r = openStore(s, { cityId: "510100", venueType: "pedestrian" });
+    return (r.ok ? 1 : 0) + "/" + before + "/" + s.stores.length
+      + "/" + s.stores[s.stores.length - 1].cityId;
+  })()`);
+  const op = String(opened).split('/');
+  check(op[0] === '1' && Number(op[2]) === Number(op[1]) + 1 && op[3] === '510100',
+    `Canvas 开店成功且城市正确（${opened}）`);
+
   /* ---- V10 对等：Canvas 研发页也要有城市标示与研发树 ----
      ★ 这条守的是「两版功能对等」：
        H5 端有 cityBar（城市 + 可用菜系）与研发树分组，

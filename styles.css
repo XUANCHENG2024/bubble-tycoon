@@ -1146,3 +1146,43 @@ body::before {
 .btn-xs:hover { background: rgba(255, 255, 255, .08); color: var(--txt); }
 .btn-danger { color: var(--red); border-color: rgba(255, 107, 107, .35); }
 .btn-danger:hover { background: rgba(255, 107, 107, .14); }
+
+/* ---------- V12：店铺地图 ---------- */
+.store-card {
+  margin-bottom: 9px; padding: 9px 10px; border-radius: 12px;
+  background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08);
+}
+.store-card.main { border-color: rgba(255, 194, 71, .35); background: rgba(255, 194, 71, .05); }
+.store-card.auto { border-color: rgba(139, 92, 255, .3); }
+.store-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 7px; }
+.store-e { font-size: 20px; line-height: 1.1; }
+.store-title { flex: 1; min-width: 0; }
+.store-name { font-size: 13px; font-weight: 800; color: var(--txt); }
+.store-sub { font-size: 10.5px; color: var(--txt3); margin-top: 1px; }
+.store-mode { flex: none; }
+.store-badge {
+  display: inline-block; margin-left: 5px; padding: 1px 6px; border-radius: 8px;
+  font-size: 9.5px; font-weight: 700; vertical-align: middle;
+  background: rgba(255, 255, 255, .1); color: var(--txt2);
+}
+.store-badge.main { background: rgba(255, 194, 71, .2); color: var(--amber); }
+.store-badge.auto { background: rgba(139, 92, 255, .22); color: #c4a8ff; margin-left: 0; }
+.store-badge.play { background: rgba(127, 211, 137, .18); color: var(--green); margin-left: 0; }
+.store-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px;
+  padding: 6px 0; border-top: 1px solid rgba(255, 255, 255, .06);
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
+}
+.store-kv { display: flex; justify-content: space-between; font-size: 10.5px; color: var(--txt3); }
+.store-kv b { color: var(--txt); font-weight: 700; }
+.store-kv b.up { color: var(--green); }
+.store-kv b.down { color: var(--red); }
+.store-mgr { font-size: 11px; color: var(--txt2); margin-top: 6px; }
+.store-mgr-lv { margin-left: 5px; font-size: 9.5px; color: var(--txt3); }
+.store-mgr-tr { margin-left: 6px; font-size: 10px; color: var(--amber); }
+.store-mgr-w { margin-left: 6px; font-size: 10px; color: var(--txt3); }
+.store-none { color: var(--txt3); }
+.store-rpt { font-size: 10.5px; color: var(--txt3); margin-top: 5px; line-height: 1.5; }
+.store-rpt b.up { color: var(--green); }
+.store-rpt b.down { color: var(--red); }
+.store-acts { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }

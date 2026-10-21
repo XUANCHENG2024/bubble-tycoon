@@ -1215,7 +1215,92 @@ function panelStaff(ctx, x, y, w, s) {
 /* ============================================================
  *  面板 5：商圈
  * ========================================================== */
+
+/** 店铺地图面板（V12·Canvas 端）
+ *  与 H5 端 storesPanelHtml 对等。Canvas 上没有 tooltip，
+ *  所以店铺现金/营收/店长/模式等关键信息都得画出来。
+ */
+function panelStores(ctx, x, y, w, s) {
+  var stores = allStores(s);
+  var cost = shopCost(s);
+  var left = Math.max(0, (SHOP_COSTS.length || 0) + 1 - stores.length);
+
+  GFX.card(ctx, x, y, w, 46);
+  text(ctx, '🗺️ 店铺地图', x + 10, y + 8, { size: 12, weight: 800, color: T.txt });
+  text(ctx, stores.length + ' 家店 · ' + managerCount(s) + ' 名店长',
+    x + w - 10, y + 9, { size: 9.5, align: 'right', color: T.cyan });
+  text(ctx, '开店费 ' + money(cost || 0) + '（可开 ' + left + ' 家）',
+    x + 10, y + 26, { size: 9.5, color: T.txt3, maxW: w - 20 });
+  y += 54;
+
+  for (var i = 0; i < stores.length; i++) {
+    var st = stores[i];
+    var mg = storeManager(s, st);
+    var staffN = staffOfBranch(s, st.branch).length;
+    var rpt = st.lastReport;
+    var h = 92;
+    GFX.card(ctx, x, y, w, h);
+    /* 店名 + 主店/托管标记 */
+    text(ctx, st.emoji + ' ' + st.name, x + 10, y + 8,
+      { size: 12, weight: 800, color: T.txt, maxW: w - 130 });
+    if (st.isMain) {
+      text(ctx, '⭐主店', x + w - 10, y + 9, { size: 9, align: 'right', color: T.amber });
+    } else {
+      text(ctx, st.auto ? '🤖托管' : '✋自营', x + w - 10, y + 9,
+        { size: 9, align: 'right', color: st.auto ? T.purple : T.green });
+    }
+    var city = cityById(st.cityId);
+    text(ctx, '📍' + (city ? city.name : st.cityId) + ' · Lv.' + st.level
+      + ' · 编制 ' + staffN + '/' + branchStaffCap(s, st.branch),
+      x + 10, y + 24, { size: 9, color: T.txt3, maxW: w - 20 });
+    /* 经营数据 */
+    text(ctx, '现金 ' + money(st.cash) + '　营收 ' + money(st.income)
+      + '　出杯 ' + st.cups,
+      x + 10, y + 40, { size: 9.5, color: T.txt2, maxW: w - 20 });
+    /* 店长 */
+    text(ctx, mg ? ('店长 ' + mg.emoji + ' ' + mg.name + ' Lv.' + mg.lv + ' ' + managerRank(mg.lv).name)
+      : '未指派店长（亲自经营）',
+      x + 10, y + 56, { size: 9.5, color: mg ? T.amber : T.txt3, maxW: w - 20 });
+    /* 最近报表 */
+    var rptTxt = '';
+    if (rpt) {
+      rptTxt = rpt.empty ? '昨日：空店（无员工），仅扣固定开支'
+        : ('昨日：客流 ' + rpt.traffic + ' · 出杯 ' + rpt.cups
+          + ' · 净利 ' + money(rpt.net));
+    }
+    if (rptTxt) {
+      text(ctx, rptTxt, x + 10, y + 72, { size: 9, color: T.txt3, maxW: w - 20 });
+    }
+    /* 操作按钮：接管/托管、任命、注资/提现 */
+    var by = y + h - 22;
+    var bw = (w - 26) / 3;
+    if (mg) {
+      GFX.button(ctx, x + 8, by, bw, 20, st.auto ? '我来接管' : '交给店长', {
+        kind: 'primary', act: 'stoggle', id: st.branch, extra: st.auto ? 0 : 1, size: 9, r: 7,
+      });
+      GFX.button(ctx, x + 8 + bw + 5, by, bw, 20, '撤下店长', {
+        kind: 'ghost', act: 'smgrfire', id: st.branch, size: 9, r: 7,
+      });
+    } else {
+      GFX.button(ctx, x + 8, by, bw, 20, '任命店长', {
+        kind: 'primary', act: 'smgrh', id: st.branch, size: 9, r: 7,
+      });
+    }
+    GFX.button(ctx, x + 8 + (bw + 5) * 2, by, bw, 20, st.isMain ? '主店' : '设为主店', {
+      kind: 'ghost', act: 'smain', id: st.branch, disabled: st.isMain, size: 9, r: 7,
+    });
+    y += h + 8;
+  }
+
+  /* 开店入口 */
+  GFX.button(ctx, x, y, w, 30, cost == null ? '已达分店上限' : ('🗺️ 开设新店 · ' + money(cost)),
+    { kind: cost == null ? 'ghost' : 'primary', act: 'sopen', disabled: cost == null, size: 11, r: 9 });
+  return y + 38;
+}
+
 function panelRival(ctx, x, y, w, s) {
+  /* ★ V12：店铺地图放在商圈页最前面（与 H5 端同位置、同语义） */
+  y = panelStores(ctx, x, y, w, s);
   var rv = s.rival || {};
   var share = num(rivalShare(s));
   GFX.card(ctx, x, y, w, 96);

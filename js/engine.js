@@ -239,12 +239,22 @@ function netWorth(s) {
 function offlinePerMin(s) { return offlineRate(s.up.auto); }
 
 /** 今日预测客流（人） */
-/** 实际在营业的分店数（≥1 名员工的分店）。
+/**
+ * 实际在营业的分店数（≥1 名员工）。
  *  只有员工在岗的分店才产生客流与产出 —— 空转的店只付租金，
- *  这正是「开了分店要立刻配人手」的压力来源。 */
+ *  这正是「开了分店要立刻配人手」的压力来源。
+ *
+ * ★ V12：托管给店长的店**不计入**。
+ *   托管店的营收来自店长 AI 的日结算，不来自实时营业模拟；
+ *   若它还计入客流加成，玩家经营的总店会凭空多出客流 ——
+ *   相当于「白送一个分店的客流却不用管它」。
+ *   这个偏差会让「托管」变成稳赚的偷懒选项，必须排除。
+ */
 function activeBranchCount(s) {
   let n = 1;                /* 总店永远在营业 */
   for (let b = 2; b <= pos(s.shops, 1); b++) {
+    const store = storeByBranch(s, b);
+    if (store && store.auto) continue;       /* 托管店不计入 */
     if (staffOfBranch(s, b).length > 0) n++;
   }
   return n;
@@ -412,6 +422,10 @@ function newGame(diffKey, bpBonus, sigCarry) {
     recipes: ['boba'], menu: ['boba'], ratios: { boba: 1.0 },
     up: { speed: 0, decor: 0, menu: 0, storage: 0, training: 0, auto: 0 },
     shops: 1, shopSpend: 0, invested: 0,
+    /* V12 店铺体系：s.stores 是权威（店数/位置/名称/等级/独立账本/托管），
+       s.shops 降级为它的派生值（s.stores.length）。
+       ★ 初始只有总店（branch 1，主店）。 */
+    stores: [], nextStoreId: 1,
     staff: [], candidates: [], nextStaffId: 1,
     /* V11 店长系统：已招店长 / 各分店候选池 / 店长 id 计数器 */
     managers: [], mgrCand: {}, nextMgrId: 1,
@@ -456,6 +470,20 @@ function newGame(diffKey, bpBonus, sigCarry) {
   for (const g of ING) { s.prices[g.id] = g.base; s.prevPrices[g.id] = g.base; s.avgCost[g.id] = g.base; }
   rollWeather(s); rollTrend(s); rollNews(s);
   refreshCandidates(s, true);
+  /* ★ V12：建好总店（branch 1，主店）。
+     少了这一步，s.stores 是空数组 → syncShopCount 会把 s.shops 算成 0，
+     之后 openStore 开出的第一家店拿到 branch 2（跳过 1），
+     表现为「店号与店数错位」：有 1 家店但它叫第 2 家。
+     这个 bug 静默发生（不报错），所以必须在这里显式建店。 */
+  s.stores.push(makeStore(s, {
+    branch: 1, id: 1, isMain: true, name: '总店', emoji: '🏠',
+    cityId: (s.venue && s.venue.cityId) || '110100',
+  }));
+  syncShopCount(s);
+  s.nextStoreId = 2;
+  /* ★ 总店也可以任命店长（V12），所以开局就要有总店的候选店长，
+     否则玩家进游戏看到「1 个名额」却一个候选人都招不了。*/
+  refreshManagerCandidates(s, 1, true);
   initRival(s);
   rollContract(s);
   rollQuests(s);
@@ -906,26 +934,241 @@ function doUpgrade(s, id) {
   return { ok: true, cost: c };
 }
 function shopCost(s) {
-  /* s.shops 被脏存档改成 0 / 负数时，SHOP_COSTS[-1] 是 undefined，
+  /* s.shops 被脏存档改成 0 / 负数时，SHOP_COSTS[-1] 是 undefined,
      Math.round(undefined) 会得到 NaN 并一路传到现金里。 */
   const i = pos(s.shops, 1) - 1;
   if (i < 0 || i >= SHOP_COSTS.length) return null;
   return Math.round(SHOP_COSTS[i] * diffOf(s).costMult);
 }
-function openShopBranch(s) {
+
+/* ============================================================
+ *  V12 店铺体系（引擎层）
+ *
+ *  权威数据：s.stores[]（店数、位置、名称、等级、独立账本、托管标记）
+ *  派生数据：s.shops = s.stores.length（保留给既有 19 处使用点）
+ *
+ *  ★ 同步点只有 syncShopCount() 一个 ——
+ *    任何增删店的地方都必须调它。散落着写 s.shops = X 就会漂，
+ *    而「店数漂了」的表现是客流/租金/名额全错，且不报错。
+ * ============================================================ */
+
+/** 同步 s.shops（派生值）。★ 增删店的唯一入口。 */
+function syncShopCount(s) {
+  s.shops = Array.isArray(s.stores) ? s.stores.length : 1;
+  return s.shops;
+}
+
+/** 按 branch 店号取店（branch 1 = 总店） */
+function storeByBranch(s, branch) {
+  const st = arr(s.stores);
+  for (const st0 of st) if (st0 && st0.branch === branch) return st0;
+  return null;
+}
+function storeById(s, id) {
+  for (const st of arr(s.stores)) if (st && st.id === id) return st;
+  return null;
+}
+/** 主店（永远存在 —— 总店不可关闭） */
+function mainStore(s) {
+  const st = arr(s.stores);
+  for (const st0 of st) if (st0 && st0.isMain) return st0;
+  return st[0] || null;
+}
+/** 全部店铺（按 branch 升序） */
+function allStores(s) {
+  return arr(s.stores).slice().sort((a, b) => (a.branch || 0) - (b.branch || 0));
+}
+/** 托管给店长的店 */
+function managedStores(s) {
+  return allStores(s).filter(st => st.auto && st.managerId);
+}
+/** 玩家亲自经营的店（未托管） */
+function playerStores(s) {
+  return allStores(s).filter(st => !st.auto);
+}
+
+/** 店的店长对象（通过 store.managerId 反查） */
+function storeManager(s, store) {
+  if (!store || !store.managerId) return null;
+  return managerById(s, store.managerId);
+}
+
+/** 同步 store.managerId ↔ manager.branch 双向一致。
+ *  ★ 两处存了同一关系，**必须**有单一同步点。
+ *   不一致的后果很具体：managerOfBranch 找到的店长和店里的店长不是同一个，
+ *   于是「加成一店算两次、工资付两次」或者「店长管着别人的店」。
+ */
+function syncStoreManagers(s) {
+  const st = arr(s.stores);
+  for (const m of arr(s.managers)) {
+    const store = storeByBranch(s, m.branch);
+    if (store) store.managerId = m.id;
+  }
+  /* 反向：店长表里没有的，清掉店上的 managerId（脏存档会产生孤儿引用） */
+  for (const st0 of st) {
+    if (st0.managerId && !managerById(s, st0.managerId)) st0.managerId = null;
+    /* 托管标记必须有店长，否则自动经营无从谈起 */
+    if (st0.auto && !st0.managerId) st0.auto = false;
+  }
+}
+
+/** 新建一个店对象 */
+function makeStore(s, opts) {
+  const o = opts || {};
+  const branch = pos(o.branch, 1);
+  const cityId = o.cityId || (s.venue && s.venue.cityId) || '110100';
+  const geo = cityGeoOf(cityId) || GEO.FALLBACK;
+  return {
+    id: o.id || (num(s.nextStoreId, 1)),
+    branch,
+    name: str(o.name, 16) || '新店',
+    emoji: o.emoji || '🏪',
+    cityId,
+    venueType: o.venueType || VENUE_DEFAULT,
+    lng: num(o.lng, geo.lng),
+    lat: num(o.lat, geo.lat),
+    coordSys: GEO.COORD_SYS,
+    isMain: !!o.isMain,
+    level: pos(o.level, 1),
+    exp: pos(o.exp, 0),
+    auto: !!o.auto,
+    managerId: o.managerId == null ? null : o.managerId,
+    cash: pos(o.cash, 0),
+    inv: o.inv || {},
+    income: 0, expense: 0, cups: 0, days: 0,
+    lastReport: null, history: [],
+    upgrades: {},
+  };
+}
+
+/**
+ * 开一家新店。
+ * @param {object} opts { cityId, venueType, name, lng, lat }
+ * @returns {object} { ok, store, cost }
+ */
+function openStore(s, opts) {
+  const o = opts || {};
   const c = shopCost(s);
   if (c == null) return { ok: false, msg: '已达分店上限' };
   if (s.cash < c) return { ok: false, msg: '现金不足' };
-  s.cash -= c; s.shopSpend += c; s.shops++;
-  /* V11 新开分店 → 立刻刷新该分店的店长候选。
-     ★ 必须在这里刷而不是等每日随机：玩家的因果链是
-       「开分店 → 招店长」，如果开完店要等几天才看到候选人，
-       因果就断了，玩家会以为"开了分店没奖励"。
-       而且候选位是**按分店槽位**存的（mgrCand[branch]），
-       新槽位天然是空的，不刷就是个永久空位。 */
-  refreshManagerCandidates(s, s.shops, true);
-  pushLog(s, `🏪 第 ${s.shops} 家分店开业！可招募一名店长`);
-  return { ok: true, cost: c, branch: s.shops };
+  const cityId = o.cityId || (s.venue && s.venue.cityId);
+  if (!cityId || !cityById(cityId)) return { ok: false, msg: '请选择一个有效的城市' };
+  const vt = o.venueType || VENUE_DEFAULT;
+  if (!VENUE_TYPES.some(t => t.id === vt)) return { ok: false, msg: '场地类型无效' };
+
+  const branch = pos(s.shops, 1) + 1;
+  const store = makeStore(s, {
+    branch,
+    id: num(s.nextStoreId, 1),
+    cityId, venueType: vt,
+    name: str(o.name, 16) || defaultStoreName(s, cityId),
+    lng: o.lng, lat: o.lat,
+  });
+  /* 划启动金：店长 AI 需要本钱才能买料付工资，
+     否则托管的店永远是空转（详见 data.js MANAGER_START_CASH 的说明）。*/
+  const start = Math.min(MANAGER_START_CASH, s.cash - c);
+  store.cash = Math.max(0, start);
+
+  s.stores.push(store);
+  s.nextStoreId = num(s.nextStoreId, 1) + 1;
+  syncShopCount(s);
+  s.cash -= c; s.shopSpend += c;
+  /* ★ 新店自带一笔启动金 —— 这笔钱从总部划出。
+     若总部的钱不够全额划拨，start 会小于标准值（min 保护），
+     店依然开得起来，但店长经营能力会弱一些（玩家能直观感到"钱不够"）。*/
+  if (start > 0) s.cash -= start;
+
+  /* V11：新店 → 立刻刷新该店的店长候选（因果链：开店 → 招店长） */
+  refreshManagerCandidates(s, branch, true);
+  const city = cityById(cityId);
+  pushLog(s, `🏪 ${store.name} 在${city ? city.name : '新地'}开业！可招募一名店长`);
+  return { ok: true, store, cost: c, startCash: start };
+}
+
+/** 默认店名：城市名 + 后缀（避开重名） */
+function defaultStoreName(s, cityId) {
+  const city = cityById(cityId);
+  const base = city ? city.name.replace(/[市省]/g, '') : '新';
+  const used = allStores(s).map(st => st.name);
+  for (const suf of STORE_SUFFIX) {
+    const nm = base + suf;
+    if (used.indexOf(nm) < 0) return nm;
+  }
+  return base + (used.length + 1) + '号店';
+}
+
+/** 改名 */
+function renameStore(s, branch, name) {
+  const st = storeByBranch(s, branch);
+  if (!st) return { ok: false, msg: '店铺不存在' };
+  const nm = str(name, 16).trim();
+  if (!nm) return { ok: false, msg: '店名不能为空' };
+  st.name = nm;
+  pushLog(s, `✏️ 店铺更名为「${nm}」`);
+  return { ok: true, store: st };
+}
+
+/** 设为主店（原子操作：原主店自动取消，不会出现两家主店） */
+function setMainStore(s, branch) {
+  const st = storeByBranch(s, branch);
+  if (!st) return { ok: false, msg: '店铺不存在' };
+  if (st.isMain) return { ok: false, msg: '已经是主店' };
+  for (const other of allStores(s)) other.isMain = false;
+  st.isMain = true;
+  pushLog(s, `⭐「${st.name}」升为主店`);
+  return { ok: true, store: st };
+}
+
+/** 玩家接管 / 交给店长 */
+function setStoreAuto(s, branch, auto) {
+  const st = storeByBranch(s, branch);
+  if (!st) return { ok: false, msg: '店铺不存在' };
+  if (auto) {
+    if (!st.managerId) return { ok: false, msg: '该店还没有店长，无法托管' };
+    if (st.managerId && !managerById(s, st.managerId)) {
+      st.managerId = null;
+      return { ok: false, msg: '该店的店长已不在职' };
+    }
+  }
+  st.auto = !!auto;
+  const m = storeManager(s, st);
+  pushLog(s, auto
+    ? `🤖「${st.name}」交由店长${m ? m.name : ''}自动打理`
+    : `✋ 玩家接管「${st.name}」`);
+  return { ok: true, store: st, auto: st.auto };
+}
+
+/** 注资（总部 → 店）/ 提现（店 → 总部） */
+function fundStore(s, branch, amount) {
+  const st = storeByBranch(s, branch);
+  if (!st) return { ok: false, msg: '店铺不存在' };
+  const amt = Math.round(num(amount, 0));
+  if (!(amt > 0)) return { ok: false, msg: '金额无效' };
+  if (amt > s.cash) return { ok: false, msg: '总部现金不足' };
+  s.cash -= amt; st.cash += amt;
+  pushLog(s, `💰 向「${st.name}」注资 ${money(amt)}`);
+  return { ok: true, store: st, amount: amt };
+}
+function withdrawStore(s, branch, amount) {
+  const st = storeByBranch(s, branch);
+  if (!st) return { ok: false, msg: '店铺不存在' };
+  const amt = Math.round(num(amount, 0));
+  if (!(amt > 0)) return { ok: false, msg: '金额无效' };
+  if (amt > st.cash) return { ok: false, msg: '该店现金不足' };
+  st.cash -= amt; s.cash += amt;
+  pushLog(s, `💵 从「${st.name}」提现 ${money(amt)}`);
+  return { ok: true, store: st, amount: amt };
+}
+
+
+/**
+ * 打开分店（兼容入口）。
+ * ★ V12 起真正的开店是 openStore()（带城市/场地/名称），
+ *   但既有代码与测试大量调用 openShopBranch(s)（无参、默认城市），
+ *   所以保留这个薄封装，让 19 处既有调用点一行都不用改。
+ */
+function openShopBranch(s, opts) {
+  return openStore(s, opts || {});
 }
 
 /* ============================================================
@@ -947,13 +1190,23 @@ function openShopBranch(s) {
 function managerCount(s) {
   return Array.isArray(s.managers) ? s.managers.length : 0;
 }
-/** 还能招几名店长 = 分店数 − 已招数（总店不占名额） */
+/**
+ * 还能招几名店长 = 店数 − 已招数。
+ *
+ * ★ V12 语义变更：原来是 `店数 − 1 − 已招数`（总店不设店长）。
+ *   新需求明确「每家分店最多任命 1 名店长（**含主店**）」，
+ *   所以总店也占一个名额 —— 店长也可以替玩家打理主店。
+ *
+ * ★ 连带影响：V11 的 probe N1 组断言的是旧语义（0/1/2…），
+ *   必须同步更新，否则会出现「测试全绿但规则已错」的假象。
+ *   这是数据模型变更最典型的配套遗漏。
+ */
 function managerSlotsLeft(s) {
-  return Math.max(0, pos(s.shops, 1) - 1 - managerCount(s));
+  return Math.max(0, pos(s.shops, 1) - managerCount(s));
 }
-/** 某家分店的店长（branch 1 = 总店恒为 null） */
+/** 某家店的店长（★ V12 起总店也可以有店长了） */
 function managerOfBranch(s, branch) {
-  if (!(branch >= 2)) return null;
+  if (!(branch >= 1)) return null;
   for (const m of (s.managers || [])) if (m.branch === branch) return m;
   return null;
 }
@@ -1019,7 +1272,8 @@ function makeManagerCandidate(s, branch) {
 
 /** 刷新某家分店的店长候选（force = 强制刷新，否则按概率） */
 function refreshManagerCandidates(s, branch, force) {
-  if (!(branch >= 2)) return [];
+  /* ★ V12：branch >= 1（**含总店**）—— 主店现在也可以任命店长了。 */
+  if (!(branch >= 1)) return [];
   /* 已经有店长了就别刷 —— 否则玩家招完会发现"还能再招一个"，
      那是名额计算错了。 */
   if (managerOfBranch(s, branch)) {
@@ -1041,7 +1295,8 @@ function refreshManagerCandidates(s, branch, force) {
      否则玩家开完分店如果没招，之后就永远只有那 2~3 个候选，
      招不中就一直招不中，通道会"卡死"。 */
 function dailyManagerRefresh(s) {
-  for (let b = 2; b <= pos(s.shops, 1); b++) {
+  /* ★ V12：从 branch 1 开始（总店也可以有店长） */
+  for (let b = 1; b <= pos(s.shops, 1); b++) {
     if (managerOfBranch(s, b)) continue;
     refreshManagerCandidates(s, b, false);
   }
@@ -1065,10 +1320,36 @@ function managerRerollCost(s, branch) {
 }
 
 /** 招募店长（idx = 该分店候选列表下标） */
+/**
+ * 招募/任命店长到某家店。
+ *
+ * ★ V12：与 assignManager 合并为一个入口 ——
+ *   之前 V11 有 hireManager（招到分店），V12 又加了 assignManager（任命到店），
+ *   两个函数做同一件事、规则还不一致（一个不允许总店、一个允许）。
+ *   合并后规则只有一处，**不会出现"两个入口规则不同"**这种经典 bug。
+ *   旧调用点（hireManager）保留为薄封装。
+ *
+ * @param {number} branch 目标店（1 = 总店，2+ = 分店）
+ * @param {number} idx    候选下标；传 null 表示「撤换现有店长」
+ */
 function hireManager(s, branch, idx) {
-  if (!(branch >= 2)) return { ok: false, msg: '总店由你亲自经营，不需要店长' };
-  if (managerOfBranch(s, branch)) return { ok: false, msg: '该分店已有店长' };
-  if (managerSlotsLeft(s) <= 0) return { ok: false, msg: '没有空余名额（每新开一家分店才能招一名店长）' };
+  if (!(branch >= 1)) return { ok: false, msg: '店号无效' };
+  if (managerOfBranch(s, branch)) {
+    /* 已有店长：换人需要先撤下 */
+    if (idx == null) {
+      const old = managerById(s, managerOfBranch(s, branch).id);
+      if (old) {
+        s.managers.splice(s.managers.indexOf(old), 1);
+        const st = storeByBranch(s, branch);
+        if (st) { st.managerId = null; st.auto = false; }
+        syncStoreManagers(s);
+        pushLog(s, `🎩 撤下店长 ${old.name}`);
+        return { ok: true, removed: old };
+      }
+    }
+    return { ok: false, msg: '该店已有店长（换人请先撤下）' };
+  }
+  if (managerSlotsLeft(s) <= 0) return { ok: false, msg: '没有空余名额（每家店最多一名店长）' };
   const list = (s.mgrCand && s.mgrCand[branch]) || [];
   const c = list[idx];
   if (!c) return { ok: false, msg: '候选人不存在' };
@@ -1083,9 +1364,13 @@ function hireManager(s, branch, idx) {
   s.managers.push(m);
   list.splice(idx, 1);
   delete s.mgrCand[branch];
-  pushLog(s, `🎩 招募店长 ${m.emoji} ${m.name}（${managerRank(m.lv).name}）入驻第 ${branch} 分店`);
+  const st = storeByBranch(s, branch);
+  if (st) st.managerId = m.id;
+  syncStoreManagers(s);
+  const stName = st ? st.name : `第 ${branch} 店`;
+  pushLog(s, `🎩 招募店长 ${m.emoji} ${m.name}（${managerRank(m.lv).name}）入驻「${stName}」`);
   bumpQuest(s, 'hire', 1);
-  return { ok: true, manager: m, fee };
+  return { ok: true, manager: m, fee, store: st };
 }
 
 /** 卸任店长（结算 3 倍日薪当补偿） */
@@ -1144,6 +1429,177 @@ function moveManager(s, id, toBranch) {
  *   · 全公司员工总上限 CFG.STAFF_MAX 依然是硬顶
  *
  * @returns {{hired: object[], skipped: number}} hired 是今天招进来的人
+ */
+/**
+ * 店长 AI：托管店的每日经营结算（V12）
+ *
+ * ★ 为什么托管店要独立结算，而不是塞进实时营业模拟：
+ *   实时模拟需要玩家逐个点出杯位 —— 托管的店玩家不在场，
+ *   塞进去的结果就是「玩家不操作它就一天做不了单」。
+ *   所以托管店走**日结算模型**：每天算一次客流/营收/成本，出报表。
+ *
+ * ★ 收益必须与「玩家亲自经营同一规模店」大致可比 ——
+ *   否则「托管」就是个亏本买卖，玩家不会用。
+ *   所以客流基准用同一套口径（按该店城市/口碑/等级），
+ *   店长的能力值提供加成。
+ *
+ * ★ 托管店不计入 activeBranchCount ——
+ *   它的营收不来自实时模拟，若还计入客流加成，
+ *   玩家经营的总店会凭空多出客流（凭空得利）。
+ *
+ * @returns {Array} 每家店一份报表
+ */
+function managedStoresDaily(s) {
+  const reports = [];
+  for (const store of managedStores(s)) {
+    const mgr = storeManager(s, store);
+    if (!mgr) { store.auto = false; continue; }
+    const rpt = managedStoreOneDay(s, store, mgr);
+    if (rpt) reports.push(rpt);
+  }
+  return reports;
+}
+
+/** 单家托管店的一天 */
+function managedStoreOneDay(s, store, mgr) {
+  const staff = staffOfBranch(s, store.branch);
+  /* ★ 空店不产出：没有人就做不了单，但店租照付（固定开支）。
+     记成「空转」而不是跳过 —— 玩家需要看到"这家店白开着"。 */
+  if (staff.length === 0) {
+    const cost = storeDailyCost(store);
+    store.cash = Math.max(0, store.cash - cost);
+    store.expense += cost;
+    store.days++;
+    const rpt = {
+      day: s.day, store: store.branch, name: store.name, empty: true,
+      traffic: 0, cups: 0, revenue: 0, cogs: 0, wages: 0, rent: cost, net: -cost,
+      msg: '空店：没有员工，扣除固定开支',
+    };
+    store.lastReport = rpt;
+    store.history.unshift(rpt);
+    if (store.history.length > 7) store.history.length = 7;
+    return rpt;
+  }
+
+  /* --- 客流：按该店自身条件算，不用总部的 --- */
+  const d = diffOf(s);
+  const lvBonus = 1 + (store.level - 1) * 0.12;      /* 店铺等级 */
+  const venueMul = venueTrafficMul(store.venueType);
+  let traffic = (4 + s.rep * 0.36) * lvBonus * venueMul * d.traffic;
+  traffic = traffic * (1 + 0.20 * (store.level - 1));
+  traffic = Math.max(1, Math.round(traffic));
+
+  /* --- 店长能力加成（与玩家经营同一套 managerBonus）--- */
+  const mb = managerBonus(s, store.branch);
+  traffic = Math.round(traffic * mb.ops);
+
+  /* --- 出杯：员工效率 × 客流 --- */
+  const avgSkill = staff.reduce((a, st) => a + staffMult(s, st), 0) / staff.length;
+  const cups = Math.max(0, Math.round(traffic * 0.72 * avgSkill * mb.speed));
+
+  /* --- 营收：客单价取该店能卖的平均价 --- */
+  const menu = s.menu || [];
+  const avgPrice = menu.length
+    ? menu.reduce((a, rid) => a + (recipeById(rid) ? recipeById(rid).price : 20), 0) / menu.length
+    : 20;
+  const revenue = Math.round(cups * avgPrice * 0.92);   /* 0.92：折价与未满座的损耗 */
+
+  /* --- 成本：原料 + 工资 + 固定开支 --- */
+  const cogs = Math.round(revenue * 0.34);              /* 原料率约 34% */
+  const wages = Math.round(staff.reduce((a, st) => a + num(st.wage, 0), 0)
+    + num(mgr.wage, 0));
+  const rent = storeDailyCost(store);
+
+  /* --- 采购：店长自己补料（只买本城能买到的） --- */
+  const bought = managedStoreBuy(s, store, cups);
+
+  const net = revenue - cogs - wages - rent;
+  store.cash += net;
+  if (store.cash < 0) store.cash = 0;      /* 亏空由总部兜底，不让店现金成负数 */
+  store.income += revenue;
+  store.expense += cogs + wages + rent;
+  store.cups += cups;
+  store.days++;
+
+  /* --- 升级：累计营收达阈值 --- */
+  const nextLv = STORE_LEVELS.find(l => l.lv === store.level + 1);
+  let leveled = false;
+  if (nextLv && store.income >= nextLv.need) {
+    store.level = nextLv.lv;
+    leveled = true;
+    pushLog(s, `🏆「${store.name}」升级到 Lv.${store.level}！`);
+  }
+
+  const rpt = {
+    day: s.day, store: store.branch, name: store.name, empty: false,
+    traffic, cups, revenue, cogs, wages, rent, net,
+    bought: bought.qty, boughtCost: bought.cost,
+    manager: mgr.name, leveled, level: store.level,
+    msg: leveled ? `升级到 Lv.${store.level}！` : '',
+  };
+  store.lastReport = rpt;
+  store.history.unshift(rpt);
+  if (store.history.length > 7) store.history.length = 7;
+  return rpt;
+}
+
+/** 店长采购：按当天预估销量补料，只买本城能买到的。 */
+function managedStoreBuy(s, store, cups) {
+  let qty = 0, cost = 0;
+  /* 买什么：优先补该店菜单用得上的原料 */
+  const need = {};
+  for (const rid of (s.menu || [])) {
+    const r = recipeById(rid);
+    if (!r) continue;
+    for (const k of Object.keys(r.req || {})) {
+      need[k] = (need[k] || 0) + (r.req[k] || 0);
+    }
+  }
+  const perCup = cups > 0 ? cups * 0.5 : 0;   /* 只备半天的量，剩下的明天再买 */
+  for (const k of Object.keys(need)) {
+    if (!ingAvailableAt(k, store.cityId)) continue;   /* 本城买不到，跳过 */
+    const g = ingById(k);
+    if (!g) continue;
+    const have = num(store.inv[k], 0);
+    const want = Math.ceil(need[k] * perCup);
+    const lack = Math.max(0, want - have);
+    if (lack <= 0) continue;
+    const price = num(s.prices[k], g.base);
+    const afford = Math.floor(Math.max(0, store.cash - cost) / Math.max(0.1, price));
+    const buy = Math.min(lack, afford, 60);
+    if (buy <= 0) continue;
+    store.inv[k] = have + buy;
+    cost += Math.round(buy * price);
+    qty += buy;
+  }
+  if (cost > 0) store.cash -= cost;
+  return { qty, cost };
+}
+
+/** 场地类型对客流的影响（不同场地客流特征不同） */
+function venueTrafficMul(venueType) {
+  switch (venueType) {
+    case 'mall': return 1.12;
+    case 'pedestrian': return 1.18;
+    case 'scenic': return 1.25;
+    case 'office': return 1.05;
+    case 'community': return 1.00;
+    case 'campus': return 1.15;
+    case 'station': return 1.30;
+    case 'hospital': return 0.95;
+    case 'factory': return 0.90;
+    case 'rural': return 0.80;
+    default: return 1;
+  }
+}
+
+/**
+ * 店长自动补员。
+ *
+ * ★ V12 变更：补员范围从「branch ≥ 2」扩到**所有有店长的店**（含总店），
+ *   因为主店现在也可以有店长了。
+ *   其余规则与 V11 相同（每天至多 1 人、要店现金够付 3 天工资、
+ *   全局 STAFF_MAX 硬顶、玩家与店长共用编制名额）。
  */
 function managerDaily(s) {
   const hired = [];
@@ -1820,6 +2276,9 @@ function nextDay(s) {
      池子必须先刷新过，否则店长会永远招不到人（候选人被招空后不补）。 */
   dailyManagerRefresh(s);
   managerDaily(s);
+  /* V12：托管店的每日结算。放在 managerDaily 之后 ——
+     店长先补员，托管店才有员工可经营（否则新托管的店第一天必然是空店）。 */
+  managedStoresDaily(s);
   rollQuests(s);
   rollContract(s);   /* 合同每天换一个：备货阶段就要知道"今天要凑什么" */
   if (RNG.next() < 0.42 && !s.pendingEvent) {
@@ -3370,6 +3829,123 @@ function sanitizeState(s) {
   }
   s.up = up;
 
+  /* ---------- V12 店铺体系：迁移 + 清洗 ----------
+     ★ 这是本次数据模型重构最关键的一段。
+       s.stores 是权威数据，老存档只有 s.shops（数字），
+       必须在清洗时把数字还原成店铺数组 ——
+       否则老存档读档后「店数对但店的信息全空」，
+       玩家会看到一家没有名字、没有位置、员工全在总店的分店。
+   */
+  {
+    const shopN = clamp(int(s.shops, 1), 1, 99);
+    const rawStores = arr(s.stores);
+    const stores = [];
+    const seenBranch = new Set();
+    const seenId = new Set();
+    for (const st0 of rawStores) {
+      if (!st0 || typeof st0 !== 'object') continue;
+      /* 店号：1..shopN，且不重复（重复会让 staffOfBranch 认错店） */
+      let br = clamp(int(st0.branch, 1), 1, shopN);
+      if (seenBranch.has(br)) continue;
+      seenBranch.add(br);
+      const id = int(st0.id, 0);
+      if (id > 0 && seenId.has(id)) continue;
+      if (id > 0) seenId.add(id);
+      const cityId = st0.cityId && cityById(st0.cityId) ? st0.cityId
+        : (s.venue && s.venue.cityId) || '110100';
+      const geo = cityGeoOf(cityId) || GEO.FALLBACK;
+      stores.push({
+        id: id > 0 ? id : stores.length + 1,
+        branch: br,
+        name: str(st0.name, 16) || defaultStoreName(s, cityId),
+        emoji: str(st0.emoji, 8) || '🏪',
+        cityId,
+        venueType: VENUE_TYPES.some(t => t.id === st0.venueType) ? st0.venueType : VENUE_DEFAULT,
+        lng: clamp(num(st0.lng, geo.lng), GEO.MIN_LNG, GEO.MAX_LNG),
+        lat: clamp(num(st0.lat, geo.lat), GEO.MIN_LAT, GEO.MAX_LAT),
+        coordSys: GEO.COORD_SYS,
+        isMain: !!st0.isMain,
+        level: clamp(int(st0.level, 1), 1, STORE_LEVELS.length),
+        exp: posCap(st0.exp, 0),
+        auto: !!st0.auto,
+        managerId: st0.managerId == null ? null : int(st0.managerId, 0),
+        cash: posCap(st0.cash, 0),
+        inv: (() => {
+          const inv0 = obj(st0.inv), out = {};
+          for (const g of ING) {
+            const v = posCap(inv0[g.id], 0);
+            if (v > 0) out[g.id] = v;
+          }
+          return out;
+        })(),
+        income: posCap(st0.income, 0),
+        expense: posCap(st0.expense, 0),
+        cups: posCap(st0.cups, 0),
+        days: posCap(st0.days, 0),
+        lastReport: st0.lastReport && typeof st0.lastReport === 'object' ? st0.lastReport : null,
+        history: arr(st0.history).slice(0, 7).filter(r => r && typeof r === 'object'),
+        upgrades: obj(st0.upgrades),
+      });
+    }
+    /* 老存档迁移：s.stores 为空但 s.shops > 1 → 生成对应数量的店。
+       ★ 总店（branch 1）永远存在，且默认是主店。*/
+    if (!stores.length) {
+      for (let b = 1; b <= shopN; b++) {
+        const cityId = (s.venue && s.venue.cityId) || '110100';
+        stores.push(makeStore(s, {
+          branch: b, id: b, cityId,
+          isMain: b === 1,
+          name: b === 1 ? '总店' : defaultStoreName(s, cityId),
+          emoji: b === 1 ? '🏠' : '🏪',
+        }));
+      }
+    } else {
+      /* 有 stores 但缺总店 → 补一个（总店不可缺失）*/
+      if (!stores.some(st0 => st0.branch === 1)) {
+        const cityId = (s.venue && s.venue.cityId) || '110100';
+        stores.unshift(makeStore(s, {
+          branch: 1, id: stores.length + 1, cityId, isMain: true,
+          name: '总店', emoji: '🏠',
+        }));
+      }
+      /* ★ stores 数量少于 s.shops → 补齐缺失的店号。
+         场景：脏存档里 s.shops=3 但 stores 只有 1 家（总店）。
+         若不补，店号 2/3 的店长会在后续清洗里被当成"店号越界"丢弃 ——
+         表现是「玩家的店长凭空消失」。
+         反向（stores 比 s.shops 多）则由 syncShopCount 收口。*/
+      const have = new Set(stores.map(st0 => st0.branch));
+      for (let b = 1; b <= shopN; b++) {
+        if (have.has(b)) continue;
+        const cityId = (s.venue && s.venue.cityId) || '110100';
+        stores.push(makeStore(s, {
+          branch: b, id: stores.length + 1, cityId,
+          isMain: false, name: defaultStoreName(s, cityId),
+        }));
+      }
+      stores.sort((a, b) => a.branch - b.branch);
+      /* 主店唯一：多个 isMain 时只留第一个 */
+      let mainSeen = false;
+      for (const st0 of stores) {
+        if (st0.isMain) {
+          if (mainSeen) st0.isMain = false;
+          else mainSeen = true;
+        }
+      }
+      /* 没有任何主店 → 把 branch 最小的那家设为主店 */
+      if (!stores.some(st0 => st0.isMain)) {
+        stores.reduce((a, b) => (a.branch <= b.branch ? a : b)).isMain = true;
+      }
+    }
+    s.stores = stores;
+    /* ★ 店数被 stores 覆盖 —— stores 是权威，s.shops 只是派生。
+       这一行是「两个数据源冲突时谁说了算」的唯一答案。*/
+    syncShopCount(s);
+    s.nextStoreId = Math.max(
+      int(s.nextStoreId, 1),
+      stores.reduce((a, st0) => Math.max(a, num(st0.id, 0) + 1), 1),
+    );
+  }
+
   /* 员工 / 候选人 */
   const traitIds = TRAITS.map(t => t.id);
   /* 用 CFG.STAFF_MAX 而不是写死 12：以前这里截到 12、而运行时能雇到更多，
@@ -3404,18 +3980,19 @@ function sanitizeState(s) {
   const shopN = Math.max(1, pos(s.shops, 1));
   const mgrTraitIds = MANAGER_TRAITS.map(t => t.id);
   const mgrLvIds = MANAGER_RANKS.map(r => r.lv);
-  /* 分店号必须在 2..shopN（1 是总店，不设店长）。
+  /* ★ V12：店号必须在 1..shopN（**含总店** —— 需求明确「每家分店最多任命
+     1 名店长（含主店）」）。
      两条硬约束：
-       ① branch >= 2：脏存档把店长挂在总店头上，会凭空多出一个可用名额
-       ② 同一家分店不能有两个店长 —— 否则 hireManager 的「该分店已有店长」
+       ① branch >= 1：脏存档把店长挂在 0 或负数号上，会凭空多出一个可用名额
+       ② 同一家店不能有两个店长 —— 否则 hireManager 的「该店已有店长」
           守卫与 managerOfBranch 的线性查找会不一致，
           表现为"招了第二个店长，但加成一店算一次、工资付两次" */
   const seenBranch = new Set();
   const mgrs = [];
   for (const m of arr(s.managers)) {
-    let br = int(m && m.branch, 2);
-    if (!(br >= 2) || br > shopN) br = -1;      /* 无效分店号→ 丢弃该店长 */
-    if (br < 0 || seenBranch.has(br)) continue;   /* 重复占用同一分店 → 丢弃 */
+    let br = int(m && m.branch, 1);
+    if (!(br >= 1) || br > shopN) br = -1;      /* 无效店号 → 丢弃该店长 */
+    if (br < 0 || seenBranch.has(br)) continue;   /* 重复占用同一家店 → 丢弃 */
     seenBranch.add(br);
     mgrs.push({
       id: int(m && m.id, mgrs.length + 1),
@@ -3430,10 +4007,10 @@ function sanitizeState(s) {
     });
   }
   s.managers = mgrs;
-  /* ★ 名额硬顶：店长数**不可能**超过分店数。
+  /* ★ 名额硬顶：店长数**不可能**超过店数（V12 含主店，故为 shopN）。
      不裁剪的话，脏存档塞 20 个店长进来，
      玩家白得 20 份加成而分店只有 3 家（白嫖是最难查的平衡漏洞）。 */
-  if (s.managers.length > shopN - 1) s.managers = s.managers.slice(0, Math.max(0, shopN - 1));
+  if (s.managers.length > shopN) s.managers = s.managers.slice(0, Math.max(0, shopN));
   /* id 计数器必须大于所有现存店长的 id，否则新招的店长会和旧的撞 id */
   let maxMgrId = 0;
   for (const m of s.managers) if (m.id > maxMgrId) maxMgrId = m.id;
@@ -3443,7 +4020,7 @@ function sanitizeState(s) {
   const cand0 = obj(s.mgrCand), mgrCand = {};
   for (const k in cand0) {
     const br = int(k, 0);
-    if (!(br >= 2 && br <= shopN)) continue;
+    if (!(br >= 1 && br <= shopN)) continue;
     if (seenBranch.has(br)) continue;
     const list = arr(cand0[k]).slice(0, 4).map(c => ({
       name: str(c && c.name, 12) || '候选人',

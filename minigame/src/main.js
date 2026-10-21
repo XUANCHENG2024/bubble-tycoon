@@ -611,6 +611,82 @@ function doAct(act, id, extra) {
     return;
   }
   /* ---------- V11 店长 ---------- */
+  /* ---------- V12 店铺系统 ---------- */
+  if (act === 'sopen') {
+    var sc = shopCost(s);
+    if (sc == null) { toast('已达分店上限'); return; }
+    if (s.cash < sc) { toast('现金不足（需 ' + money(sc) + '）'); return; }
+    /* Canvas 端没有 <select>，用「循环切换」代替下拉：
+       点一次切到下一个城市 / 下一个场地。这是本项目既有的做法
+       （经营信息里的省市切换就是这样），不引入新的交互范式。 */
+    VIEW.sOpen = { cityId: (s.venue && s.venue.cityId) || CITY_DEFAULT, venue: VENUE_DEFAULT, name: '' };
+    toast('选择城市与场地后点「确认开店」');
+    return;
+  }
+  if (act === 'sopenok') {
+    var so = VIEW.sOpen || { cityId: (s.venue && s.venue.cityId) || CITY_DEFAULT, venue: VENUE_DEFAULT };
+    var sr = openStore(s, { cityId: so.cityId, venueType: so.venue, name: so.name || '' });
+    if (sr.ok) {
+      beep('up', 780, 0.14);
+      toast('🗺️「' + sr.store.name + '」开业！可任命一名店长');
+      VIEW.sOpen = null;
+      VIEW.tab = 'rival';
+    } else toast(sr.msg);
+    return;
+  }
+  if (act === 'scity') {
+    /* 循环切换城市（Canvas 没有下拉框） */
+    var so2 = VIEW.sOpen || (VIEW.sOpen = { cityId: (s.venue && s.venue.cityId) || CITY_DEFAULT, venue: VENUE_DEFAULT });
+    var allCities = [];
+    for (var ci = 0; ci < CITIES.length; ci++) allCities.push(CITIES[ci]);
+    var idx = 0;
+    for (var cj = 0; cj < allCities.length; cj++) if (allCities[cj].id === so2.cityId) { idx = cj; break; }
+    so2.cityId = allCities[(idx + 1) % allCities.length].id;
+    toast('📍 ' + (cityById(so2.cityId) || {}).name);
+    return;
+  }
+  if (act === 'svenue') {
+    var so3 = VIEW.sOpen || (VIEW.sOpen = { cityId: (s.venue && s.venue.cityId) || CITY_DEFAULT, venue: VENUE_DEFAULT });
+    var vi = 0;
+    for (var vk = 0; vk < VENUE_TYPES.length; vk++) if (VENUE_TYPES[vk].id === so3.venue) { vi = vk; break; }
+    so3.venue = VENUE_TYPES[(vi + 1) % VENUE_TYPES.length].id;
+    var vt2 = VENUE_TYPES[(vi + 1) % VENUE_TYPES.length];
+    toast('📍 ' + vt2.emoji + ' ' + vt2.name);
+    return;
+  }
+  if (act === 'stoggle') {
+    var tg = setStoreAuto(s, +id, +extra === 1);
+    if (tg.ok) { beep('tap'); toast(tg.auto ? '🤖 该店已交由店长自动打理' : '✋ 你已接管该店'); }
+    else toast(tg.msg);
+    return;
+  }
+  if (act === 'smgrh') {
+    var b12 = +id;
+    var lst = (s.mgrCand && s.mgrCand[b12]) || [];
+    if (!lst.length) { toast('暂无候选人（次日刷新）'); return; }
+    /* Canvas 无弹窗列表，用「循环挑选」：点一次任命当前第一位，
+       若想换人先撤下。 */
+    var hr2 = hireManager(s, b12, 0);
+    if (hr2.ok) { beep('up', 760, 0.12); toast('🎩 ' + hr2.manager.name + ' 入驻'); }
+    else toast(hr2.msg);
+    return;
+  }
+  if (act === 'smgrfire') {
+    var st12 = storeByBranch(s, +id);
+    var m12 = st12 ? managerById(s, st12.managerId) : null;
+    if (!m12) { toast('该店没有店长'); return; }
+    var fr2 = fireManager(s, m12.id);
+    if (fr2.ok) { beep('tap'); toast('🎩 店长已撤下，员工留在原编制'); }
+    else toast(fr2.msg);
+    return;
+  }
+  if (act === 'smain') {
+    var mr2 = setMainStore(s, +id);
+    if (mr2.ok) { beep('up', 760, 0.12); toast('⭐「' + mr2.store.name + '」升为主店'); }
+    else toast(mr2.msg);
+    return;
+  }
+
   if (act === 'mhire') {
     var mh = hireManager(s, +id || 2, +extra || 0);
     if (mh.ok) {

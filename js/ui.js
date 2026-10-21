@@ -367,6 +367,171 @@ UI.renderPanel = function (t) {
 UI.renderAll = function () { UI.renderHUD(); UI.renderPanel(UI.tab); };
 
 
+
+/** 店铺地图面板（V12）
+ *
+ *  ★ 为什么叫「地图」但不画地图：
+ *    现有「经营信息」面板已定调「不内嵌地图 SDK」（静态托管的离线包
+ *    拉不到瓦片，空白区比没有地图更糟）。这里沿用同一原则 ——
+ *    用「城市选择 + 场地类型」来定位，位置取自城市表自带的 GCJ-02 坐标。
+ *    340+ 城市可选，等于"任意位置"。
+ *
+ *  ★ 面板承担四件事（需求 4）：
+ *    ① 开店流程：选城市 / 场地 / 店名 → 确认
+ *    ② 店铺列表与切换入口：每店一卡，显示状态
+ *    ③ 店长任命 / 更换 / 撤下
+ *    ④ 店铺信息与收益：现金、累计营收、支出、出杯、等级、最近报表
+ */
+function storesPanelHtml(s) {
+  const stores = allStores(s);
+  const main = mainStore(s);
+  let h = `<div class="card"><div class="card-h">🗺️ 店铺地图
+    <span class="ch-sub">${stores.length} 家店 · ${managerCount(s)} 名店长</span></div>`;
+
+  h += `<div style="font-size:11.5px;color:var(--txt3);line-height:1.6;margin-bottom:10px">
+    开设分店需支付 <b>${money(shopCost(s) || 0)}</b>（可开 ${Math.max(0, (SHOP_COSTS.length || 0) + 1 - stores.length)} 家）。
+    店铺拥有<b>独立的资金、库存与经营数据</b>；指派店长后该店可交给店长自动打理，
+    未指派店长的店由你亲自经营。</div>`;
+
+  /* ---------- 店铺列表 ---------- */
+  for (const st of stores) {
+    const mg = storeManager(s, st);
+    const isMain = st.isMain;
+    const rpt = st.lastReport;
+    const staffN = staffOfBranch(s, st.branch).length;
+    h += `<div class="store-card${st.auto ? ' auto' : ''}${isMain ? ' main' : ''}">
+      <div class="store-head">
+        <span class="store-e">${st.emoji}</span>
+        <div class="store-title">
+          <div class="store-name">${esc(st.name)}
+            ${isMain ? '<span class="store-badge main">⭐ 主店</span>' : ''}
+            <span class="store-badge">Lv.${st.level}</span>
+          </div>
+          <div class="store-sub">📍${esc((cityById(st.cityId) || {}).name || st.cityId)}
+            · ${esc((VENUE_TYPES.find(t => t.id === st.venueType) || {}).name || st.venueType)}
+            · 编制 ${staffN}/${branchStaffCap(s, st.branch)}</div>
+        </div>
+        <div class="store-mode">${st.auto
+      ? '<span class="store-badge auto">🤖 托管中</span>'
+      : '<span class="store-badge play">✋ 亲自经营</span>'}</div>
+      </div>
+
+      <div class="store-grid">
+        <div class="store-kv"><span>店铺现金</span><b>${money(st.cash)}</b></div>
+        <div class="store-kv"><span>累计营收</span><b class="up">${money(st.income)}</b></div>
+        <div class="store-kv"><span>累计支出</span><b class="down">${money(st.expense)}</b></div>
+        <div class="store-kv"><span>累计出杯</span><b>${st.cups}</b></div>
+      </div>
+
+      <div class="store-mgr">
+        ${mg
+      ? `店长：<b>${mg.emoji} ${esc(mg.name)}</b>
+             <span class="store-mgr-lv">Lv.${mg.lv} ${esc(managerRank(mg.lv).name)}</span>
+             <span class="store-mgr-tr">${managerTrait(mg).emoji} ${esc(managerTrait(mg).name)}</span>
+             <span class="store-mgr-w">日薪 ${money(mg.wage)}</span>`
+      : '<span class="store-none">未指派店长（由你亲自经营）</span>'}
+      </div>
+
+      ${rpt ? `<div class="store-rpt">${st.auto
+        ? `昨日：${rpt.empty
+          ? '空店（无员工），仅扣固定开支'
+          : `客流 ${rpt.traffic} · 出杯 ${rpt.cups} · 营收 ${money(rpt.revenue)} · 净利 <b class="${rpt.net >= 0 ? 'up' : 'down'}">${money(rpt.net)}</b>`}`
+        : `本店累计净利 <b class="${st.income - st.expense >= 0 ? 'up' : 'down'}">${money(st.income - st.expense)}</b>`}</div>` : ''}
+
+      <div class="store-acts">
+        ${mg
+        ? `<button class="btn btn-xs" data-act="stoggle" data-b="${st.branch}" data-auto="${st.auto ? 0 : 1}">
+             ${st.auto ? '✋ 我来接管' : '🤖 交给店长'}</button>
+           <button class="btn btn-xs" data-act="smgrfire" data-b="${st.branch}">撤下店长</button>`
+        : `<button class="btn btn-xs btn-primary" data-act="smgrh" data-b="${st.branch}">🎩 任命店长</button>`}
+        ${!isMain ? `<button class="btn btn-xs" data-act="smain" data-b="${st.branch}">设为主店</button>` : ''}
+        <button class="btn btn-xs" data-act="sfund" data-b="${st.branch}">💰 注资</button>
+        <button class="btn btn-xs" data-act="sdraw" data-b="${st.branch}">💵 提现</button>
+        <button class="btn btn-xs" data-act="srename" data-b="${st.branch}">✏️ 改名</button>
+      </div>
+    </div>`;
+  }
+
+  /* ---------- 开店入口 ---------- */
+  const cost = shopCost(s);
+  h += `<div style="margin-top:10px">
+    <button class="btn btn-cyan" style="width:100%" data-act="sopen" ${cost == null ? 'disabled' : ''}>
+      ${cost == null ? '已达分店上限' : '🗺️ 开设新店 · ' + money(cost)}</button>
+  </div></div>`;
+  return h;
+}
+
+/** 店长候选列表（任命用） */
+function storeCandidatesHtml(s, branch) {
+  const cands = (s.mgrCand && s.mgrCand[branch]) || [];
+  if (!cands.length) {
+    return `<div style="font-size:11.5px;color:var(--txt3);padding:8px 0">
+      暂无候选人（次日刷新，或在经营页用「刷新」付费重抽）</div>`;
+  }
+  const fee = managerCost(s);
+  let h = `<div style="font-size:11.5px;color:var(--txt3);margin-bottom:8px">
+    任命费用 ${money(fee)} · 每家店至多一名店长</div>`;
+  for (let i = 0; i < cands.length; i++) {
+    const c = cands[i];
+    const tr = managerTrait(c);
+    h += `<div class="mgr-cand">
+      <div class="mgr-row">
+        <span class="mgr-e">${c.emoji}</span>
+        <div class="mgr-info">
+          <div class="mgr-name">${esc(c.name)}<span class="mgr-lv">Lv.${c.lv} ${esc(managerRank(c.lv).name)}</span></div>
+          <div class="mgr-trait">${tr.emoji} ${esc(tr.name)} · ${esc(tr.desc)}</div>
+        </div>
+        <div class="mgr-cost">
+          <div>日薪 ${money(c.wage)}</div>
+          <div class="mgr-skill">能力 ${Number(c.skill).toFixed(2)}</div>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-primary" style="width:100%;margin-top:6px"
+        data-act="smgrpick" data-b="${branch}" data-i="${i}"
+        ${s.cash >= fee ? '' : 'disabled'}>任命 · ${money(fee)}</button>
+    </div>`;
+  }
+  return h;
+}
+
+/** 开店流程弹窗内容 */
+function openStoreModalHtml(s) {
+  const v = s.venue || {};
+  const provId = v.provId || '11';
+  const cityId = v.cityId || '110100';
+  const cities = citiesOfProvince(provId);
+  const provOpts = PROVINCES.map(p =>
+    `<option value="${p.id}" ${p.id === provId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const cityOpts = cities.map(c =>
+    `<option value="${c.id}" ${c.id === cityId ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+  const venueBtns = VENUE_TYPES.map(t =>
+    `<button class="vtype ${t.id === VENUE_DEFAULT ? 'on' : ''}" data-act="svenue" data-id="${t.id}"
+      title="${esc(t.desc)}"><span class="vt-e">${t.emoji}</span><span class="vt-n">${esc(t.name)}</span></button>`).join('');
+  const cost = shopCost(s);
+  return `<div class="m-title">🗺️ 开设新店</div>
+    <div class="m-sub">开店费 ${money(cost || 0)} · 开店后立刻可以任命店长</div>
+    <div style="margin:12px 0">
+      <div class="vlabel">所在城市<span class="vhint">位置自动取该城市坐标（GCJ-02）</span></div>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <select id="sProv" class="vsel" data-act="sprov" style="flex:1">
+          ${provOpts}
+        </select>
+        <select id="sCity" class="vsel" data-act="scity" style="flex:1">
+          ${cityOpts}
+        </select>
+      </div>
+      <div class="vlabel">场地类型</div>
+      <div class="vgrid">${venueBtns}</div>
+      <div class="vlabel">店名<span class="vhint">留空则自动命名</span></div>
+      <input id="sName" class="vinp" maxlength="16" placeholder="例如：成都旗舰店" />
+    </div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn btn-ghost" style="flex:1" data-act="modal-close">取消</button>
+      <button class="btn btn-primary" style="flex:2" data-act="sopenok"
+        ${cost == null ? 'disabled' : ''}>确认开店 · ${money(cost || 0)}</button>
+    </div>`;
+}
+
 /** 店长与分店编制面板（V11）
  *
  *  ★ 面板放在「原料市场」之后 —— 它是"人事管理"，比"进物料"更靠后，
@@ -1146,7 +1311,12 @@ UI.renderRival = function () {
   const s = window.S; if (!s) return;
   const r = s.rival;
   let h = '';
-  if (!r) { $('panel-rival').innerHTML = '<div class="card">暂无竞争对手</div>'; return; }
+  /* ★ V12：店铺地图放在「🏙️ 商圈」页的最前面 ——
+     店铺与商圈是同一语义（在哪、开什么店），
+     放在这一页比塞进管理页或升级页都自然。
+     放最前面是因为它是这一页的**主功能**，竞争对手只是背景信息。*/
+  h += storesPanelHtml(s);
+  if (!r) { $('panel-rival').innerHTML = h + '<div class="card">暂无竞争对手</div>'; return; }
 
   const share = rivalShare(s);
   const lv = rivalLevel(r);

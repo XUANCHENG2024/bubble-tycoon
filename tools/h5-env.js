@@ -31,6 +31,13 @@ const EXPORT = `({
   managerSlotsLeft, managerCost, hireManager, currentCityId, cuisinesOfCity,
   ingsOfCity, ingAvailableAt, recipeById, claimAchStars, checkAchievements,
   netWorth, dailyRecent, pushHistory, loginState, claimLogin, todayKey,
+  /* V12 店铺系统 */
+  storeDailyCost, syncShopCount, storeByBranch, storeById, mainStore,
+  allStores, managedStores, playerStores, storeManager, syncStoreManagers,
+  makeStore, openStore, defaultStoreName, renameStore, setMainStore,
+  setStoreAuto, fundStore, withdrawStore, managedStoresDaily,
+  managedStoreOneDay, managedStoreBuy, venueTrafficMul,
+  storesPanelHtml, storeCandidatesHtml, openStoreModalHtml,
 })`;
 
 function buildH5Env() {

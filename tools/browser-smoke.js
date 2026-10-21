@@ -222,6 +222,16 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
 
   /* ---------- 13. 重构后新增的边界保护（回归锁定） ---------- */
   window.eval('window.__T = { tick, openShop, setRatio, pushLog, newGame, saveGame, loadGame };');
+  /* V12 店铺系统需要的引擎符号。
+     ★ 注意 `const` 声明的符号在 Node 侧拿不到，必须用 window.eval 导出。*/
+  window.eval(`window.__S12 = {
+    shopCost, openStore, renameStore, setMainStore, setStoreAuto,
+    fundStore, withdrawStore, hireManager, fireManager, managerBonus,
+    allStores, mainStore, storeByBranch, storeManager, managedStores,
+    managedStoresDaily, activeBranchCount, branchStaffCap, staffOfBranch,
+    managerSlotsLeft, managerCount, refreshCandidates, hireStaff,
+    citiesOfProvince, PROVINCES, VENUE_TYPES, VENUE_DEFAULT, CITY_DEFAULT,
+  };`);
   const T = window.__T;
 
   const fresh = T.newGame('normal', 0);
@@ -789,6 +799,139 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
   check(t3Ok.split(' ')[0].split('/')[0] === t3Ok.split(' ')[0].split('/')[1],
     `无工坊时通用研发树可逐级走通（工坊是加成不是门票，实际 ${t3Ok}）`);
 
+  /* ---- V12 店铺系统：面板 / 开店 / 任命 / 托管 ---- */
+  /* ① 面板存在且信息完整 */
+  {
+    const s = window.S;
+    s.cash = 300000;
+    window.UI.setTab('rival'); window.UI.renderAll();
+    const html = doc.getElementById('panel-rival').innerHTML;
+    check(/店铺地图/.test(html), 'V12 商圈页有「店铺地图」区块');
+    check(/总店/.test(html), 'V12 面板显示总店');
+    check(/⭐\s*主店|主店/.test(html), 'V12 总店标为主店');
+    check(/店铺现金/.test(html) && /累计营收/.test(html),
+      'V12 面板显示店铺的独立经营数据（现金/营收/支出/出杯）');
+    check(/亲自经营/.test(html), 'V12 未指派店长的店标注为「亲自经营」');
+    check(/开设新店/.test(html), 'V12 有开店入口');
+  }
+
+  /* ② 开店流程：选城市 → 确认 → 店数 +1 */
+  {
+    const before = window.S.stores.length;
+    const cost = window.__S12.shopCost(window.S);
+    window.S.cash = 300000;
+    const r = window.eval('window.__S12.openStore(window.S, { cityId: "510100", venueType: "pedestrian", name: "成都旗舰店" })');
+    check(r.ok && window.S.stores.length === before + 1,
+      `V12 开店成功（${before} → ${window.S.stores.length} 家）`);
+    const st = window.S.stores[window.S.stores.length - 1];
+    check(st && st.cityId === '510100' && st.venueType === 'pedestrian' && st.name === '成都旗舰店',
+      'V12 新店的���市/场地/店名都按选择写入');
+    check(st && st.branch === before + 1,
+      `V12 新店店号连续（branch ${st && st.branch}）`);
+    check(st && Number.isFinite(st.lng) && Number.isFinite(st.lat)
+      && st.coordSys === 'GCJ02',
+      'V12 新店坐标取自城市表且坐标系为 GCJ-02');
+    check(st && st.cash > 0, `V12 新店获得启动金 ¥${Math.round(st ? st.cash : 0)}`);
+    check(window.S.shops === window.S.stores.length,
+      `V12 派生量 s.shops 与 stores 同步（${window.S.shops}）`);
+  }
+
+  /* ③ 任命店长 → 托管 → 接管 */
+  {
+    const branch = window.S.stores.length;
+    const hr = window.eval(`window.__S12.hireManager(window.S, ${branch}, 0)`);
+    check(hr.ok, `V12 任命店长成功（${hr.ok ? hr.manager.name : hr.msg}）`);
+    check(window.S.stores[branch - 1].managerId === (hr.ok ? hr.manager.id : -1),
+      'V12 店的 managerId 与店长对象对应');
+    const tg = window.eval(`window.__S12.setStoreAuto(window.S, ${branch}, true)`);
+    check(tg.ok && window.S.stores[branch - 1].auto === true,
+      'V12 可把店交给店长托管');
+    const tb = window.eval(`window.__S12.setStoreAuto(window.S, ${branch}, false)`);
+    check(tb.ok && window.S.stores[branch - 1].auto === false,
+      'V12 玩家可随时接管托管的店');
+    /* 无店长的店不能托管 */
+    const noMgr = window.eval(`(function(){
+      var b = window.S.stores[0].branch;
+      if (window.S.stores[0].managerId) return 'skip';
+      return window.__S12.setStoreAuto(window.S, b, true).ok ? 'BAD' : 'ok';
+    })()`);
+    check(noMgr === 'ok' || noMgr === 'skip',
+      'V12 没有店长的店无法托管');
+  }
+
+  /* ④ 店长 AI 结算：托管的店产出报表 */
+  {
+    const rpt = window.eval(`(function(){
+      var s = window.S;
+      var st = s.stores[s.stores.length - 1];
+      /* 给这家店配一个人，否则是空店（空店只扣固定开支） */
+      window.__S12.refreshCandidates(s, true);
+      window.__S12.hireStaff(s, 0, st.branch);
+      window.__S12.setStoreAuto(s, st.branch, true);
+      var reports = window.__S12.managedStoresDaily(s);
+      var r = reports[0];
+      if (!r) return 'no-report';
+      return [r.traffic, r.cups, r.revenue, r.net, r.manager].join('/');
+    })()`);
+    const parts = String(rpt).split('/');
+    check(rpt !== 'no-report' && parts.length === 5 && Number(parts[0]) > 0,
+      `V12 托管店 AI 产出报表（${rpt}）`);
+    check(parts.length === 5 && Number(parts[1]) > 0,
+      'V12 托管店真的出杯了');
+    const st = window.eval('window.S.stores[window.S.stores.length - 1]');
+    check(st && st.lastReport && st.history.length >= 1,
+      'V12 报表写回店铺（lastReport + history）');
+    check(st && st.days >= 1, 'V12 托管店营业天数 +1');
+  }
+
+  /* ⑤ 托管店不计入实时客流加成（否则凭空得利） */
+  {
+    const cmp = window.eval(`(function(){
+      var a = window.S;
+      var b = JSON.parse(JSON.stringify(a));
+      /* b：把所有托管店改成非托管，其余相同 */
+      for (var i = 0; i < b.stores.length; i++) b.stores[i].auto = false;
+      return window.__S12.activeBranchCount(a) + '/' + window.__S12.activeBranchCount(b);
+    })()`);
+    const [autoN, allN] = String(cmp).split('/').map(Number);
+    check(autoN < allN,
+      `V12 托管店不计入在营店数（托管 ${autoN} < 全开 ${allN}）`);
+  }
+
+  /* ⑥ 注资 / 提现 */
+  {
+    const r = window.eval(`(function(){
+      var s = window.S;
+      var b = s.stores[s.stores.length - 1].branch;
+      var cashBefore = s.cash;
+      var storeBefore = s.stores[s.stores.length - 1].cash;
+      var f = window.__S12.fundStore(s, b, 1000);
+      var w = window.__S12.withdrawStore(s, b, 500);
+      /* 注资 1000 再提现 500 → 总部净减 500，店净加 500。
+         ★ 断言要按**净变化**写，不能写「现金回到原值」——
+           那是把「注资额=提现额」当成了前提，而实际操作不等额。 */
+      return [f.ok, w.ok, s.cash - cashBefore, s.stores[s.stores.length - 1].cash - storeBefore].join('/');
+    })()`);
+    const p = String(r).split('/');
+    check(p[0] === 'true' && p[1] === 'true' && Number(p[2]) === -500 && Number(p[3]) === 500,
+      `V12 注资/提现：总部净减 500、店铺净加 500（${r}）`);
+  }
+
+  /* ⑦ 存档往返：店铺数据完整保留 */
+  {
+    const r = window.eval(`(function(){
+      setSlot(0); saveGame(window.S);
+      var back = loadGame(0);
+      if (!back) return 'null';
+      return [back.stores.length, back.shops, back.managers.length,
+              back.stores[0].name, back.stores[0].isMain].join('/');
+    })()`);
+    const p = String(r).split('/');
+    check(p[0] === String(window.S.stores.length) && p[1] === String(window.S.stores.length),
+      `V12 存档往返：店数与派生量一致（${r}）`);
+    check(p[3] === '总店' && p[4] === 'true', 'V12 存档保留店名与主店标记');
+  }
+
   /* ---- V11 店长与分店编制 ---- */
   /* 开一家分店 → 店长名额 +1 且**立刻**出现候选人。
      这条守的是因果链：玩家点完开店就该看到可招的人。
@@ -801,8 +944,11 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     + ' var cands = (window.S.mgrCand[window.S.shops] || []).length;'
     + ' return before + "/" + after + "/" + cands; })()');
   const m1 = mgr1.split('/');
-  check(m1[0] === '0' && m1[1] === '1' && Number(m1[2]) >= 2,
-    `开分店后名额 0→1 且立刻出现 ${m1[2]} 位候选人（${mgr1}）`);
+  /* ★ V12：名额规则变了 —— 现在是「店数 − 已招数」（**含主店**），
+     所以开局就有 1 个名额（总店），开分店后变 2。
+     断言必须跟着改，否则会出现「测试全绿但规则已错」的假象。*/
+  check(m1[0] === '1' && m1[1] === '2' && Number(m1[2]) >= 2,
+    `开分店后名额 1→2 且立刻出现 ${m1[2]} 位候选人（V12 含主店，${mgr1}）`);
 
   const mgr2 = await window.eval('(function(){'
     + ' var r = hireManager(window.S, window.S.shops, 0);'

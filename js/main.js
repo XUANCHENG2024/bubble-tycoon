@@ -450,6 +450,118 @@ function doAct(act, el) {
       break;
     }
     /* ---------- V11 店长 ---------- */
+    /* ---------- V12 店铺系统 ---------- */
+    case 'sopen': {
+      /* 开店流程：先看能不能开（有上限 / 钱不够就别开弹窗） */
+      const c = shopCost(s);
+      if (c == null) { UI.toast('已达分店上限', 'err'); break; }
+      if (s.cash < c) { UI.toast(`现金不足（需 ${money(c)}）`, 'err'); break; }
+      UI.modal(openStoreModalHtml(s));
+      break;
+    }
+    case 'sopenok': {
+      const provId = ($('sProv') && $('sProv').value) || (s.venue && s.venue.provId);
+      const cityId = ($('sCity') && $('sCity').value) || (s.venue && s.venue.cityId);
+      const name = ($('sName') && $('sName').value) || '';
+      const vt = window.__sVenue || VENUE_DEFAULT;
+      const r = openStore(s, { cityId, venueType: vt, name: name.trim() });
+      if (r.ok) {
+        UI.closeModal();
+        UI.toast(`🗺️「${r.store.name}」开业！可任命一名店长`, 'gold');
+        UI.confetti(40); SFX.up();
+        UI.setTab('rival');
+      } else { UI.toast(r.msg, 'err'); }
+      break;
+    }
+    case 'svenue': {
+      /* 场地类型：弹窗内的按钮组（不入 state，选中后再点确认才生效） */
+      window.__sVenue = id;
+      const box = document.querySelectorAll('#modal .vtype');
+      box.forEach(b => b.classList.toggle('on', b.dataset.id === id));
+      break;
+    }
+    case 'sprov': {
+      /* 换省 → 市列表跟着换（与现有 vprov 同款交互） */
+      const v = $('sProv') ? $('sProv').value : (s.venue && s.venue.provId);
+      const opts = citiesOfProvince(v).map(c =>
+        `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+      if ($('sCity')) $('sCity').innerHTML = opts;
+      break;
+    }
+    case 'stoggle': {
+      /* 玩家接管 ⇄ 交给店长 */
+      const r = setStoreAuto(s, +br, el.dataset.auto === '1');
+      if (r.ok) {
+        UI.toast(r.auto ? '🤖 该店已交由店长自动打理' : '✋ 你已接管该店', 'ok');
+        SFX.click();
+      } else UI.toast(r.msg, 'err');
+      break;
+    }
+    case 'smgrh': {
+      /* 任命店长：弹窗里挑候选人 */
+      const b = +br;
+      UI.modal(`<div class="m-title">🎩 任命店长</div>
+        <div class="m-sub">${esc((storeByBranch(s, b) || {}).name || '')} · 每家店至多一名店长</div>
+        <div style="margin-top:10px" id="sCandBox">${storeCandidatesHtml(s, b)}</div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-ghost" style="flex:1" data-act="modal-close">关闭</button>
+        </div>`);
+      break;
+    }
+    case 'smgrpick': {
+      const r = hireManager(s, +br, +id);
+      if (r.ok) {
+        UI.closeModal();
+        const st = storeByBranch(s, +br);
+        UI.toast(`🎩 ${r.manager.name} 入驻「${st ? st.name : ''}」`, 'ok');
+        SFX.up();
+      } else UI.toast(r.msg, 'err');
+      break;
+    }
+    case 'smgrfire': {
+      /* 撤下店长（不遣散员工 —— 店长是管理者不是所有者） */
+      const st = storeByBranch(s, +br);
+      const m = st ? managerById(s, st.managerId) : null;
+      if (!m) { UI.toast('该店没有店长', 'err'); break; }
+      const r = fireManager(s, m.id);
+      if (r.ok) { UI.toast('🎩 店长已撤下，该店员工留在原编制', 'ok'); SFX.click(); }
+      else UI.toast(r.msg, 'err');
+      break;
+    }
+    case 'smain': {
+      const r = setMainStore(s, +br);
+      if (r.ok) { UI.toast(`⭐「${r.store.name}」升为主店`, 'gold'); SFX.up(); }
+      else UI.toast(r.msg, 'err');
+      break;
+    }
+    case 'srename': {
+      const st = storeByBranch(s, +br);
+      const nm = prompt('店铺名称（最多 16 字）', st ? st.name : '');
+      if (nm == null) break;                    /* 取消 */
+      const r = renameStore(s, +br, nm);
+      if (r.ok) { UI.toast('✏️ 店名已更新', 'ok'); SFX.click(); }
+      else UI.toast(r.msg, 'err');
+      break;
+    }
+    case 'sfund': {
+      const st = storeByBranch(s, +br);
+      const amt = prompt(`向「${st ? st.name : ''}」注资多少？（总部现金 ${money(s.cash)}）`, '2000');
+      if (amt == null) break;
+      const r = fundStore(s, +br, parseFloat(amt));
+      if (r.ok) { UI.toast(`💰 已注资 ${money(r.amount)}`, 'ok'); SFX.click(); }
+      else UI.toast(r.msg, 'err');
+      break;
+    }
+    case 'sdraw': {
+      const st = storeByBranch(s, +br);
+      const amt = prompt(`从「${st ? st.name : ''}」提现多少？（店铺现金 ${money(st ? st.cash : 0)}）`, '1000');
+      if (amt == null) break;
+      const r = withdrawStore(s, +br, parseFloat(amt));
+      if (r.ok) { UI.toast(`💵 已提现 ${money(r.amount)}`, 'ok'); SFX.click(); }
+      else UI.toast(r.msg, 'err');
+      break;
+    }
+
     case 'mhire': {
       const r = hireManager(s, +br || 2, +id || 0);
       if (r.ok) {

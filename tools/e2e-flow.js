@@ -125,7 +125,8 @@ s.cash = 1e6;
 const shopsBefore = s.shops;
 const op = E.openShopBranch(s);
 check(op.ok && s.shops === shopsBefore + 1, `开店：第 ${s.shops} 家分店开业`);
-check(E.managerSlotsLeft(s) === 1, `开店：店长名额 +1（剩 ${E.managerSlotsLeft(s)}）`);
+/* ★ V12：名额含主店 → 开局 1 个（总店），开店后 2 个 */
+check(E.managerSlotsLeft(s) === 2, `开店：店长名额 +1（剩 ${E.managerSlotsLeft(s)}，V12 含主店）`);
 check(((s.mgrCand && s.mgrCand[s.shops]) || []).length >= 2,
   `开店：立刻出现 ${((s.mgrCand && s.mgrCand[s.shops]) || []).length} 位候选人`);
 

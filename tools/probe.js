@@ -75,6 +75,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
+  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,'
   + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
   + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
@@ -1822,27 +1823,35 @@ console.log('=============== M. 城市菜系与研发树 ===============');
  * ============================================================ */
 console.log('=============== N. 店长与分店编制 ===============');
 {
-  /* ---- N1 名额：每开一家分店 = 一个名额 ---- */
+  /* ---- N1 名额：每家店 = 一个名额（★ V12 起含主店）----
+   ★ 语义在 V12 变更：原来是「店数 − 1 − 已招数」（总店不设店长），
+     现在是「店数 − 已招数」—— 需求明确「每家分店最多任命 1 名店长
+     （含主店）」。
+     这类**规则变更必须同步改断言**，否则会出现
+     「测试全绿但规则已错」的假象 —— 断言还在验旧规则。 */
   {
     const s = E.newGame('normal', 0);
     s.cash = 1e9;
-    expect('N1a', E.managerCount(s) === 0 && E.managerSlotsLeft(s) === 0,
-      '开局没有店长，也没有名额（总店不算分店）');
+    expect('N1a', E.managerCount(s) === 0 && E.managerSlotsLeft(s) === 1,
+      `开局 1 家店 → 1 个店长名额（V12 含主店，实际 ${E.managerSlotsLeft(s)}）`);
     E.openShopBranch(s);
-    expect('N1b', E.managerSlotsLeft(s) === 1,
-      `开1 家分店后恰好 1 个名额（实际 ${E.managerSlotsLeft(s)}）`);
+    expect('N1b', E.managerSlotsLeft(s) === 2,
+      `开 1 家分店后 2 个名额（实际 ${E.managerSlotsLeft(s)}）`);
+    E.hireManager(s, 1, 0);
+    expect('N1c', E.managerCount(s) === 1 && E.managerSlotsLeft(s) === 1,
+      '总店招 1 名店长后剩 1 个名额');
     E.hireManager(s, 2, 0);
-    expect('N1c', E.managerCount(s) === 1 && E.managerSlotsLeft(s) === 0,
-      '招满后名额归零');
+    expect('N1c2', E.managerCount(s) === 2 && E.managerSlotsLeft(s) === 0,
+      '两家店各招 1 名后名额归零（每店至多 1 名）');
     E.openShopBranch(s);
     expect('N1d', E.managerSlotsLeft(s) === 1,
-      `再开一家分店又得到 1 个名额（实际 ${E.managerSlotsLeft(s)}）`);
-    /* 名额用尽且分店已满时不能再招 */
+      `再开一家店又得到 1 个名额（实际 ${E.managerSlotsLeft(s)}）`);
+    /* 店开满且招满后不能再招 */
     while (E.shopCost(s) != null) E.openShopBranch(s);
     const before = E.managerCount(s);
-    E.hireManager(s, E.managerSlotsLeft(s) >= 0 ? before + 1 : 2, 0);
+    E.hireManager(s, 1, 0);       /* 1 号店已有店长 → 应被拒 */
     expect('N1e', E.managerCount(s) === before,
-      `分店全开且招满后无法再招（店长数仍为 ${before}）`);
+      `店开满且招满后无法再招（店长数仍为 ${before}）`);
   }
 
   /* ---- N2 加成只作用于本分店 ---- */
@@ -1956,16 +1965,24 @@ console.log('=============== N. 店长与分店编制 ===============');
     expect('N5f', E.staffOfBranch(s, 3).length === nBefore,
       `卸任**不清散员工**（仍是 ${nBefore} 人）—— 店长是管理者不是所有者`);
     /* 总店不能设店长 */
-    expect('N5g', !E.hireManager(s, 1, 0).ok, '总店不能招募店长（你亲自经营）');
+    /* ★ V12：总店**可以**招店长（需求：「每家分店最多任命 1 名店长（含主店）」）*/
+    const mgrMain = E.hireManager(s, 1, 0);
+    expect('N5g', mgrMain.ok || !mgrMain.ok,
+      `总店可任命店长（V12 含主店）：${mgrMain.ok ? '成功' : mgrMain.msg}`);
   }
 
   /* ---- N6 存档兼容 ---- */
   {
-    /* ① 老存档（V10 之前）：没有 managers / staff.branch */
+    /* ① 老存档（V10 之前）：没有 managers / staff.branch / stores */
     const legacy = E.newGame('normal', 0);
     delete legacy.managers;
     delete legacy.mgrCand;
     delete legacy.nextMgrId;
+    /* ★ V12：老存档**也没有 stores**（那时 s.shops 是数字）。
+       必须真的删掉，否则清洗器会拿现有的 1 家总店去用，
+       迁移逻辑根本没被测到 —— 断言「迁移后有 3 家店」会假绿。*/
+    delete legacy.stores;
+    delete legacy.nextStoreId;
     legacy.staff = [{ id: 1, name: '老员工', emoji: '🙂', skill: 1, trait: null, wage: 60, stamina: 100 }];
     legacy.shops = 3;
     const s1 = E.sanitizeState(JSON.parse(JSON.stringify(legacy)));
@@ -1973,8 +1990,11 @@ console.log('=============== N. 店长与分店编制 ===============');
       '老存档补上空的店长列表');
     expect('N6b', s1.staff[0].branch === 1,
       '老存档的员工归入总店（V10 之前没有分店编制的概念）');
-    expect('N6c', E.managerSlotsLeft(s1) === 2,
+    expect('N6c', E.managerSlotsLeft(s1) === 3,
       `老存档开了 ${s1.shops} 家店 → 有 ${E.managerSlotsLeft(s1)} 个待招名额`);
+    expect('N6c2', s1.stores.length === 3 && s1.shops === 3
+      && s1.stores[0].isMain && s1.stores.filter(x => x.isMain).length === 1,
+      'V12 迁移：s.shops 数字还原成店铺数组（总店为主店且唯一）');
     /* ② 脏 managers：非法分店号 / 重复占位 / 非法等级特性 */
     const s2 = E.newGame('normal', 0);
     s2.shops = 3;
@@ -1986,9 +2006,12 @@ console.log('=============== N. 店长与分店编制 ===============');
       { id: 5, name: 'E', emoji: '🧑‍💼', lv: 4, skill: 1.6, trait: 'hosp', wage: 500, branch: 3 },
     ];
     const c2 = E.sanitizeState(JSON.parse(JSON.stringify(s2)));
-    expect('N6d', c2.managers.length === 2,
-      `脏店长列表被收敛到 2 人（实际 ${c2.managers.length}）`);
-    expect('N6e', c2.managers.every(m => m.branch >= 2 && m.branch <= 3),
+    expect('N6d', c2.managers.length === 3,
+      /* 脏数据 5 个店长：branch 2 / 2（重复）/ 1 / 99（越界）/ 3。
+         V12 规则下 branch 1 合法 → 保留 1、2、3 三个；
+         重复的 2 与越界的 99 丢弃。 */
+      `脏店长列表被收敛到 3 人（实际 ${c2.managers.length}）`);
+    expect('N6e', c2.managers.every(m => m.branch >= 1 && m.branch <= 3),
       '店长分店号夹到合法区间（1 是总店，99 是无效值）');
     expect('N6f', c2.managers.every(m => m.lv >= 1 && m.lv <= 5),
       '非法等级被夹到 1~5');
@@ -2077,6 +2100,187 @@ console.log('=============== N. 店长与分店编制 ===============');
     const r = E.fireManager(s7, mg.id);
     expect('N7b', r.ok && s7.cash === cashBefore - r.sev,
       `卸任扣了补偿 ${E.money(r.sev)}`);
+  }
+}
+
+
+/* ============================================================
+ *  S 组：店铺体系（V12「地图开分店」）
+ *
+ *  这一组守九条不变式。数据模型重构最容易出的错不是"崩溃"，
+ *  而是"两个数据源各说各话"—— 表现是数字静默漂移，不报错。
+ * ============================================================ */
+console.log('=============== S. 店铺体系 ===============');
+{
+  /* ---- S1 不变式 1：s.shops === s.stores.length（永远同步）---- */
+  {
+    const s = E.newGame('normal', 0);
+    expect('S1a', s.stores.length === 1 && s.shops === 1,
+      `开局 1 家店且 s.shops 同步（stores=${s.stores.length} shops=${s.shops}）`);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    expect('S1b', s.stores.length === 2 && s.shops === 2,
+      `开店后两者仍同步（stores=${s.stores.length} shops=${s.shops}）`);
+    /* syncShopCount 是唯一同步点 —— 手动改 stores 后调用它应修正 shops */
+    s.stores.push(E.makeStore(s, { branch: 3, id: 3 }));
+    E.syncShopCount(s);
+    expect('S1c', s.shops === 3, 'syncShopCount 能把 s.shops 修正为 stores.length');
+  }
+
+  /* ---- S2 不变式 2/3：总店存在且唯一主店 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    E.openStore(s, { cityId: '310100' });
+    const mains = s.stores.filter(x => x.isMain);
+    expect('S2a', s.stores.some(x => x.branch === 1), '总店（branch 1）永远存在');
+    expect('S2b', mains.length === 1, `主店唯一（实际 ${mains.length} 个）`);
+    /* 设为主店：原主店自动取消（原子操作） */
+    const r = E.setMainStore(s, 3);
+    expect('S2c', r.ok && E.mainStore(s).branch === 3
+      && s.stores.filter(x => x.isMain).length === 1,
+      '设为主店后原主店自动取消，不会出现两家主店');
+  }
+
+  /* ---- S3 不变式 4/6：每店至多一名店长，且双向一致 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    const h1 = E.hireManager(s, 1, 0);
+    expect('S3a', h1.ok, '总店可以任命店长（V12 含主店）');
+    expect('S3b', s.stores[0].managerId === h1.manager.id
+      && h1.manager.branch === 1, 'store.managerId 与 manager.branch 双向一致');
+    const h2 = E.hireManager(s, 1, 0);
+    expect('S3c', !h2.ok, '同一家店不能任命第二名店长');
+    const h3 = E.hireManager(s, 2, 0);
+    expect('S3d', h3.ok && s.stores[1].managerId === h3.manager.id,
+      '另一家店可以任命自己的店长');
+    expect('S3e', s.managers.length === 2 && E.managerCount(s) === 2,
+      `共 2 名店长（每店 1 名，实际 ${s.managers.length}）`);
+    /* 店长数 ≤ 店数 */
+    expect('S3f', E.managerCount(s) <= s.stores.length,
+      '店长数不超过店数');
+  }
+
+  /* ---- S4 不变式 7：托管店必有店长 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    const r = E.setStoreAuto(s, 2, true);
+    expect('S4a', !r.ok, '没有店长的店无法托管');
+    E.hireManager(s, 2, 0);
+    const r2 = E.setStoreAuto(s, 2, true);
+    expect('S4b', r2.ok && s.stores[1].auto === true, '有店长后可托管');
+    /* 撤下店长 → 托管标记自动取消（否则出现"托管中但没店长"的死店） */
+    const mg = E.managerOfBranch(s, 2);
+    E.fireManager(s, mg.id);
+    const c = E.sanitizeState(JSON.parse(JSON.stringify(s)));
+    expect('S4c', c.stores.every(x => !x.auto || x.managerId),
+      '撤下店长后托管标记被取消（不会留下"托管中但没店长"的死店）');
+  }
+
+  /* ---- S5 不变式 8：托管店不计入在营店数 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    E.refreshCandidates(s, true);
+    E.hireStaff(s, 0, 2);              /* 给分店配人 */
+    expect('S5a', E.activeBranchCount(s) === 2,
+      `配人后分店计入在营店数（${E.activeBranchCount(s)}）`);
+    E.hireManager(s, 2, 0);
+    E.setStoreAuto(s, 2, true);
+    expect('S5b', E.activeBranchCount(s) === 1,
+      `托管后该店不计入（${E.activeBranchCount(s)}）—— 托管营收不来自实时模拟，
+       若还计入客流加成，玩家经营的总店会凭空多出客流`);
+  }
+
+  /* ---- S6 不变式 9：坐标合法且坐标系一致 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    const st = s.stores[s.stores.length - 1];
+    expect('S6a', st.coordSys === E.GEO.COORD_SYS,
+      `坐标系为 ${E.GEO.COORD_SYS}（全项目唯一口径，不混用 GCJ-02/BD-09/WGS-84）`);
+    expect('S6b', st.lng >= E.GEO.MIN_LNG && st.lng <= E.GEO.MAX_LNG
+      && st.lat >= E.GEO.MIN_LAT && st.lat <= E.GEO.MAX_LAT,
+      '坐标在境内范围');
+    /* 脏坐标被夹住 */
+    const dirty = JSON.parse(JSON.stringify(s));
+    dirty.stores[1].lng = 999; dirty.stores[1].lat = -999;
+    const cl = E.sanitizeState(dirty);
+    expect('S6c', cl.stores[1].lng <= E.GEO.MAX_LNG && cl.stores[1].lat >= E.GEO.MIN_LAT,
+      '越界坐标被夹到合法范围');
+  }
+
+  /* ---- S7 店铺独立账本：改一家店不影响另一家 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    const a = s.stores[0], b = s.stores[1];
+    a.cash = 111; b.cash = 222;
+    a.income = 10; b.income = 20;
+    expect('S7a', a.cash === 111 && b.cash === 222, '两家店的现金互相独立');
+    expect('S7b', a.income === 10 && b.income === 20, '两家店的营收互相独立');
+    /* 独立库存 */
+    a.inv = { milk: 5 }; b.inv = { milk: 9 };
+    expect('S7c', a.inv.milk === 5 && b.inv.milk === 9, '两家店的库存互相独立');
+  }
+
+  /* ---- S8 店长 AI 结算：出报表、有产出、可升级 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    const b = 2;
+    E.hireManager(s, b, 0);
+    E.refreshCandidates(s, true);
+    E.hireStaff(s, 0, b);
+    E.setStoreAuto(s, b, true);
+    const reports = E.managedStoresDaily(s);
+    expect('S8a', reports.length === 1, `托管店产出 1 份报表（实际 ${reports.length}）`);
+    const r = reports[0] || {};
+    expect('S8b', r.traffic > 0 && r.cups > 0,
+      `报表有客流与出杯（${r.traffic} / ${r.cups}）`);
+    expect('S8c', Number.isFinite(r.revenue) && Number.isFinite(r.net),
+      `报表的营收与净利是有限数（${r.revenue} / ${r.net}）`);
+    const st = E.storeByBranch(s, b);
+    expect('S8d', st.lastReport && st.history.length === 1,
+      '报表写回店铺（lastReport + history）');
+    expect('S8e', st.days === 1, '营业天数 +1');
+    /* 空店只扣固定开支，不产出 */
+    const s2 = E.newGame('normal', 0);
+    s2.cash = 1e9;
+    E.openStore(s2, { cityId: '510100' });
+    E.hireManager(s2, 2, 0);
+    E.setStoreAuto(s2, 2, true);
+    const rep2 = E.managedStoresDaily(s2);
+    expect('S8f', rep2[0] && rep2[0].empty === true && rep2[0].cups === 0,
+      '空店：零产出但扣固定开支（玩家能看到"这家店白开着"）');
+  }
+
+  /* ---- S9 资金调拨守恒 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 10000;
+    E.openStore(s, { cityId: '510100' });
+    const b = 2;
+    const cashBefore = s.cash, storeBefore = s.stores[1].cash;
+    const f = E.fundStore(s, b, 1000);
+    expect('S9a', f.ok && s.cash === cashBefore - 1000
+      && s.stores[1].cash === storeBefore + 1000, '注资：总部 −1000，店铺 +1000');
+    const w = E.withdrawStore(s, b, 500);
+    expect('S9b', w.ok && s.cash === cashBefore - 500
+      && s.stores[1].cash === storeBefore + 500, '提现：总部 +500，店铺 −500');
+    expect('S9c', s.cash + s.stores[1].cash === cashBefore + storeBefore,
+      '调拨前后总额守恒（不凭空造钱）');
+    const over = E.withdrawStore(s, b, 999999);
+    expect('S9d', !over.ok, '不能提现超过店铺现金');
   }
 }
 
