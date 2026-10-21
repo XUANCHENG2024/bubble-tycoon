@@ -7,12 +7,12 @@ const $ = id => document.getElementById(id);
 
 /* HTML 转义：任何进入 innerHTML 的动态文本都必须过这一层。
    存档可导出/导入，敌方构造的存档里可能带 <img onerror> 之类 payload，
-   渲染层不能信任状态里的字符串。 */
-const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
-function esc(v) {
-  if (v === null || v === undefined) return '';
-  return String(v).replace(/[&<>"']/g, c => ESC_MAP[c]);
-}
+   渲染层不能信任状态里的字符串。
+   实现放在 engine.js 的 escText()（引擎内部拼 HTML 片段时也要用），这里只是取个别名。
+   以前这里自己声明了一份同名的 ESC_MAP —— 经典脚本的顶层 const/let 落在**同一个**
+   全局词法环境里，同名重复声明不是覆盖，而是让后加载的文件整份解析失败
+   （H5 端表现为白屏，控制台只有一句 "already been declared"）。 */
+const esc = escText;
 /* num() 由 engine.js 统一提供，此处不再重复声明 ——
    两个文件各写一份同名 function 声明会静默互相覆盖，改一处漏一处。 */
 
@@ -245,17 +245,18 @@ UI.toast = function (msg, kind) {
 };
 
 /* ---------------- 弹窗 ---------------- */
-UI.modal = function (html, onClose) {
+/* 只接 html 一个参数。原来还有个 onClose 回调参数（配一套 UI._modalClose 机制），
+   但全仓 14 处 UI.modal() 调用没有一个传第二参 —— 需要"关闭时做点什么"的地方
+   都改成在调用方自己处理了。留着只会让人以为存在这条路径。 */
+UI.modal = function (html) {
   const root = $('modal');
   $('modalBox').innerHTML = html;
   root.dataset.lock = '0';
   root.classList.add('on');
-  UI._modalClose = onClose;
 };
 UI.closeModal = function () {
   $('modal').classList.remove('on');
   $('modalBox').innerHTML = '';
-  if (UI._modalClose) { const f = UI._modalClose; UI._modalClose = null; f(); }
 };
 $('modalMask').addEventListener('click', () => { if ($('modal').dataset.lock !== '1') UI.closeModal(); });
 
@@ -303,24 +304,38 @@ UI.floater = function (x, y, text, kind) {
 };
 
 /* ---------------- HUD ---------------- */
+/* HUD 节点缓存：renderHUD 每帧都跑（主循环里跟在 tick 后面），
+   里面 7 次 $() 就是一秒四百多次 getElementById —— 挂在热路径上的白给开销。
+   和舞台节点的 UI.el 是同一套做法。HUD 是 index.html 里的静态节点，不会重建。 */
+let HUD_EL = null;
+function hudEl() {
+  if (!HUD_EL) {
+    HUD_EL = {
+      day: $('hudDay'), cash: $('hudCash'), rep: $('hudRep'), worth: $('hudWorth'),
+      goalFill: $('goalFill'), goalText: $('goalText'),
+    };
+  }
+  return HUD_EL;
+}
+
 UI.renderHUD = function () {
   const s = window.S; if (!s) return;
-  const d = diffOf(s);
-  $('hudDay').innerHTML = s.endless
+  const h = hudEl();
+  h.day.innerHTML = s.endless
     ? `${num(s.day, 1)}<i> 无尽·${num(s.milestone)}阶</i>`
     : `${num(s.day, 1)}<i>/${CFG.DAYS}</i>`;
-  $('hudCash').textContent = money(num(s.cash));
-  $('hudRep').textContent = Math.round(num(s.rep));
+  h.cash.textContent = money(num(s.cash));
+  h.rep.textContent = Math.round(num(s.rep));
   const nw = num(netWorth(s));
-  $('hudWorth').textContent = money(nw);
+  h.worth.textContent = money(nw);
   const goal = Math.max(1, num(goalOf(s), 1));
   const p = pct(nw / goal * 100);
-  $('goalFill').style.width = p + '%';
+  h.goalFill.style.width = p + '%';
   const share = num(rivalShare(s));
-  $('goalText').textContent = `目标 ${money(goal)} · ${p.toFixed(0)}%`
+  h.goalText.textContent = `目标 ${money(goal)} · ${p.toFixed(0)}%`
     + (share >= 0.15 ? ` · 🦑对手抢 ${Math.round(share * 100)}%` : '');
-  $('hudCash').style.color = num(s.cash) < 0 ? 'var(--red)' : '';
-  if (!STORAGE_OK) $('hudCash').title = '⚠️ 浏览器存储不可用，进度无法保存';
+  h.cash.style.color = num(s.cash) < 0 ? 'var(--red)' : '';
+  if (!STORAGE_OK) h.cash.title = '⚠️ 浏览器存储不可用，进度无法保存';
 };
 
 /* ---------------- Tab ---------------- */
@@ -358,6 +373,9 @@ UI.renderManage = function () {
   const nextTag = TAGS[s.nextTrend];
   let h = '';
 
+  /* 已持有的经营策略卡（没有则整块不渲染） */
+  h += UI.cardsChipsHtml(s);
+
   /* 今日情报 */
   h += `<div class="card"><div class="card-h">📡 今日情报 <span class="ch-sub">Day ${s.day}</span></div>
     <div class="intel">
@@ -368,8 +386,63 @@ UI.renderManage = function () {
       <div class="intel-i"><div class="ii-k">明日预告</div><div class="ii-v">${s.trendKnown ? nextTag.emoji + ' ' + nextTag.name : '❓ 未知'}</div>
         ${s.trendKnown ? '' : '<button class="btn btn-sm btn-ghost" data-act="scout" style="margin-top:3px">🔍 调研 ¥150</button>'}</div>
     </div>
-    ${s.news ? `<div style="margin-top:9px;font-size:11.5px;color:var(--amber)">📰 ${s.news.text}</div>` : ''}
+    /* news.text 来自存档（可导出 / 导入），必须转义：
+       这里曾经是唯一一处漏掉 esc() 的动态文本，导入一份带 payload 的存档就能执行。 */
+    ${s.news ? `<div style="margin-top:9px;font-size:11.5px;color:var(--amber)">📰 ${esc(s.news.text)}</div>` : ''}
   </div>`;
+
+  /* 每日合同（V1）：放在所有卡片最上面 ——
+     它是「今天要凑什么」的方向盘，玩家会照着它改采购、改菜单、改定价，
+     所以必须在备货页第一眼看到，而不是和每日任务混在一起。 */
+  const ct = contractView(s);
+  if (ct) {
+    const progTxt = ct.prog === null ? (ct.done ? '已达成' : '打烊时结算')
+      : `${ct.prefix}${Math.round(ct.prog)}/${ct.prefix}${ct.goal}${ct.unit}`;
+    h += `<div class="card contract${ct.done ? ' done' : ''}" data-tut="contract">
+      <div class="card-h">📜 今日合同
+        <span class="ch-sub">开门前就知道目标 · 打烊结算</span></div>
+      <div class="ct-row">
+        <span class="ct-e">${ct.emoji}</span>
+        <span class="ct-n">${ct.name}</span>
+        <span class="ct-desc">${ct.desc}</span>
+        <span class="ct-r">${ct.done ? '✅ 已达成' : '+' + money(ct.cash)}</span>
+      </div>
+      <div class="ct-bar"><i style="width:${(ct.ratio * 100).toFixed(1)}%"></i></div>
+      <div class="ct-sub">${progTxt}${ct.done ? '' : (ct.failRep < 0 ? ` · 未达成扣口碑 ${ct.failRep}` : ' · 未达成不扣口碑')}</div>
+    </div>`;
+  }
+
+  /* V5 章节关卡：中期目标（跨 5 天推进），紧跟在每日合同之后 ——
+     两个都是"开门前就知道目标"的方向盘，但时间尺度不同：
+     合同是今天这一关，关卡是这一整章。 */
+  const sv = stageView(s);
+  if (sv) {
+    const steps = sv.stages.map(x =>
+      `<span class="stg-step${x.done ? ' on' : ''}${x.current ? ' cur' : ''}">${x.emoji}${esc(x.name)}</span>`
+    ).join('');
+    const diffBtns = sv.diffs.map(d =>
+      `<button class="btn btn-sm ${d.cur ? 'btn-primary' : 'btn-ghost'}" data-act="stagediff" data-id="${d.id}"
+        title="门槛 ${d.goal} · 奖励 ${money(d.cash)}">${d.emoji}${esc(d.name)}</button>`
+    ).join('');
+    h += `<div class="card stage${sv.chapterDone ? ' done' : ''}" data-tut="stage">
+      <div class="card-h">🏔️ 第 ${sv.chapter} 章 · 关卡
+        <span class="ch-sub">本章 ${sv.cleared}/${sv.total} · 共 ${sv.chapterCount} 章</span></div>
+      <div class="stg-steps">${steps}</div>
+      ${sv.chapterDone
+        ? `<div class="stg-sub" style="color:var(--green)">✅ 本章已通关 · 明天进入第 ${Math.min(sv.chapterCount, sv.chapter + 1)} 章</div>`
+        : sv.cur ? `
+        <div class="stg-cur">
+          <span class="stg-e">${sv.cur.emoji}</span>
+          <span class="stg-n">${esc(sv.cur.name)}</span>
+          <span class="stg-d">${esc(sv.cur.desc)}</span>
+          <span class="stg-r">+${money(sv.cur.cash)}</span>
+        </div>
+        <div class="stg-diffs">
+          <span class="stg-dl">难度</span>${diffBtns}
+          <span class="stg-hint">难度越高门槛越大、奖励越丰厚 · 未达成只失奖励不扣口碑</span>
+        </div>` : ''}
+    </div>`;
+  }
 
   /* 今日任务 */
   const qs = questViews(s);
@@ -439,8 +512,14 @@ UI.renderManage = function () {
     const price = priceOf(s, rid);
     const cost = costOf(s, rid);
     const hit = r.tags.includes(s.trend);
+    /* V6 招牌配方：达到等级就在配方卡上挂一个徽章 ——
+       玩家一眼能看出"这款是我的招牌"，招牌加成（售价/成本）已算进上面的数字。 */
+    const sg = sigLevelOf(s, rid);
+    const sgBadge = sg.lv > 0
+      ? `<div class="rc-badge sig">${sg.tier.emoji} ${esc(sg.tier.name)}</div>` : '';
     h += `<div class="rc ${on ? 'on' : ''}" data-act="toggle" data-id="${rid}">
       ${hit ? '<div class="rc-badge">🔥流行</div>' : ''}
+      ${sgBadge}
       <div class="rc-h"><span class="rc-e">${r.emoji}</span><span>${r.name}</span></div>
       <div class="rc-m">售价 <b style="color:var(--amber)">¥${price}</b> · 成本 ¥${cost.toFixed(1)} · 毛利 ¥${(price - cost).toFixed(1)}</div>
       <div class="rc-tags">${r.tags.map(t => `<span class="rc-tag ${t === s.trend ? 'hit' : ''}">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}</div>
@@ -513,8 +592,39 @@ UI.renderManage = function () {
 };
 
 /* ---------------- 研发面板 ---------------- */
+/** V6 招牌配方卡：10 款配方的跨局累计进度。返回一段 HTML 字符串。 */
+function sigCardHtml(s) {
+  const sgs = sigViews(s);
+  const maxed = sgs.filter(x => x.maxed).length;
+  const anyLv = sgs.filter(x => x.lv > 0).length;
+  let h = `<div class="card sig-card"><div class="card-h">🏷️ 招牌配方
+    <span class="ch-sub">${anyLv}/${sgs.length} 款已成招牌 · ${maxed} 款满级</span></div>
+    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:9px;line-height:1.6">
+      累计卖出杯数<b>跨局继承</b>：这一局卖得多，下一局该款永久更强。<br>
+      专精一款（Lv.3）比铺开十款更划算 —— 招牌加成只对<b>那一款</b>生效。</div>`;
+  for (const g of sgs) {
+    h += `<div class="sig-row">
+      <span class="sg-e">${g.emoji}</span>
+      <span class="sg-n">${esc(g.name)}</span>
+      ${g.lv > 0
+        ? `<span class="sg-lv">${g.tierEmoji} ${esc(g.tierName)}</span>`
+        : `<span class="sg-lv none">未成招牌</span>`}
+      <span class="sg-c">${g.cups}${g.maxed ? '' : `/${g.nextCups}`} 杯</span>
+      <span class="sg-bar"><i style="width:${(g.ratio * 100).toFixed(1)}%"></i></span>
+    </div>`;
+  }
+  h += `</div>`;
+  return h;
+}
+
 UI.renderLab = function () {
   const s = window.S; if (!s) return;
+
+  /* V6 招牌配方：跨局继承的成长线。放在实验室页最上面 ——
+     这里是"长期目标"该待的地方：玩家看到某款已经 142/150 杯，
+     下一局就会想专门练它。 */
+  const sigHtml = sigCardHtml(s);
+
   let h = `<div class="card"><div class="card-h">🧪 配方实验室
     <span class="ch-sub">已解锁 ${s.recipes.length}/${RECIPES.length}</span></div>
     <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px;line-height:1.6">
@@ -548,13 +658,90 @@ UI.renderLab = function () {
     </div>`;
   }
   h += `</div></div>`;
-  $('panel-lab').innerHTML = h;
+  $('panel-lab').innerHTML = sigHtml + h;
 };
+
+/* ---------------- 经营维度面板 ----------------
+ * 三个字段（场地类型 / 城市 / 地图坐标）都走「数据驱动 + 引擎校验」：
+ * 这里只负责渲染与收集交互，真正的合法性判断在 engine 的 setVenueType /
+ * setVenueCity / setGeo 里（小游戏端复用同一套校验，不会出现两版口径）。
+ *
+ * 地图选点交互的关键取舍：这里**不内嵌第三方地图 SDK**。
+ *   ① 静态托管的离线包无法拉取高德瓦片 → 地图区域在离线/内网环境下会是空白，
+ *      反而比没有地图更糟（用户以为坏了）。
+ *   ② 内嵌 SDK 会把一个外部脚本变成页面的硬依赖，且引入密钥管理与合规责任。
+ * 所以这里做的是「**坐标输入 + 校验 + 一键跳转高德**」：
+ *   用户可以在高德地图上选好点，复制坐标回来填；也可以直接手输经纬度。
+ *   校验（GCJ-02、境内范围、区前缀匹配）在引擎里，与其他端一致。
+ * 生产环境若要内嵌地图，把「跳转/回填」换成高德 JS API 的 Map + Marker 即可，
+ *   存储结构与校验逻辑都不用动 —— 这也是把 coordSys 显式存下来的原因。
+ */
+function venuePanelHtml(s) {
+  const v = venueView(s);
+
+  /* 场地类型：横向按钮组（10 种，网格排布） */
+  const venueBtns = VENUE_TYPES.map(t =>
+    `<button class="vtype ${t.id === v.type ? 'on' : ''}" data-act="vtype" data-id="${t.id}"
+      title="${esc(t.desc)}"><span class="vt-e">${t.emoji}</span><span class="vt-n">${esc(t.name)}</span></button>`
+  ).join('');
+
+  /* 省市：两个下拉。选省时市列表跟着换（由 act="vprov" 触发重渲染） */
+  const provOpts = PROVINCES.map(p =>
+    `<option value="${p.id}" ${p.id === v.provId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
+  const cityList = citiesOfProvince(v.provId);
+  const cityOpts = cityList.map(c =>
+    `<option value="${c.id}" ${c.id === v.cityId ? 'selected' : ''}>${esc(c.name)}</option>`).join('');
+
+  /* 区级：可选粒度。没收录的城市降级为「仅到市级」，不显示空下拉 */
+  const districts = districtsOfCity(v.cityId);
+  const districtHtml = districts.length
+    ? `<select class="vsel" data-act="vcity" data-id="dist">
+        <option value="">— 不指定 —</option>
+        ${districts.map(d => `<option value="${d.id}" ${d.id === v.districtId ? 'selected' : ''}>${esc(d.name)}</option>`).join('')}
+      </select>`
+    : `<span class="vnote">该城市暂未收录区级（可选仅到市级）</span>`;
+
+  /* 地图坐标：手输 + 一键跳转高德查询 */
+  const geo = v.geo;
+  const geoHtml = `
+    <div class="vgeo">
+      <input class="vin" type="text" inputmode="decimal" placeholder="经度 lng" value="${geo ? geo.lng : ''}" data-vfield="lng" style="flex:1">
+      <input class="vin" type="text" inputmode="decimal" placeholder="纬度 lat" value="${geo ? geo.lat : ''}" data-vfield="lat" style="flex:1">
+      <button class="btn btn-sm btn-primary" data-act="vgeo">定位</button>
+      ${geo ? `<button class="btn btn-sm btn-ghost" data-act="vgeoclear">清除</button>` : ''}
+    </div>
+    <div class="vnote">坐标系固定 <b>${GEO.COORD_SYS}</b>（高德）· 境内范围 ${GEO.MIN_LAT}~${GEO.MAX_LAT} / ${GEO.MIN_LNG}~${GEO.MAX_LNG}
+      ${geo ? ` · 当前 <b style="color:var(--cyan)">${geo.lng}, ${geo.lat}</b>` : ' · 尚未选点'}
+    </div>`;
+
+  return `<div class="card venue">
+    <div class="card-h">🏙️ 经营信息
+      <span class="ch-sub">${esc(v.typeName || '未设置')} · ${esc([v.provName, v.cityName, v.districtName].filter(Boolean).join(' / '))}</span></div>
+
+    <div class="vlabel">经营场地类型<span class="vhint">可扩展（数据驱动，新增类型只改配置）</span></div>
+    <div class="vtypes">${venueBtns}</div>
+
+    <div class="vlabel">经营城市<span class="vhint">限中国大陆</span></div>
+    <div class="vrow">
+      <select class="vsel" data-act="vprov" data-id="prov">${provOpts}</select>
+      <select class="vsel" data-act="vcity" data-id="city">${cityOpts}</select>
+    </div>
+    <div class="vrow">${districtHtml}</div>
+
+    <div class="vlabel">经营地图位置<span class="vhint">用于标记经营地点</span></div>
+    ${geoHtml}
+  </div>`;
+}
 
 /* ---------------- 升级面板 ---------------- */
 UI.renderUp = function () {
   const s = window.S; if (!s) return;
-  let h = `<div class="card"><div class="card-h">⬆️ 设备与门店</div>`;
+  /* 经营维度放在**页面最前面**（设备升级之前），不放末尾：
+     它是店铺的静态属性、且只有三个字段，是这一页最该被看到的东西；
+     而末尾（分店 / 品牌声望之后）在小游戏端会被推出首屏 —— 面板内容一高，
+     越靠后的卡片玩家越看不到，等于白做。语义与可见性在这里是一致的。 */
+  let h = venuePanelHtml(s);
+  h += `<div class="card"><div class="card-h">⬆️ 设备与门店</div>`;
   for (const u of UPGRADES) {
     const lv = s.up[u.id];
     const cost = upgradeCost(s, u.id);
@@ -593,7 +780,11 @@ UI.renderUp = function () {
   h += `<div class="card"><div class="card-h">🌟 品牌声望
     <span class="ch-sub">已继承 ${meta.bp} 点</span></div>
     <div style="font-size:11.5px;color:var(--txt3);line-height:1.6;margin-bottom:9px">
-      声望点永久生效：每点 <b>客流 +2%</b>、<b>离线收益 +2%</b>。当前本局加成：客流 +${(s.bpBonus * 2)}%。
+      声望点永久生效：<b>折算开局创业基金</b>（${money(prestigeStartCash(meta.bp))}，封顶 ${money(CFG.BP_START_CAP)}，
+      越往后每点换得越少）。本局已到账 <b style="color:var(--green)">+${money(s.startBonus || 0)}</b>，
+      由你决定投去雇人、提速还是开店。<br>
+      声望<b>不再直接加客流</b>：单加客流会让客人多到做不过来，流失扣口碑，反而更亏。<br>
+      成就首次达成给 ★（32 条共 150 ★），重复达成只给现金。
       现在转生可获得 <b style="color:var(--amber)">${gain} 点</b>（按当前净资产 ${money(netWorth(s))} 计算）。
     </div>
     <div style="display:flex;gap:7px">
@@ -824,7 +1015,7 @@ UI.renderAch = function () {
   const s = window.S; if (!s) return;
   const got = ACHIEVEMENTS.filter(a => s.ach[a.id]).length;
   let h = `<div class="card"><div class="card-h">🏅 成就 <span class="ch-sub">${got}/${ACHIEVEMENTS.length}</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px">达成成就可获得现金与品牌声望点，声望点永久保留。</div>`;
+    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px">本局达成给现金；<b>跨局首次</b>达成额外给品牌声望 ★（32 条共 150 ★，永久保留）。</div>`;
   for (const a of ACHIEVEMENTS) {
     const on = !!s.ach[a.id];
     h += `<div class="ach ${on ? 'got' : ''}">
@@ -840,6 +1031,10 @@ UI.renderAch = function () {
 /* ---------------- 营业舞台 ---------------- */
 UI.stageInit = function () {
   const s = window.S;
+  /* 与 stageSync 保持同一口径：sim 为空（还没开门 / 已读档回 prep）时
+     直接返回，别去读 s.sim.stations 炸掉。生产路径上 case 'open' 一定先
+     openShop 成功才会走到这里，所以这只是防御，但缺了它很难查。 */
+  if (!s || !s.sim) return;
   $('tabs').style.display = 'none';
   $('panels').style.display = 'none';
   $('stage').classList.add('on');
@@ -885,7 +1080,7 @@ UI.stageInit = function () {
 };
 
 UI.stageSync = function () {
-  const s = window.S; const sim = s.sim;
+  const s = window.S; const sim = s && s.sim;
   if (!sim) return;
   const E = UI.el || {};
   const p = clamp(sim.t / sim.duration, 0, 1);
@@ -921,9 +1116,12 @@ UI.stageSync = function () {
     let el = UI.custEls[c.id];
     if (!el) {
       el = document.createElement('div');
-      el.className = 'cust';
+      /* V7 事件型顾客：加一个"特殊"类和角标，让玩家一眼认出该优先伺候谁。
+         只靠 emoji 区分不够 —— 🧑‍🍳 和普通顾客的脸在同一队列里很容易看漏。 */
+      el.className = 'cust' + (c.special ? ' sp' : '');
       const cr = recipeById(c.rid) || { emoji: '🥤', name: '未知' };
       el.innerHTML = `<div class="cf">${esc(c.face)}</div><div class="cw">${esc(cr.emoji)}</div>
+        ${c.special ? '<div class="csp">★</div>' : ''}
         <div class="cp"><i></i></div>`;
       el._bar = el.querySelector('.cp i');   /* 缓存进度条，避免每帧 querySelector */
       UI.custEls[c.id] = el;
@@ -975,6 +1173,27 @@ UI.stageSync = function () {
     else { btn.disabled = false; cdEl.textContent = ''; }
   }
 
+  /* 营业中两个即时决策（V2）的状态：促销倒计时 + 两颗按钮的可用性 */
+  const ops = openOps(window.S);
+  const bSale = $('btnSale'), bPull = $('btnPull'), saleCd = $('saleCd');
+  if (bSale && bPull && ops) {
+    if (ops.sale.active) {
+      bSale.disabled = true;
+      bSale.classList.add('on');
+      if (saleCd) saleCd.textContent = `(${ops.sale.left}s)`;
+    } else if (ops.sale.used) {
+      bSale.disabled = true;
+      bSale.classList.remove('on');
+      if (saleCd) saleCd.textContent = '（已用）';
+    } else {
+      bSale.disabled = false;
+      bSale.classList.remove('on');
+      if (saleCd) saleCd.textContent = '';
+    }
+    bPull.disabled = !!ops.pull.used;
+    bPull.textContent = ops.pull.used ? '📥 已下架一款' : '📥 临时下架';
+  }
+
   /* 飘字 */
   if (sim.floaters.length) {
     const rect = $('stations').getBoundingClientRect();
@@ -1018,7 +1237,11 @@ function deltaTag(cur, prev, opt) {
 }
 
 UI.showReport = function () {
-  const s = window.S; const r = s.report;
+  /* 与同文件其它渲染函数同一口径：window.S 为空（标题页 / 已收官）时直接返回。
+     生产路径上调用方都保证了 S 非空，这只是防御 —— 但缺了它，一处误用就会抛
+     "Cannot read properties of null"，而报错栈指向 UI 而不是真正的调用方。 */
+  const s = window.S; if (!s) return;
+  const r = s.report;
   /* 第一天打烊 = 核心循环已走完，引导到此结束（避免挡住结算按钮） */
   if (typeof TUT !== 'undefined' && TUT.active) TUT.markDone(false);
   const nw = netWorth(s);
@@ -1034,8 +1257,12 @@ UI.showReport = function () {
   if (r.net < 0) note += `⚠️ 今日亏损，注意控制固定成本（房租/工资）。<br>`;
   if (!note) note = '平稳的一天，继续保持。';
 
-  const html = `<button class="close-x" onclick="UI.closeModal()">×</button>
-    <div class="m-title">🔔 Day ${r.day} 打烊结算</div>
+  /* 不给结算弹窗画 ×：日报是「必须点『进入下一天』才能继续」的强制步骤。
+     以前这里有 ×，玩家习惯性关掉后 phase 停在 'report'，再点开门会被
+     「今天的账还没结」挡死，而当期内没有任何入口能重新打开日报 ——
+     只能提前收官或回主菜单。小游戏版的 drawModal 对 report 同样不画 ×，
+     两边口径一致。 */
+  const html = `<div class="m-title">🔔 Day ${r.day} 打烊结算</div>
     <div class="m-sub">${s.weather.emoji} ${s.weather.name} · 流行 ${TAGS[s.trend].emoji}${TAGS[s.trend].name}</div>
     <div class="rep-grid">
       <div class="rep-i"><div class="ri-k">卖出杯数</div><div class="ri-v">${r.served}</div></div>
@@ -1048,6 +1275,30 @@ UI.showReport = function () {
       <div class="rep-i"><div class="ri-k">口碑</div><div class="ri-v ${r.repDelta >= 0 ? 'p' : 'n'}">${Math.round(r.repAfter)} (${r.repDelta >= 0 ? '+' : ''}${r.repDelta.toFixed(1)})</div></div>
     </div>
     <div class="rep-note">${note}</div>
+    ${(r.contractResult || (s.contract && s.contract.done) || r.contract) ? (() => {
+      /* 合同结算行：日报是玩家唯一会认真看的页面，合同的成败必须在这里落地，
+         否则「备货页给方向、结算页不给交代」等于白给。 */
+      const cr = r.contractResult;
+      if (!cr) return '';
+      return `<div class="rep-ct ${cr.ok ? 'ok' : 'bad'}">`
+        + `${cr.ok ? '📜 今日合同达成' : '📜 今日合同未达成'}：`
+        + `${esc(cr.emoji)} ${esc(cr.name)} · `
+        + (cr.ok ? `<b>+${money(cr.cash)}</b>` : `口碑 ${cr.rep}`)
+        + `</div>`;
+    })() : ''}
+    ${(r.stageResult) ? (() => {
+      /* V5 关卡结算行：和合同一样，日报是玩家唯一认真看的页面，
+         关卡的成败必须在这里落地。 */
+      const sr = r.stageResult;
+      return `<div class="rep-ct ${sr.ok ? 'ok' : 'bad'}">`
+        + `${sr.ok ? '🏔️ 关卡达成' : '🏔️ 关卡未达成'}：`
+        + `${esc(sr.emoji)} ${esc(sr.name)} · ${esc(sr.diffEmoji)}${esc(sr.diffName)} · `
+        + (sr.ok ? `<b>+${money(sr.cash)}</b>` : `目标 ${esc(sr.desc)}`)
+        + `</div>`;
+    })() : ''}
+    ${(r.highlights && r.highlights.length) ? `<div class="rep-hl">`
+      + r.highlights.map(h => `<div class="hl-i">${esc(h.text)}</div>`).join('')
+      + `</div>` : ''}
     ${(() => {
       const p = s.prevReport;
       if (!p || p.day === r.day) return '';
@@ -1078,7 +1329,8 @@ UI.showReport = function () {
 
 /* ---------------- 事件弹窗 ---------------- */
 UI.showEvent = function () {
-  const s = window.S; const ev = s.pendingEvent;
+  const s = window.S; if (!s) return false;
+  const ev = s.pendingEvent;
   if (!ev) return false;
   let h = `<div class="m-title">${ev.emoji} ${ev.title}</div>
     <div class="m-sub">突发事件 · 请做出选择</div>
@@ -1087,6 +1339,44 @@ UI.showEvent = function () {
     h += `<button class="ev-opt" data-act="eventopt" data-i="${i}">
       <div class="eo-l">${o.label}</div><div class="eo-d">${o.desc}</div></button>`;
   });
+  UI.modal(h);
+  $('modal').dataset.lock = '1';
+  return true;
+};
+
+/* ---------------- 打烊三选一 ---------------- */
+/** 把手里已有的策略卡渲染成一行小标签（没有则不占版面） */
+UI.cardsChipsHtml = function (s) {
+  const ids = Array.isArray(s.cards) ? s.cards : [];
+  if (!ids.length) return '';
+  const rows = ids.map(id => {
+    const c = cardById(id);
+    if (!c) return '';
+    return `<span class="cd-chip" title="${esc(c.gain)} · 代价 ${esc(c.cost)}">${c.emoji} ${esc(c.name)}</span>`;
+  }).join('');
+  return `<div class="card"><div class="card-h">🃏 经营策略
+    <span class="ch-sub">${ids.length}/${CFG.CARD_MAX} · 打烊时还会再抽</span></div>
+    <div style="font-size:11.5px;color:var(--txt3);line-height:1.6;margin-bottom:8px">
+      每张卡都同时带来好处和代价，选定后会一直生效到本局结束。手感不对也不用硬吃 —— 可以选择「都不要」。
+    </div>
+    <div class="cd-chips">${rows}</div></div>`;
+};
+
+/** 打烊抽卡：三选一（或跳过）。结构与事件弹窗一致，便于玩家沿用熟悉的操作 */
+UI.showCardDraft = function () {
+  const s = window.S; if (!s) return false;
+  const offer = Array.isArray(s.cardOffer) ? s.cardOffer : [];
+  if (!offer.length) return false;
+  let h = `<div class="m-title">🃏 经营策略 · 三选一</div>
+    <div class="m-sub">Day ${s.day} 打烊 · 选定后在本局内持续生效</div>
+    <div class="rep-note">每张卡都是有得有失的：挑一张适配当前产能与现金流的，
+      或者一张都不选、维持现有路线。</div>`;
+  offer.forEach(c => {
+    h += `<button class="ev-opt" data-act="pickcard" data-id="${c.id}">
+      <div class="eo-l">${c.emoji} ${esc(c.name)}</div>
+      <div class="eo-d"><span class="cd-up">↑ ${esc(c.gain)}</span><br><span class="cd-down">↓ ${esc(c.cost)}</span></div></button>`;
+  });
+  h += `<div class="m-btns"><button class="btn btn-ghost" data-act="skipcard">🚫 都不要</button></div>`;
   UI.modal(h);
   $('modal').dataset.lock = '1';
   return true;
@@ -1112,7 +1402,32 @@ UI.showHelp = function () {
         <li><b>② 配菜单 & 定价</b>：倍率越高单价越高，但客人会流失，0.9~1.1 最稳</li>
         <li><b>③ 开门营业</b>：${CFG.DAY_DURATION} 秒实时经营，<b>点击出杯位可加速</b>，还有小费和连击！</li>
         <li><b>④ 结算</b>：满意率决定口碑涨跌，口碑决定明天客流</li>
-        <li><b>⑤ 投资</b>：升级设备 / 研发配方 / 招人 / 开分店</li>
+        <li><b>⑤ 三选一</b>：每 ${CFG.CARD_EVERY} 天打烊时抽 3 张经营策略卡，最多留 ${CFG.CARD_MAX} 张</li>
+        <li><b>⑥ 投资</b>：升级设备 / 研发配方 / 招人 / 开分店</li>
+      </ul></div>
+    <div class="m-sec"><h4>🃏 经营策略卡</h4>
+      <p>每张卡都<b>有得有失</b>（例：外卖平台 客流 +25% / 每杯收入 -¥0.8），选定后本局内一直生效。<br>
+      它改的是<b>收益结构</b>而不是收益总量 —— 抽到什么不重要，<b>怎么围绕它调整才是玩法</b>。<br>
+      手感不对可以选「都不要」，维持现有路线同样是一种决策。</p></div>
+    <div class="m-sec"><h4>🏔️ 章节关卡</h4>
+      <ul>
+        <li>30 天切成 <b>6 章</b>，每章 3 个关卡，按顺序打通</li>
+        <li>备货阶段选难度：<b>⚪普通 / 🔵精英 / 🟣传奇</b> —— 门槛越高、奖励越丰厚</li>
+        <li>关卡<b>跨 5 天推进</b>，是中期目标；每日合同是今天的目标，两个时间尺度互补</li>
+        <li>未达成<b>不扣口碑</b>，只是拿不到奖励 —— 敢挑高难度才有趣</li>
+      </ul></div>
+    <div class="m-sec"><h4>🏷️ 招牌配方</h4>
+      <ul>
+        <li>某款配方累计卖出 <b>60 / 150 / 300 杯</b>，逐级成为「小有名气 / 街坊认可 / 城市名店」</li>
+        <li>累计销量<b>跨局继承</b>：这一局卖得多，下一局该款永久更强</li>
+        <li>加成只对<b>那一款</b>生效 —— 专精一款还是铺开十款，是个真取舍</li>
+      </ul></div>
+    <div class="m-sec"><h4>🎭 特殊顾客</h4>
+      <ul>
+        <li>每天最多来 <b>2 位</b>特殊顾客，队列里带 <b>★ 角标</b>，一眼能认出来</li>
+        <li><b>🧑‍🍳 美食评论家</b>：服务好口碑 +6，服务砸了 -5</li>
+        <li><b>🛒 团购大单</b>：一次要 6~8 杯，但耐心很低，忙不过来他就走了</li>
+        <li><b>💝 熟客回购</b>：价格能多接受 15%，给的小费也多 60%</li>
       </ul></div>
     <div class="m-sec"><h4>👥 客群与竞争</h4>
       <ul>
@@ -1122,7 +1437,8 @@ UI.showHelp = function () {
       </ul></div>
     <div class="m-sec"><h4>♾️ 模式</h4>
       <ul>
-        <li><b>每日挑战</b>：每天一局，全网同一种子，可反复刷分</li>
+        <li><b>每日挑战</b>：每天一局，全网同一种子 —— 同一张价格表、同一批顾客、同一串事件，比的只有经营决策</li>
+        <li><b>🏆 日榜</b>：每日挑战的成绩会排进当天的榜单。一天可以打很多局，榜单记的是<b>当天最好的那一局</b>；小游戏端可直接看全网排名，网页端看本机记录</li>
         <li><b>无尽模式</b>：通关后继续经营，目标每达成一次上涨 55%</li>
         <li><b>战绩卡片</b>：结局页可保存战绩图，方便截图分享</li>
       </ul></div>
@@ -1144,7 +1460,7 @@ UI.showHelp = function () {
 
 /* ---------------- 紧急进货 ---------------- */
 UI.showRestock = function () {
-  const s = window.S;
+  const s = window.S; if (!s) return;
   let h = `<button class="close-x" onclick="UI.closeModal()">×</button>
     <div class="m-title">🚚 紧急进货</div>
     <div class="m-sub">营业中进货加价 ${Math.round((CFG.RESTOCK_MARKUP - 1) * 100)}%，但能救回排队的客人</div>`;
@@ -1302,8 +1618,13 @@ UI.renderSlots = function () {
 };
 
 /* ---------------- 结局 ---------------- */
-UI.showEnd = function (result) {
-  const s = window.S;
+/**
+ * daily 是 recordDaily 的返回值（普通模式为 null）。
+ * 每日挑战这一局结束时，日榜相关的反馈就挂在这里 —— 玩家刚打完，
+ * 正是最想知道「我比别人/比自己强在哪」的时刻。
+ */
+UI.showEnd = function (result, daily) {
+  const s = window.S; if (!s) return;
   const d = diffOf(s);
   const nw = netWorth(s);
   let emoji, title, grade, gradeSub;
@@ -1323,12 +1644,25 @@ UI.showEnd = function (result) {
       : `净资产 ${money(nw)}，距离目标 ${money(goal)} 还差 ${money(goal - nw)}。`;
   }
   const st = s.stats;
+  /* V8 结局四维称号：同一个 S 级有多种拿法 —— 走口碑流和走利润流
+     是两种不同的经营叙事，给玩家"下一局换个打法"的动力。 */
+  const et = endingTitle(s);
+  const axesHtml = et.axes.map(a => `<div class="ax ${a.tier > 0 ? 'on' : ''}">
+      <div class="ax-e">${a.emoji}</div>
+      <div class="ax-b"><div class="ax-n">${esc(a.name)}${a.tier > 0 ? ` · ${esc(a.title)}` : ''}</div>
+        <div class="ax-d">${esc(a.desc)}</div></div>
+    </div>`).join('');
   const html = `<div class="end-emoji">${emoji}</div>
     <div class="end-title">${title}</div>
     <div class="end-grade">${grade}</div>
     <div style="font-size:12.5px;color:var(--txt2);margin-bottom:16px">${gradeSub}</div>
     ${(s.history || []).length >= 2 ? `<div class="card" style="text-align:left">
       <div class="card-h">📈 经营曲线</div><div id="endChart"></div></div>` : ''}
+    <div class="card" style="text-align:left">
+      <div class="card-h">🏅 经营四维
+        <span class="ch-sub">${et.best ? `最高称号「${esc(et.best.title)}」` : '本局未达称号线'}</span></div>
+      <div class="ax-grid">${axesHtml}</div>
+    </div>
     <div class="card" style="text-align:left">
       <div class="rep-grid">
         <div class="rep-i"><div class="ri-k">最终净资产</div><div class="ri-v">${money(nw)}</div></div>
@@ -1338,7 +1672,7 @@ UI.showEnd = function (result) {
         <div class="rep-i"><div class="ri-k">最高单日净利</div><div class="ri-v">${money(st.bestDayProfit)}</div></div>
         <div class="rep-i"><div class="ri-k">最终口碑</div><div class="ri-v">${Math.round(s.rep)}</div></div>
         <div class="rep-i"><div class="ri-k">成就</div><div class="ri-v">${Object.keys(s.ach).length}/${ACHIEVEMENTS.length}</div></div>
-        <div class="rep-i"><div class="ri-k">分店数量</div><div class="ri-v">${s.shops}</div></div>
+        <div class="rep-i"><div class="ri-k">招牌配方</div><div class="ri-v">${sigViews(s).filter(x => x.lv > 0).length}/${RECIPES.length}</div></div>
       </div>
     </div>
     <div class="card" style="text-align:left">
@@ -1349,6 +1683,19 @@ UI.showEnd = function (result) {
       </div>
       <div class="m-btns"><button class="btn btn-amber" data-act="prestige">♻️ 转生并开始新一局</button></div>
     </div>
+    ${daily ? `
+    <div class="card" style="text-align:left">
+      <div class="card-h">📅 每日挑战 <span class="ch-sub">${esc(todayKey())} · 全网同种子</span></div>
+      <div style="font-size:12px;color:var(--txt2);line-height:1.7">
+        本局净资产 <b style="color:var(--amber)">${esc(money(daily.score))}</b>。${
+        daily.newEver ? '🎉 刷新了个人最佳！'
+          : (daily.newToday ? `比今天上一局多赚 ${esc(money(daily.score - daily.prevToday))}。`
+            : (daily.prevToday > 0
+              ? `今天已有更好的一局（${esc(money(daily.prevToday))}），本局不计入榜单。`
+              : '本局成绩不计入榜单。'))}
+      </div>
+      <div class="m-btns"><button class="btn btn-amber" data-act="dailyrank">🏆 查看日榜</button></div>
+    </div>` : ''}
     ${result !== 'bankrupt' ? `
     <div class="card" style="text-align:left">
       <div class="card-h">♻️ 无尽模式 <span class="ch-sub">不结束，目标持续升级</span></div>
@@ -1381,6 +1728,61 @@ UI.showEnd = function (result) {
 
   UI.showScreen('screen-end');
   if (result !== 'bankrupt' && nw >= goalOf(s)) UI.confetti(90);
+};
+
+/* ---------------- 每日挑战日榜（F3） ---------------- */
+/**
+ * 展示本机这一份每日挑战记录：今日成绩 / 个人最佳 / 最近 7 天。
+ *
+ * 这不是占位视图 —— 小游戏端在未登录或宿主不支持排行榜时，玩家看到的
+ * 也是同一套内容。两版刻意保持结构一致，才不会出现「换端就少半截」。
+ */
+UI.showDailyRank = function () {
+  const m = window.META || {};
+  const key = todayKey();
+  const today = (m.dailyDate === key) ? Math.max(0, Math.round(num(m.dailyBest, 0))) : 0;
+  const ever = Math.max(0, Math.round(num(m.dailyBestEver, 0)));
+  const recent = dailyRecent(m, 7);
+
+  let peak = 1;
+  for (const r of recent) if (r.best > peak) peak = r.best;
+
+  let bars = '';
+  for (const r of recent) {
+    const h = Math.max(8, Math.round(r.best / peak * 100));
+    const isBest = ever > 0 && r.best >= ever;
+    bars += '<div class="rk-bar' + (isBest ? ' on' : '') + '">'
+      + '<i style="height:' + h + '%"></i>'
+      + '<b>' + esc(r.d.slice(5)) + '</b>'
+      + '<span>' + esc(money(r.best)) + '</span>'
+      + '</div>';
+  }
+  if (!bars) {
+    bars = '<div style="font-size:11.5px;color:var(--txt3)">还没有成绩 —— '
+      + '打一局每日挑战，这里就会出现柱子。</div>';
+  }
+
+  UI.modal(`<button class="close-x" onclick="UI.closeModal()">×</button>
+    <div class="m-title">📅 每日挑战 · 同种子日榜</div>
+    <div class="m-sub">每天全网共用同一个种子：同一张价格表、同一批顾客、同一串事件。比的只有经营决策。</div>
+    <div class="card" style="text-align:left">
+      <div class="card-h">🎯 今日 <span class="ch-sub">${esc(key)}</span></div>
+      <div class="rk-now">
+        <div><div class="rk-k">今日最好</div><div class="rk-v">${today ? esc(money(today)) : '未挑战'}</div></div>
+        <div><div class="rk-k">个人最佳</div><div class="rk-v">${ever ? esc(money(ever)) : '—'}</div></div>
+      </div>
+    </div>
+    <div class="card" style="text-align:left">
+      <div class="card-h">📈 ${recent.length ? `最近 ${recent.length} 天` : '最近战绩'}</div>
+      <div class="rk-bars">${bars}</div>
+    </div>
+    <div style="font-size:11px;color:var(--txt3);line-height:1.7">
+      网页版本机保存（换设备或清缓存会丢）。全网日榜在抖音小游戏版内可见。
+    </div>
+    <div class="m-btns">
+      <button class="btn btn-amber" onclick="UI.closeModal();doAct('daily')">🚀 挑战今天这一局</button>
+      <button class="btn btn-ghost" onclick="UI.closeModal()">关闭</button>
+    </div>`);
 };
 
 /* ---------------- 导入 / 导出存档 ---------------- */

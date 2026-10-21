@@ -188,6 +188,7 @@ function onDown(x, y) {
      onMove 里按当时处在哪个区取用，避免两个滚动量互相污染。 */
   down.scroll0 = VIEW.scroll[VIEW.tab] || 0;
   down.stageScroll0 = VIEW.stageScroll || 0;
+  down.modalScroll0 = VIEW.modalScroll || 0;
   VIEW.pressedAct = down.hit ? { act: down.hit.act, id: down.hit.id, extra: down.hit.extra } : null;
 }
 
@@ -203,7 +204,16 @@ function onMove(x, y) {
   var thresh = inStage ? 14 : 6;
   if (!down.dragging && Math.abs(dy) > thresh) down.dragging = true;
   if (!down.dragging) return;
-  if (VIEW.modal || VIEW.tut.on) return;
+  /* 弹窗开着时滑的是弹窗内容（目前只有 help 超高）。
+     以前这里直接 return —— 375×667 上玩法说明的底部章节和音效开关
+     被裁掉且永远滑不到，而音效开关在小游戏版只此一处。 */
+  if (VIEW.modal) {
+    if ((VIEW.modalMax || 0) > 0) {
+      VIEW.modalScroll = Math.max(0, Math.min(VIEW.modalMax, down.modalScroll0 - dy));
+    }
+    return;
+  }
+  if (VIEW.tut.on) return;
   if (inStage) {
     /* 出杯位多到一屏放不下时才允许滑动；能放下就完全不介入，手感与以前一致 */
     VIEW.stageScroll = Math.max(0, Math.min(VIEW.stageMax, down.stageScroll0 - dy));
@@ -264,12 +274,32 @@ function doAct(act, id, extra) {
   if (act === 'daily') {
     RNG.setSeed(seedFromText('bubble-' + todayKey()));
     QUEST_RNG.setSeed(seedFromText('bubble-quest-' + todayKey()));
-    var ds = newGame('normal', _META.bp);
+    /* 每日挑战不继承声望：全网同一局，开局资金也必须一样，否则榜单不公平 */
+    var ds = newGame('normal', 0);
     ds.daily = true;
     _META.runs++;
     saveMeta(_META);
     startGame('normal', ds, true);
     toast('📅 每日挑战 ' + todayKey() + ' · 全网同一局');
+    return;
+  }
+  /* --- 每日挑战日榜（F3） ---
+     面板里同时给「本地记录」和「平台原生榜单」两个入口：
+     平台那一路不可用时（未登录 / 宿主不支持 / 非抖音端），
+     面板本身还在，只是不显示「全网日榜」那个按钮。 */
+  if (act === 'dailyrank') { VIEW.modal = { type: 'dailyrank' }; return; }
+  if (act === 'ranklist') {
+    /* 必须在触摸回调里同步调用：doAct 由 tt.onTouchEnd 直接驱动。
+       登录态已在 CAPS.init() 预热，所以这里是同步走到 getImRankList 的。 */
+    var rkOk = CAPS.openRank(function (ok, why) {
+      /* openRank 内部是异步回调（等登录预热），这里只处理同步返回为 false 的情况 */
+      if (!ok && why) {
+        toast(why === 'notlogin' ? '登录没成功，稍后再试一次'
+          : (why === 'showing' ? '榜单正在打开中…'
+            : (why === 'loadfail' ? '榜单拉取失败，稍后再试' : '当前环境不支持排行榜')));
+      }
+    });
+    if (!rkOk) { /* 同步分支已由回调覆盖，这里不重复提示 */ }
     return;
   }
   if (act === 'import') { VIEW.modal = { type: 'import' }; return; }
@@ -281,7 +311,13 @@ function doAct(act, id, extra) {
     if (!es) { toast('还没有可导出的存档'); return; }
     var code = exportSave(es);
     if (!code) { toast('存档导出失败'); return; }
-    toast(PLAT.copy(code) ? '📋 存档码已复制，可粘到浏览器版导入' : '复制失败，剪贴板不可用');
+    /* copy() 现在返回 'pending'（已发起异步写入）/ false（剪贴板根本不可用）。
+       以前这里把 pending 当成 true，于是 Promise 被拒时也提示"已复制" ——
+       玩家以为码在剪贴板里，实际没有，存档等于丢了。现在等真实结果再说话。 */
+    var cp = PLAT.copy(code, function (ok2) {
+      toast(ok2 ? '📋 存档码已复制，可粘到浏览器版导入' : '复制没成功，请换个方式保存（或去 H5 版导出）');
+    });
+    if (cp !== 'pending') toast('当前环境不支持剪贴板，存档码只能在本机查看');
     return;
   }
   if (act === 'doimport') {
@@ -312,12 +348,16 @@ function doAct(act, id, extra) {
     return;
   }
 
+  /* 玩法说明放在「需要开局」守卫之前：标题页就摆着这颗按钮（ui.js 的
+     📖 玩法说明），以前它排在守卫后面 —— 标题页点它没有任何反应，
+     和 H5 那次 TITLE_ACTS 漏项是同一类病。 */
+  if (act === 'help') { VIEW.modal = { type: 'help' }; return; }
+
   /* 标题页只放行上面这些 */
   if (!s) return;
 
   /* --- 全局 --- */
   if (act === 'tab') { VIEW.tab = id; VIEW.scroll[id] = 0; beep('up', 560, 0.05); return; }
-  if (act === 'help') { VIEW.modal = { type: 'help' }; return; }
   /* 必须走独立的 chart 弹窗：report 底部固定带「进入 Day N」按钮，
      复用它会让备货阶段看一眼曲线就直接跳到第二天。 */
   if (act === 'chart') { VIEW.modal = { type: 'chart' }; return; }
@@ -328,8 +368,11 @@ function doAct(act, id, extra) {
      doAct 正是由 tt.onTouchEnd 直接驱动，中间不能插入任何异步包装。 */
   if (act === 'gift') { VIEW.modal = { type: 'gift' }; return; }
   if (act === 'sidebar') {
-    CAPS.gotoSidebar(function (ok) {
-      toast(ok ? '👉 已前往侧边栏，从那里再进来就能领补给' : '当前环境不支持侧边栏');
+    CAPS.gotoSidebar(function (ok, why) {
+      /* 按原因给文案：玩家自己取消 ≠ 环境不支持 ≠ 接口报错 */
+      toast(ok ? '👉 已前往侧边栏，从那里再进来就能领补给'
+        : (why === 'cancelled' ? '没关系，下次再从侧边栏进来也一样'
+          : (why === 'failed' ? '跳转没成功，稍后再试一次' : '当前环境不支持侧边栏')));
     });
     return;
   }
@@ -355,8 +398,15 @@ function doAct(act, id, extra) {
     return;
   }
   if (act === 'adreward') {
-    CAPS.showRewarded(function (watched) {
-      if (!watched) { toast('广告未看完，奖励不发放'); return; }
+    CAPS.showRewarded(function (watched, why) {
+      /* 三种失败要分开说：没配置 / 今天次数用完 / 广告拉取失败 / 中途关掉 */
+      if (!watched) {
+        toast(why === 'exhausted' ? '今天的广告奖励已经领完啦，明天再来'
+          : (why === 'aborted' ? '广告没看完，奖励不发放（再看一次就能领）'
+            : (why === 'loadfail' ? '广告没加载出来，稍后再试'
+              : '当前环境暂不支持广告奖励')));
+        return;
+      }
       CAPS.markAd();
       var ac = grantGift('ad');
       VIEW.modal = null;
@@ -408,6 +458,59 @@ function doAct(act, id, extra) {
     else toast(tb.msg || '无法团建');
     return;
   }
+  /* V5 章节关卡：选难度档（备货阶段，打烊时结算） */
+  if (act === 'stagediff') {
+    var sdr = setStageDiff(s, id);
+    if (sdr.ok) {
+      var sv2 = stageView(s);
+      var d2 = null;
+      for (var sdi = 0; sdi < sv2.diffs.length; sdi++) {
+        if (sv2.diffs[sdi].id === sdr.diff) d2 = sv2.diffs[sdi];
+      }
+      if (d2) toast('🏔️ 难度：' + d2.emoji + d2.name + ' · 目标 ' + d2.goal + ' · 奖励 ' + money(d2.cash));
+      beep('up', 700, 0.06);
+    }
+    return;
+  }
+  /* --- 经营维度：场地类型 / 城市 / 地图坐标（与 H5 同一套引擎校验） ---
+     Canvas 端用「点一下切下一个」的循环交互：272 个市不可能都摆成按钮，
+     弹层选择器在触屏上又要多一次点击、容易被遮罩误触。 */
+  if (act === 'vtypeNext') {
+    var rvt = nextVenueType(s);
+    if (rvt.ok) { toast(rvt.emoji + ' 经营场地：' + rvt.name); beep('up', 700, 0.06); }
+    else toast(rvt.msg || '切换失败');
+    return;
+  }
+  if (act === 'vprovNext') {
+    var rvp = nextProvince(s);
+    if (rvp.ok) { toast('📍 ' + rvp.cityName); beep('up', 700, 0.06); }
+    else toast(rvp.msg || '切换失败');
+    return;
+  }
+  if (act === 'vcityNext') {
+    var rvc = nextCity(s);
+    if (rvc.ok) { toast('📍 ' + rvc.cityName); beep('up', 700, 0.06); }
+    else toast(rvc.msg || '切换失败');
+    return;
+  }
+  if (act === 'vdistNext') {
+    var rvd = nextDistrict(s);
+    if (rvd.ok) { toast('📍 区：' + rvd.districtName); beep('up', 700, 0.06); }
+    else toast(rvd.msg || '切换失败');
+    return;
+  }
+  if (act === 'vgeoCity') {
+    var rvg = setGeoToCityCenter(s);
+    if (rvg.ok) { toast('📍 已记 ' + rvg.geo.lng + ', ' + rvg.geo.lat); beep('up', 880, 0.08); }
+    else toast(rvg.msg || '定位失败');
+    return;
+  }
+  if (act === 'vgeoclear') {
+    clearGeo(s);
+    toast('已清除地图坐标');
+    beep('tap', 600, 0.05);
+    return;
+  }
   if (act === 'endless') {
     var eg = startEndless(s);
     VIEW.modal = null;
@@ -423,13 +526,28 @@ function doAct(act, id, extra) {
   if (act === 'nextday') {
     VIEW.modal = null;
     VIEW.stageScroll = 0;
-    nextDay(s);
-    if (isFinished(s)) { finishRun('finish'); return; }
-    autoSave(s);
-    /* 插屏广告只放在「打烊结算 → 进入下一天」这个自然断点上，
-       并带冷却（默认 120 秒）。营业中途弹广告会直接毁掉连点手感。 */
-    CAPS.showInterstitial();
-    toast('🌅 Day ' + s.day + ' 开始 · ' + (s.weather ? s.weather.emoji + ' ' + s.weather.name : ''));
+    /* 打烊三选一：有卡包先选，选完再进下一天（与 H5 同序）。
+       引导进行中不放卡包 —— 那时的 pickcard 会被引导吞掉，玩家会卡在弹窗里。 */
+    if (VIEW.tut.on) s.cardOffer = null;
+    if (s.cardOffer && s.cardOffer.length) { VIEW.modal = { type: 'card' }; autoSave(s); return; }
+    enterNextDay();
+    return;
+  }
+  if (act === 'pickcard') {
+    var picked = applyCard(s, id);
+    VIEW.modal = null;
+    if (picked) {
+      toast('🃏 采纳「' + picked.emoji + ' ' + picked.name + '」' + picked.gain + ' · 代价 ' + picked.cost);
+      confetti(20); buzz('short');
+    }
+    enterNextDay();
+    return;
+  }
+  if (act === 'skipcard') {
+    VIEW.modal = null;
+    s.cardOffer = null;
+    toast('🚫 这次都不采纳（保留现有经营路线）');
+    enterNextDay();
     return;
   }
   if (act === 'eventopt') {
@@ -500,11 +618,14 @@ function doAct(act, id, extra) {
   }
   if (act === 'prestige') {
     var gain = prestigeGain(s);
+    var mb = _META.bp;
     VIEW.modal = {
       type: 'confirm', title: '♻️ 品牌升级',
       text: '把 ' + money(netWorth(s)) + ' 净资产转化为 +' + gain + ' ★ 永久声望。'
-        + '转生后本局进度重置，但声望永久保留（客流 +'
-        + (_META.bp + gain) * 2 + '%）。',
+        + '转生后本局进度重置，但声望永久保留：开局创业基金 '
+        + money(prestigeStartCash(mb)) + ' → ' + money(prestigeStartCash(mb + gain))
+        + '（封顶 ' + money(CFG.BP_START_CAP) + '），由你决定投去雇人、提速还是开店。'
+        + '声望不再直接加客流 —— 客人多到做不过来只会流失扣口碑。',
       okText: '确认转生', okKind: 'amber', okAct: 'prestige2',
     };
     return;
@@ -515,6 +636,8 @@ function doAct(act, id, extra) {
     _META.maxBpEarned = Math.max(_META.maxBpEarned || 0, _META.bp);
     _META.best[s.diff] = Math.max(_META.best[s.diff] || 0, Math.round(netWorth(s)));
     for (var k in s.ach) _META.ach[k] = true;
+    /* V6 招牌配方：转生后立刻开新局，本局的招牌进度必须先写回 */
+    mergeSignature(_META, s);
     saveMeta(_META);
     clearSave();
     VIEW.modal = null;
@@ -563,6 +686,19 @@ function doAct(act, id, extra) {
   }
   if (act === 'pause') { var p = togglePause(s); toast(p ? '⏸ 已暂停' : '▶ 继续营业'); return; }
   if (act === 'restock') { VIEW.modal = { type: 'restock' }; return; }
+  /* 营业中两个即时决策（V2） */
+  if (act === 'sale') {
+    var sr = flashSale(s);
+    if (sr.ok) toast('📣 限时促销 ' + sr.seconds + ' 秒：客流大涨，每杯少赚一点');
+    else toast(sr.msg);
+    return;
+  }
+  if (act === 'pullmenu') {
+    var pr = pullMenu(s);
+    if (pr.ok) toast('📥 已下架 ' + pr.emoji + pr.name + '（今天只卖了 ' + pr.sold + ' 杯）');
+    else toast(pr.msg);
+    return;
+  }
   if (act === 'closeearly') {
     if (s.sim) { s.sim.closing = true; toast('🔔 提前打烊'); }
     return;
@@ -650,7 +786,9 @@ function grantIap(g) {
 /* ---------------- 流程 ---------------- */
 function startGame(diff, loaded, keepSeed) {
   if (!loaded && !keepSeed) { RNG.clear(); QUEST_RNG.clear(); }
-  var s = loaded || newGame(diff, _META.bp);
+  /* V6 招牌配方：把跨局累计销量带进这一局（每日挑战除外 ——
+     全网同种子必须完全一致，带了继承数据就没法比了）。 */
+  var s = loaded || newGame(diff, _META.bp, keepSeed ? null : _META.sig);
   _S = s;
   if (!loaded) { _META.runs++; saveMeta(_META); }
   VIEW.screen = 'game';
@@ -665,6 +803,7 @@ function startGame(diff, loaded, keepSeed) {
   if (s.phase === 'report') VIEW.modal = { type: 'report', day: s.day };
   autoSave(s);
   if (lb) { toast('🔥 连续登录 ' + lb.streak + ' 天，创业基金 +' + money(lb.cash)); confetti(16); buzz('short'); }
+  if (!loaded && s.startBonus > 0) toast('🌟 声望 ' + Math.round(num(s.bpBonus)) + ' ★ → 创业基金 +' + money(s.startBonus));
   /* 首次游玩自动开引导；读档则续上未完成的进度 */
   if (loaded && s.tut && !s.tut.done && s.tut.step > 0 && s.tut.step < TUTORIAL.length) {
     tutStart(s.tut.step);
@@ -674,6 +813,11 @@ function startGame(diff, loaded, keepSeed) {
 }
 
 function autoSave(s) {
+  /* 营业中途不落盘：清洗器会把 phase 退回 'prep'（现场恢复不了），
+     而开门时扣掉的营销费已经进了 s.dayMarketing、重开门又会被覆盖掉 ——
+     那笔钱既没退回现金、也没进任何一天的日报，等于凭空蒸发。
+     这条规则与 H5 版 js/main.js 的 autoSave 完全一致，改一边就要改另一边。 */
+  if (!s || s.phase === 'open') return false;
   var ok = saveGame(s);
   if (!ok && !VIEW.storageWarned) {
     VIEW.storageWarned = true;
@@ -710,10 +854,28 @@ function emitAchievements(s) {
   if (s.newAchList && s.newAchList.length) { got = s.newAchList; s.newAchList = []; }
   else got = checkAchievements(s);
   if (!got.length) return;
+  /* ★ 只在跨局首次达成时给，重复达成仍有现金 */
+  var firsts = claimAchStars(_META, got);
+  if (firsts.length) saveMeta(_META);
   for (var i = 0; i < got.length; i++) {
-    toast('🏅 ' + got[i].emoji + ' ' + got[i].name + '  +' + money(got[i].reward.cash || 0) + ' ' + got[i].reward.bp + '★');
+    var isFirst = firsts.indexOf(got[i].id) >= 0;
+    toast('🏅 ' + got[i].emoji + ' ' + got[i].name + '  +' + money(got[i].reward.cash || 0)
+      + (isFirst ? ' ' + got[i].reward.bp + '★' : ''));
   }
   confetti(24);
+}
+
+/* 「进入下一天」的统一出口：抽卡（如果有）走完以后都会回到这里 */
+function enterNextDay() {
+  var s = _S;
+  nextDay(s);
+  if (isFinished(s)) { finishRun('finish'); return; }
+  autoSave(s);
+  /* 插屏广告只放在「打烊结算 → 进入下一天」这个自然断点上，
+     并带冷却（默认 120 秒）。营业中途弹广告会直接毁掉连点手感。 */
+  CAPS.showInterstitial();
+  /* 事件弹窗不用在这里设：主循环会在 prep 阶段自动补弹（这里重复设会把新一天的 toast 吞掉） */
+  toast('🌅 Day ' + s.day + ' 开始 · ' + (s.weather ? s.weather.emoji + ' ' + s.weather.name : ''));
 }
 
 function finishRun(kind) {
@@ -721,11 +883,19 @@ function finishRun(kind) {
   var nw = netWorth(s);
   _META.best[s.diff] = Math.max(_META.best[s.diff] || 0, Math.round(nw));
   for (var k in s.ach) _META.ach[k] = true;
+  /* V6 招牌配方：本局卖出的累计销量写回 META，下一局继承 */
+  mergeSignature(_META, s);
   pushRunRecord(_META, s, kind);
+
+  var daily = null;
   if (s.daily) {
-    var key = todayKey();
-    if (_META.dailyDate !== key || (_META.dailyBest || 0) < nw) {
-      _META.dailyDate = key; _META.dailyBest = Math.round(nw);
+    daily = recordDaily(_META, todayKey(), nw);
+    /* 只上报「刷新了当天最好成绩」的那一局：榜单每次上报是覆盖，
+       拿一局摆烂成绩盖上去等于自己把名次冲掉。 */
+    if (daily.newToday) {
+      CAPS.submitRank(daily.score, function (uploaded) {
+        if (uploaded) toast('📊 今日成绩已上传：' + money(daily.score));
+      });
     }
   }
   saveMeta(_META);
@@ -740,19 +910,32 @@ function finishRun(kind) {
   else if (ratio >= 0.6) { e = '🌱'; tt = '小有起色'; g = 'C'; }
   else { e = '😵'; tt = '创业未遂'; g = 'D'; }
 
+  var sub = kind === 'bankrupt'
+    ? '你在 Day ' + s.day + ' 破产了，店铺被房东收回。'
+    : (ratio >= 1 ? '净资产 ' + money(nw) + '，超额完成目标！'
+      : '净资产 ' + money(nw) + '，距离目标还差 ' + money(Math.max(0, num(goalOf(s)) - nw)) + '。');
+  if (daily) {
+    sub += '\n' + (daily.newEver
+      ? '🎉 刷新个人最佳！今日成绩 ' + money(daily.score)
+      : (daily.newToday
+        ? '📅 比今天上一局多赚 ' + money(daily.score - daily.prevToday)
+        : (daily.prevToday > 0
+          ? '📅 今天已有更好的一局（' + money(daily.prevToday) + '），本局不计入榜单'
+          : '📅 本局成绩不计入榜单')));
+  }
   var st = s.stats || {};
+  /* V8 结局四维称号：与 H5 结局页同一段数据、同一口径 */
+  var et = endingTitle(s);
   VIEW.end = {
-    kind: kind, emoji: e, title: tt, grade: g,
-    sub: kind === 'bankrupt'
-      ? '你在 Day ' + s.day + ' 破产了，店铺被房东收回。'
-      : (ratio >= 1 ? '净资产 ' + money(nw) + '，超额完成目标！'
-        : '净资产 ' + money(nw) + '，距离目标还差 ' + money(Math.max(0, num(goalOf(s)) - nw)) + '。'),
+    kind: kind, emoji: e, title: tt, grade: g, daily: daily,
+    sub: sub,
     items: [
       { k: '最终净资产', v: money(nw) },
       { k: '经营天数', v: st.days + ' 天' },
       { k: '累计卖出', v: st.totalCups + ' 杯' },
       { k: '累计营收', v: money(st.totalRevenue) },
     ],
+    axes: et.axes,
   };
   VIEW.screen = 'end';
   confetti(60);
@@ -760,12 +943,29 @@ function finishRun(kind) {
 
 /* ---------------- 新手引导 ---------------- */
 var TUT_RECT = {
+  /* ②③④⑥ 从 VIEW.panelRects 读**本帧绘制的真实矩形**（panelManage /
+     drawPanelArea 画到哪就记到哪）。以前是硬编码 y 偏移 —— 面板内容顺序
+     一调整（比如建议卡挪到营销后面），高亮就指到别的东西上去了。
+     读不到时退回旧估值，防御读档瞬间的空帧。 */
   hud: function () { return { x: 16, y: 8, w: CW - 32, h: 52 }; },
-  advice: function () { var L = CV.layoutOf(CW, CH); return { x: 16, y: L.bodyY + 300, w: CW - 32, h: 60 }; },
-  market: function () { var L = CV.layoutOf(CW, CH); return { x: 16, y: L.bodyY + 220, w: CW - 32, h: 60 }; },
-  menu: function () { var L = CV.layoutOf(CW, CH); return { x: 16, y: L.bodyY + 100, w: CW - 32, h: 60 }; },
+  advice: function () {
+    var r = VIEW.panelRects && VIEW.panelRects.advice;
+    return r || { x: 16, y: 300, w: CW - 32, h: 60 };
+  },
+  market: function () {
+    var r = VIEW.panelRects && VIEW.panelRects.market;
+    return r || { x: 16, y: 220, w: CW - 32, h: 200 };
+  },
+  menu: function () {
+    var r = VIEW.panelRects && VIEW.panelRects.menu;
+    return r || { x: 16, y: 100, w: CW - 32, h: 120 };
+  },
   grow: function () { var L = CV.layoutOf(CW, CH); return { x: 0, y: L.bodyY, w: CW, h: L.tabH }; },
-  open: function () { var L = CV.layoutOf(CW, CH); return { x: 16, y: L.bodyY + 340, w: CW - 32, h: 48 }; },
+  open: function () {
+    var r = VIEW.panelRects && VIEW.panelRects.open;
+    /* 钉底的「开门营业」按钮：真实矩形由 drawPanelArea 回写 */
+    return r || { x: 16, y: CH - 60, w: CW - 32, h: 44 };
+  },
   station: function () { return { x: 16, y: CH * 0.42, w: CW - 32, h: 76 }; },
   boss: function () { return { x: 16, y: CH - 92, w: (CW - 44) / 2, h: 42 }; },
   finish: function () { var L = CV.layoutOf(CW, CH); return { x: 0, y: L.hudH, w: CW, h: L.tabH }; },
@@ -799,6 +999,42 @@ function tutSync() {
   /* 按步骤切到对应 Tab，玩家才看得懂在讲什么 */
   if (st.tab && PANELS[st.tab] && VIEW.screen === 'game') VIEW.tab = st.tab;
   VIEW.tut.rect = f ? f() : null;
+}
+
+/**
+ * 引导跟随滚动：把高亮目标滚进可视区。
+ *
+ * 为什么需要：引导第④步指向"配方行"（备货页靠下），而备货页的内容高度
+ * 是**随机的** —— 今日任务的条数、今日建议的条数、菜单行数都会变。
+ * 目标落在可视区外时，命中区不会被登记（GFX.addHit 的既有行为），
+ * 玩家按提示"点一下任意配方卡"却**根本点不到**，
+ * 高亮框也画在屏幕外看不见 —— 引导直接卡死。
+ * 备货页加了一张关卡卡后更容易触发（内容整体下移 66px）。
+ *
+ * 每帧都要**重算**高亮矩形：panelRects 是本帧绘制时写入的，
+ * 而 tut.rect 若只在切步时算一次，就会和实际位置对不上
+ * （高亮框指向 192、采购卡却画在 -130）。
+ */
+function tutFollowScroll() {
+  if (!VIEW.tut.on) return;
+  var st = TUTORIAL[VIEW.tut.step];
+  if (!st) { VIEW.tut.rect = null; return; }
+  /* 高亮矩形跟着本帧的 panelRects 走 */
+  var f = TUT_RECT[st.key];
+  VIEW.tut.rect = f ? f() : null;
+  var r = VIEW.tut.rect;
+  if (!r) return;
+  /* 只有面板类目标需要跟随（HUD / 钉底按钮是固定的） */
+  if (st.key !== 'advice' && st.key !== 'market' && st.key !== 'menu') return;
+  var L = layoutOf(CW, CH);
+  var top = L.bodyY + 10;
+  var bottom = CH - 60;
+  var sc = VIEW.scroll[VIEW.tab] || 0;
+  if (r.y < top) {
+    VIEW.scroll[VIEW.tab] = Math.max(0, sc - (top - r.y) - 8);
+  } else if (r.y + r.h > bottom) {
+    VIEW.scroll[VIEW.tab] = sc + (r.y + r.h - bottom) + 8;
+  }
 }
 function tutNext() {
   VIEW.tutRush = 0;
@@ -837,6 +1073,10 @@ if (typeof globalThis !== 'undefined') {
     toast: toast, step: step, draw: draw,
     onDown: onDown, onMove: onMove, onUp: onUp,
     get S() { return _S; }, get META() { return _META; },
+    /* VIEW 暴露出来给自动化测试用：里面存着当前 tab / 滚动位置 / 弹窗状态，
+       是"玩家现在看到什么"的唯一真相源。canvas 版没有 DOM 可查，
+       断言只能从这里读。没有它，自动化测试就只能靠猜。 */
+    get VIEW() { return VIEW; },
     get canvas() { return canvas; },
     get ctx() { return ctx; },
     get size() { return { w: CW, h: CH }; },

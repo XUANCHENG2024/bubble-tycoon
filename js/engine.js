@@ -55,7 +55,9 @@ const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const rnd = (a, b) => a + RNG.next() * (b - a);
 const rndInt = (a, b) => Math.floor(rnd(a, b + 1));
 const pick = arr => arr[Math.floor(RNG.next() * arr.length)];
-const money = n => '¥' + Math.round(n).toLocaleString('en-US');
+/* + 0 是为了消掉 -0：Math.round(-0.4) 得到 -0，直接格式化会显示成刺眼的「-¥0」
+   （IEEE-754 里 -0 + 0 === +0，对其它数值没有副作用）。 */
+const money = n => '¥' + (Math.round(n) + 0).toLocaleString('en-US');
 
 function weightedPick(items, weightFn) {
   if (!items || items.length === 0) return undefined;   /* 空列表不该返回 items[0] 这种假结果 */
@@ -114,15 +116,105 @@ function stationCount(s) { return 1 + s.staff.length + (s.shops - 1); }
 function queueCap(s) { return CFG.BASE_QUEUE + s.up.decor; }
 function patienceOf(s) { return CFG.BASE_PATIENCE + s.up.decor * 0.7; }
 
+/* ---------------- 策略卡效果 ----------------
+ * 所有卡的效果都从这里读，结算只有乘法和加法两种：
+ *   cardMul  —— 倍率类（客流 / 速度 / 成本），多张叠乘
+ *   cardSum  —— 绝对值类（每杯扣多少钱），多张叠加
+ * 这样加一张新卡只要写 fx，不用改任何调用点。 */
+/* 走 data.js 的索引，不再线性扫卡表。cardMul / cardSum 是热路径：
+   serviceTimeOf 每个工位每帧都要跑一次，卡表 12 张 × 在手 6 张 × 20 个工位，
+   一帧就是上千次字符串比较。 */
+function cardById(id) { return STRATEGY_CARD_INDEX.get(id); }
+/** 策略卡主题共鸣（V4）：同主题 2 张 +10%，3 张 +25%。
+ *  没有这一层时 12 张卡就是纯数值交换，玩家的选卡逻辑退化成
+ *  "算净收益最大的那几张"——单局内唯一的 build 分歧点变成算术题。 */
+function cardThemeBonus(s, key) {
+  /* key 是 fx 键。先反查"这个增益属于哪个主题"，再数该主题凑了几张。
+     增益/代价的归属写在每张卡的 boost 字段里，不靠数值大小猜 ——
+     中央厨房的 cogs: 0.86（成本 −14%）是增益却小于 1，
+     精品路线的 traffic: 0.92 是代价也小于 1。 */
+  let themeKey = null;
+  for (const id of (Array.isArray(s.cards) ? s.cards : [])) {
+    const c = cardById(id);
+    const th = CARD_THEMES[id];
+    if (c && th && Array.isArray(c.boost) && c.boost.indexOf(key) >= 0) { themeKey = th.key; break; }
+  }
+  if (!themeKey) return 1;
+  let n = 0;
+  for (const id of s.cards) {
+    const th = CARD_THEMES[id];
+    if (th && th.key === themeKey) n++;
+  }
+  return n >= 3 ? 1.25 : (n === 2 ? 1.10 : 1);
+}
+function cardMul(s, key) {
+  let m = 1;
+  if (!Array.isArray(s.cards)) return m;
+  const bonus = cardThemeBonus(s, key);
+  for (const id of s.cards) {
+    const c = cardById(id);
+    if (c && c.fx && typeof c.fx[key] === 'number') {
+      /* 只有 boost 声明过的增益键吃共鸣；代价（unitSub/wage/rent…）不跟着涨 */
+      m *= (Array.isArray(c.boost) && c.boost.indexOf(key) >= 0) ? c.fx[key] * bonus : c.fx[key];
+    }
+  }
+  return m;
+}
+function cardSum(s, key) {
+  let n = 0;
+  if (!Array.isArray(s.cards)) return n;
+  for (const id of s.cards) {
+    const c = cardById(id);
+    if (c && c.fx && typeof c.fx[key] === 'number') n += c.fx[key];
+  }
+  return n;
+}
+/** 当前局面是否已经以及结束时该不该抽卡 */
+function shouldOfferCard(s) {
+  if (!STRATEGY_CARDS.length) return false;
+  if ((Array.isArray(s.cards) ? s.cards.length : 0) >= CFG.CARD_MAX) return false;
+  /* d 已经用 Math.max(1, …) 兜底了，d > 0 恒为真 —— 留着只会让人以为这里在防什么 */
+  const d = Math.max(1, num(s.day, 1));
+  return d % Math.max(1, CFG.CARD_EVERY) === 0;
+}
+/** 抽 CFG.CARD_OFFER_N 张没拿过的卡；池子不够就把剩下的全给 */
+function drawCards(s) {
+  if (!shouldOfferCard(s)) return null;
+  const owned = Array.isArray(s.cards) ? s.cards : [];
+  const pool = STRATEGY_CARDS.filter(c => owned.indexOf(c.id) < 0);
+  if (!pool.length) return null;
+  /* 用 QUEST_RNG 而不是主 RNG：主序列要保证「同种子同经济」，
+     不能让抽卡这种新增调用把每日挑战的可复现性弄坏。 */
+  const n = Math.min(CFG.CARD_OFFER_N, pool.length);
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    out.push(pool.splice(Math.floor(QUEST_RNG.next() * pool.length), 1)[0]);
+  }
+  return out.length ? out : null;
+}
+/** 选中一张卡。返回该卡（失败返回 null —— id 不合法或已有这张卡） */
+function applyCard(s, id) {
+  const c = cardById(id);
+  if (!c) return null;
+  if (!Array.isArray(s.cards)) s.cards = [];
+  if (s.cards.indexOf(id) >= 0) return null;
+  if (s.cards.length >= CFG.CARD_MAX) return null;
+  s.cards.push(id);
+  s.cardOffer = null;
+  pushLog(s, `🃏 采纳策略「${c.emoji} ${c.name}」：${c.gain} · 代价 ${c.cost}`);
+  return c;
+}
+
 /** 某配方按当前库存均价计算的单杯成本 */
 function costOf(s, rid) {
   const r = recipeById(rid);
   let c = CFG.PACK_COST;
   for (const k in r.req) c += (r.req[k] || 0) * (s.avgCost[k] || ingById(k).base);
-  return c;
+  /* 招牌配方（V6）：等级越高，每杯成本越省（熟练度/规模效应） */
+  return Math.max(0.1, c - sigCostCut(s, rid));
 }
 function priceOf(s, rid) {
-  return Math.max(1, Math.round(recipeById(rid).price * (s.ratios[rid] || 1)));
+  return Math.max(1, Math.round(recipeById(rid).price * (s.ratios[rid] || 1)) + sigPriceAdd(s, rid));
 }
 function invUsed(s) {
   let n = 0;
@@ -149,7 +241,15 @@ function trafficOf(s) {
   t *= marketingMul(s.marketing);
   t *= s.weather.traffic;
   t *= 1 + 0.6 * (s.shops - 1);
-  t *= 1 + 0.02 * s.bpBonus + 0.01 * s.up.auto;
+  /* 这里曾经有一项 `1 + 0.02 * s.bpBonus`：声望点直接乘在客流上，线性且无上限。
+     问题是产能（出杯位 / 服务速度）每局都从零起步，只有需求端在涨 ——
+     多来的客人接不住 → 排队超时流失 → 扣口碑 → 口碑又反过来压客流，成负反馈。
+     实测（tools/sim.js --bp=N，同一 AI、同一套种子）：
+       bp 0 → 94% 达标 / 破产 0/8，bp 74（第 5 局）→ 74% 达标 / 破产 7/8。
+     所以声望不再动客流，改为折算「开局创业基金」（见 prestigeStartCash）：
+     钱怎么变成产能（雇人 / 提速 / 开店）由玩家自己决定，不会单向推高需求。 */
+  t *= 1 + 0.01 * s.up.auto;
+  t *= cardMul(s, 'traffic');     /* 🃏 策略卡：薄利多销 / 达人探店这类 */
   for (const st of s.staff) if (st.trait === 'star') t *= 1.07;
   t *= d.traffic;
   t *= (s.eventTrafficMul || 1);
@@ -207,14 +307,36 @@ function serviceTimeOf(s, worker, sim) {
   let t = CFG.BASE_SERVICE / (1 + 0.20 * s.up.speed) / (1 + 0.12 * s.up.training);
   if (worker) t /= staffMult(s, worker);
   if (sim && sim.rushUntil > sim.t) t *= 0.55;
+  t /= cardMul(s, 'speed');       /* 🃏 策略卡：极速出杯更快、自助点单机更慢 */
   return Math.max(CFG.MIN_SERVICE, t);
 }
 
 /* ---------------- 新游戏 ---------------- */
-function newGame(diffKey, bpBonus) {
+/** 品牌声望点 → 开局创业基金。√ 曲线：前 25 点换 ¥225，100 点换 ¥450，400 点触顶 ¥900 */
+function prestigeStartCash(bp) {
+  const n = Math.max(0, Math.floor(num(bp, 0)));
+  if (n <= 0) return 0;
+  return Math.min(CFG.BP_START_CAP, Math.floor(CFG.BP_START_RATE * Math.sqrt(n)));
+}
+
+/**
+ * 开一局新游戏。
+ * sigCarry：V6 招牌配方的**跨局基线**（{ 配方 id: 累计卖出杯数 }）。
+ *   传 null/省略 = 从零开始（每日挑战就是这种情况：全网同种子必须一样，
+ *   继承了招牌加成就没法比了）。传对象 = 把上一局累计的销量带进来。
+ */
+function newGame(diffKey, bpBonus, sigCarry) {
   const d = DIFFICULTY[diffKey] || DIFFICULTY.normal;
+  const startBonus = prestigeStartCash(bpBonus);
+  /* 招牌基线：只认真实存在的配方 id，脏数据（可编辑存档）一律归零 */
+  const sig = {};
+  if (sigCarry && typeof sigCarry === 'object' && !Array.isArray(sigCarry)) {
+    for (const rid of Object.keys(sigCarry)) {
+      if (recipeById(rid)) sig[rid] = posCap(sigCarry[rid], 0);
+    }
+  }
   const s = {
-    v: 2, diff: d.key, day: 1, cash: d.cash, rep: 26,
+    v: 2, diff: d.key, day: 1, cash: d.cash + startBonus, rep: 26,
     inv: { tea: 34, milk: 30, sugar: 24, pearl: 22, fruit: 16 },
     avgCost: {}, prices: {}, prevPrices: {},
     recipes: ['boba'], menu: ['boba'], ratios: { boba: 1.0 },
@@ -227,19 +349,34 @@ function newGame(diffKey, bpBonus) {
     phase: 'prep', sim: null, report: null, pendingEvent: null,
     debtDays: 0, lastReport: null, prevReport: null, lastMarketing: 0, msHit: [],
     bpBonus: bpBonus || 0,
+    startBonus: startBonus,
     stats: { totalCups: 0, totalRevenue: 0, totalProfit: 0, bestDayProfit: 0, totalLost: 0, totalServed: 0, clicks: 0, days: 0 },
-    flags: {}, ach: {}, log: [],
+    flags: {}, ach: {}, log: [], cards: [], cardOffer: null,
     tut: { active: false, step: 0, done: false },
     history: [], endless: false, milestone: 0, daily: false,
     quests: [], questDay: 1, newQuests: [],
+    contract: null,           /* 每日合同（V1）：{ id, done }，备货阶段可见 */
+    /* V5 章节关卡：{ diff: 难度档 id, done: { 关卡 id: true } } */
+    stage: { diff: 'std', done: {} },
+    stageResult: null,
+    /* V6 招牌配方：s.sig = 跨局继承的累计销量基线，s.sigRun = 本局新增 */
+    sig: sig, sigRun: {},
+    /* 经营维度：场地类型 / 城市 / 地图位置。
+       三个字段都是**可选**的，老存档读出来时由 sanitizeVenue 补默认值。
+       坐标不预置 —— 默认给一个坐标等于替玩家编造经营地，应如实留空。 */
+    venue: { type: VENUE_DEFAULT, provId: CITY_DEFAULT.slice(0, 2), cityId: CITY_DEFAULT },
   };
   for (const g of ING) { s.prices[g.id] = g.base; s.prevPrices[g.id] = g.base; s.avgCost[g.id] = g.base; }
   rollWeather(s); rollTrend(s); rollNews(s);
   refreshCandidates(s, true);
   initRival(s);
+  rollContract(s);
   rollQuests(s);
   pushLog(s, '🎉 你的第一家奶茶店开张了！');
   pushLog(s, `🏙️ 隔壁开了家「${s.rival.name}」，生意还不错…`);
+  if (startBonus > 0) {
+    pushLog(s, `🌟 品牌声望 ${Math.floor(bpBonus)} ★ → 创业基金 +${money(startBonus)}`);
+  }
   return s;
 }
 
@@ -260,7 +397,19 @@ function rivalShare(s) {
   let share = clamp(0.04 + diff * 0.5 + Math.min(0.07, s.day * 0.004), 0.02, 0.34);
   share *= Math.max(0.4, 1 - 0.06 * (s.rival.proof || 0));
   share *= Math.max(0.5, 1 - 0.035 * s.recipes.length);
-  return share * (s.rival.aggro || 1);
+  /* 乘 aggro 之前那三项的含义：
+     ① 基础份额 0.02~0.34（口碑差 + 天数升温，开局温和、后期升温）
+     ② proof 护城河最多砍到 40%（玩家可主动投资对冲）
+     ③ 配方数降温：只卖一款时最吃亏，最多砍到 50%
+     三项叠完是 0.3281，这**不是**最终值 —— 后面还要乘 aggro。
+
+     最后这个 0.5 只是**防脏数据的兜底**，不是设计上限：
+     引擎里 aggro 涨到 1.5 就封顶（updateRival），实战最大 0.3281 × 1.5 ≈ 0.49，
+     0.5 完整覆盖得到；而导入的存档允许到 3（清洗器 clamp 到 0.5~3），
+     那会算出 0.98 —— 客流几乎清零。兜在 0.5 上，作弊存档最多让客流减半。
+     别把它压到 0.34：那样 aggro > 1.04 之后乘了也白乘，"打压对手"整条
+     策略线会变成死参数，而 ui 的红色警告（阈值 1.05）恰好在失效点亮起。 */
+  return clamp(share * (s.rival.aggro || 1), 0, 0.5);
 }
 function updateRival(s) {
   const r = s.rival; if (!r) return;
@@ -271,6 +420,11 @@ function updateRival(s) {
 function rivalAction(s, id) {
   const a = rivalActionById(id);
   if (!a || !s.rival) return { ok: false, msg: '未知行动' };
+  /* 挖角是**绕过 hireStaff 的第二条进人路径**，上限得在这里也挡一次，
+     否则「挖到 21 人 → 存档 → 读档」又会凭空少人。放在扣费之前，不白扣钱。 */
+  if (id === 'poach' && s.staff.length >= CFG.STAFF_MAX) {
+    return { ok: false, msg: `员工已达上限 ${CFG.STAFF_MAX} 人` };
+  }
   const cdKey = 'cd_' + id;
   if (a.cd && (s.rival.cd[cdKey] || 0) > s.day) return { ok: false, msg: `冷却中 · Day ${s.rival.cd[cdKey]} 后可再执行` };
   if (id === 'diff' && (s.rival.proof || 0) >= 5) return { ok: false, msg: '护城河已满级' };
@@ -449,23 +603,29 @@ function doResearch(s, rid) {
 /* ---------------- 升级 / 分店 ---------------- */
 function upgradeCost(s, id) {
   const u = upgradeById(id);
-  const lv = s.up[id];
+  /* 非法 id / 未初始化等级：以前前者会读 u.max 抛异常，
+     后者会让 Math.pow(mult, undefined) 算出 NaN 并一路传下去。 */
+  if (!u) return null;
+  const lv = pos(s.up[id], 0);
   if (lv >= u.max) return null;
   return Math.round(u.base * Math.pow(u.mult, lv) * diffOf(s).costMult);
 }
 function doUpgrade(s, id) {
+  const u = upgradeById(id);
+  if (!u) return { ok: false, msg: '没有这项升级' };
   const c = upgradeCost(s, id);
   if (c == null) return { ok: false, msg: '已满级' };
   if (s.cash < c) return { ok: false, msg: '现金不足' };
-  s.cash -= c; s.invested += c; s.up[id]++;
-  const u = upgradeById(id);
+  s.cash -= c; s.invested += c; s.up[id] = pos(s.up[id], 0) + 1;
   bumpQuest(s, 'upgrade', 1);
   pushLog(s, `⬆️ ${u.emoji} ${u.name} 升至 Lv.${s.up[id]}`);
   return { ok: true, cost: c };
 }
 function shopCost(s) {
-  const i = s.shops - 1;
-  if (i >= SHOP_COSTS.length) return null;
+  /* s.shops 被脏存档改成 0 / 负数时，SHOP_COSTS[-1] 是 undefined，
+     Math.round(undefined) 会得到 NaN 并一路传到现金里。 */
+  const i = pos(s.shops, 1) - 1;
+  if (i < 0 || i >= SHOP_COSTS.length) return null;
   return Math.round(SHOP_COSTS[i] * diffOf(s).costMult);
 }
 function openShopBranch(s) {
@@ -481,6 +641,9 @@ function openShopBranch(s) {
 function hireStaff(s, idx) {
   const c = s.candidates[idx];
   if (!c) return { ok: false, msg: '候选人不存在' };
+  /* 上限守卫：以前这里不查人数，员工可以一直加到存档清洗器截断为止，
+     读档时多出来的会无声消失（连遣散费都不退）。 */
+  if (s.staff.length >= CFG.STAFF_MAX) return { ok: false, msg: `员工已达上限 ${CFG.STAFF_MAX} 人` };
   if (s.cash < c.fee) return { ok: false, msg: '现金不足' };
   s.cash -= c.fee; s.invested += c.fee;
   const st = { id: s.nextStaffId++, name: c.name, emoji: c.emoji, skill: c.skill, trait: c.trait, wage: c.wage, stamina: 100 };
@@ -513,12 +676,18 @@ function teamBuild(s) {
 
 /* ---------------- 营业模拟 ---------------- */
 function openShop(s) {
+  /* 阶段守卫放最前面：重复开门会把 s.sim 整个重建，
+     等于当天的营收、排队、已服务顾客全被悄悄清零。 */
+  if (s.phase === 'open') return { ok: false, msg: '正在营业中' };
+  if (s.phase === 'report') return { ok: false, msg: '今天的账还没结，先看看日报' };
   if (s.menu.length === 0) return { ok: false, msg: '至少要上架一款饮品' };
+  /* 先校验再动钱。客流算不出来时旧代码已经把营销费扣掉了，
+     玩家没开成门却平白少一笔钱，再点一次又少一笔。 */
   if (s.cash < s.marketing) s.marketing = Math.max(0, Math.floor(s.cash));
-  s.dayMarketing = s.marketing;
-  s.cash -= s.marketing;
   const traffic = num(trafficOf(s), 3);
   if (!(traffic > 0)) return { ok: false, msg: '今日客流数据异常，无法开门' };
+  s.dayMarketing = s.marketing;
+  s.cash -= s.marketing;
   const dur = CFG.DAY_DURATION;
   const stations = [];
   stations.push({ idx: 0, worker: null, order: null, isBoss: true });
@@ -540,9 +709,14 @@ function openShop(s) {
     queue: [], stations, paused: false,
     orders: 0, cups: 0, lost: 0, priceLost: 0, stockout: 0,
     revenue: 0, cogs: 0, tips: 0,
-    typeServed: {}, typeLost: {},
+    typeServed: {}, typeLost: {}, byRecipe: {},
     repGain: 0, trendCups: 0, clicks: 0, combo: 0, comboBest: 0, lastClick: 0, lastClickWall: 0,
-    rushUntil: -99, rushCd: 0, trafficMul: s.eventTrafficMul || 1,
+    rushUntil: -99, rushCd: 0,
+    highlights: [],           /* 每日高光（V3）：当天值得记住的 3 件事 */
+    /* 营业中两个即时决策（V2），每天各一次 */
+    saleUntil: -99, saleUsed: false, saleCap: 0, pulled: null,
+    /* V7 事件型顾客：今天已出的特殊顾客数（上限 2） */
+    specialCount: 0,
     floaters: [],
   };
   s.marketing = 0;
@@ -550,22 +724,28 @@ function openShop(s) {
   return { ok: true };
 }
 
-function spawnCustomer(s) {
+/**
+ * 生成一位顾客并入队。
+ * type 非空 = 特殊顾客（V7）；为 null = 常规顾客（按客群权重抽）。
+ */
+function spawnOne(s, type) {
   const sim = s.sim;
   if (!s.menu.length) return;
-  const type = pickCustomerType(s);
+  const t = type || pickCustomerType(s);
 
   const r = weightedPick(s.menu, rid => {
     const rec = recipeById(rid);
     let p = rec.pop;
+    /* 招牌配方（V6）：等级越高，该款越抢手 —— 跨局累计出来的"招牌效应" */
+    p *= sigSaleMul(s, rid);
     if (rec.tags.includes(s.trend)) p *= 1.55;
     if (s.weather.boom && rec.tags.includes(s.weather.boom)) p *= 1.25;
     if (s.weather.bust && rec.tags.includes(s.weather.bust)) p *= 0.78;
     for (const tag of rec.tags) {
-      if (type.prefer.includes(tag)) p *= 1.75;
-      if (type.avoid && type.avoid.includes(tag)) p *= 0.5;
+      if (t.prefer.includes(tag)) p *= 1.75;
+      if (t.avoid && t.avoid.includes(tag)) p *= 0.5;
     }
-    if (type.popBias) p *= Math.pow(Math.max(0.4, rec.pop / 100), 1.2) * type.popBias;
+    if (t.popBias) p *= Math.pow(Math.max(0.4, rec.pop / 100), 1.2) * t.popBias;
     return p;
   });
 
@@ -573,29 +753,51 @@ function spawnCustomer(s) {
   /* 等位座满了 → 直接走人 */
   if (sim.queue.length >= queueCap(s)) {
     sim.lost++; sim.repGain += CFG.LOST_REP;
-    sim.typeLost[type.id] = (sim.typeLost[type.id] || 0) + 1;
+    sim.typeLost[t.id] = (sim.typeLost[t.id] || 0) + 1;
     bumpQuest(s, 'lost', 1);
     return;
   }
-  /* 价格接受度：客群容忍度不同，定价过高会被当场劝退 */
-  const eff = (s.ratios[r] || 1) / type.priceTol;
+  /* 价格接受度：客群容忍度不同，定价过高会被当场劝退。
+     🃏 策略卡「精品路线」提高 priceTol —— 可以涨价而不被劝退。 */
+  const eff = (s.ratios[r] || 1) / t.priceTol / cardMul(s, 'priceTol');
   const accept = clamp(1.35 - 0.35 * eff, 0.3, 1.5);
   if (RNG.next() > accept) {
     sim.lost++; sim.priceLost++;
     sim.repGain += CFG.LOST_REP * 0.6;
     bumpQuest(s, 'lost', 1);
-    sim.typeLost[type.id] = (sim.typeLost[type.id] || 0) + 1;
+    sim.typeLost[t.id] = (sim.typeLost[t.id] || 0) + 1;
     sim.floaters.push({ text: '太贵了…', kind: 'bad' });
     return;
   }
 
   sim.queue.push({
     id: 'c' + sim.spawned + '_' + RNG.next().toString(36).slice(2, 6),
-    face: type.emoji, rid: r, type: type.id,
-    cups: rndInt(type.cups[0], type.cups[1]),
+    face: t.emoji, rid: r, type: t.id,
+    /* V7：特殊顾客要在队列里一眼认出来（face 不同 + 角标） */
+    special: type ? t.id : null,
+    cups: rndInt(t.cups[0], t.cups[1]),
     wait: 0,
-    patience: patienceOf(s) * type.patienceMul * rnd(0.85, 1.2),
+    /* 🃏 策略卡：会员体系延长耐心、员工入股缩短耐心 */
+    patience: patienceOf(s) * t.patienceMul * cardMul(s, 'patience') * rnd(0.85, 1.2),
   });
+}
+
+function spawnCustomer(s) {
+  const sim = s.sim;
+  if (!s.menu.length) return;
+  /* V7 事件型顾客：与一位常规顾客**一一替换**（总客流不变）。
+     两版方案的取舍（都是 sim 配对实测出来的）：
+       ① 「顶替」（初版）—— 特殊顾客挤掉一位常规顾客。easy 掉 11pp：
+          挤掉的是本来能服务好的客人，而特殊客人自己又因耐心低而流失，
+          等于白丢一单；玩家在 26 秒里也**无法**"优先伺候"谁（工位全并行）。
+       ② 「额外到店」—— 特殊顾客多来一位，总客流 +1/天。easy 修好了（+1pp），
+          但 hard 涨了 +5pp：hard 目标高（48000），每天多 1 位客人 ≈ 80 元，
+          30 天就是 +2400 元 ≈ +5pp —— 客流总量变了就是会改难度。
+     现在取③：**1:1 替换**（特殊顾客取代那位常规顾客），客流总量严格不变，
+     难度中性；特殊顾客只把"今天这一位是谁"换掉，不改变今天的客流量。
+     配合调优后的数值（耐心/口碑系数不低于常规顾客），期望价值不亏。 */
+  const sp = pickSpecialType(s);
+  spawnOne(s, sp);
 }
 
 function assignOrder(s, st, c) {
@@ -613,7 +815,7 @@ function assignOrder(s, st, c) {
     }
   }
   const n = c.cups || 1;
-  for (let i = 0; i < n; i++) sim.cogs += consumeStock(s, c.rid, st.worker);
+  for (let i = 0; i < n; i++) sim.cogs += consumeStock(s, c.rid, st.worker) * cardMul(s, 'cogs');
   st.order = { c, progress: 0, price: priceOf(s, c.rid), rid: c.rid, cups: n, type: c.type };
   return true;
 }
@@ -625,17 +827,26 @@ function completeOrder(s, st) {
   const cups = o.cups || 1;
   const trendHit = !!(rec && rec.tags && rec.tags.includes(s.trend));
   const type = customerTypeById(o.type) || null;
-  const income = o.price * cups;
+  /* 🃏 策略卡：外卖平台 / 加盟模式按杯让利 —— 客流赚回来，单杯少赚一点 */
+  const sub = cardSum(s, 'unitSub') * cups;
+  /* 限时促销（V2）期间每杯再让 ¥2：它换来的是那 8 秒里多来 60% 的客人，
+     划不划算取决于当时产能够不够 —— 这正是它作为"决策"的意义。 */
+  const saleNow = sim.t < sim.saleUntil;
+  const income = Math.max(1, o.price * cups - sub - (saleNow ? CFG.SALE_UNIT_SUB * cups : 0));
 
   s.cash += income;
   sim.revenue += income;
   sim.orders++;
   sim.cups += cups;
   sim.repGain += CFG.SERVE_REP * (type ? type.repMul : 1) * cups;
+  /* V6 招牌配方：累计卖出杯数（跨局继承的成长线） */
+  addSigCups(s, o.rid, cups);
   if (trendHit) sim.trendCups += cups;
   s.stats.totalCups += cups;
   s.stats.totalRevenue += income;
   sim.typeServed[o.type] = (sim.typeServed[o.type] || 0) + cups;
+  /* 按配方的销量：临时下架（V2）要靠它挑出"今天最不受欢迎的那款" */
+  sim.byRecipe[o.rid] = (sim.byRecipe[o.rid] || 0) + cups;
   st.order = null;
   bumpQuest(s, 'cups', cups);
   bumpQuest(s, 'revenue', income);
@@ -643,6 +854,36 @@ function completeOrder(s, st) {
   sim.floaters.push({ text: '+' + money(income), kind: 'good' });
   if (trendHit && sim.trendCups >= 20) s.flags.trendMaster = true;
   if (cups >= 4) s.flags.bigOrder = true;
+  /* ---- V7 事件型顾客：服务成功的口碑奖励 ----
+     口碑奖惩是**当日生效**的（repGain 在 endDay 统一结算成口碑增减），
+     所以特殊顾客的价值当天就能兑现；没接住（走了）走 repBad。 */
+  if (type && type.repGood) {
+    sim.repGain += num(type.repGood, 0);
+    sim.floaters.push({ text: `${type.emoji} ${type.name} +${type.repGood} 口碑`, kind: 'gold' });
+    pushHighlight(sim, 'special', `${type.emoji} ${type.name} 满意离店 · 口碑 +${type.repGood}`);
+  }
+  /* ---- 每日高光（V3）：把"今天发生了什么值得记住的事"记下来 ----
+     日报从此不只是 6 个数字。同一类型只记一条（取当天最强的那次），
+     最多 3 条 —— 再多日报就变成流水账，反而没人看。 */
+  if (cups >= 4 && !hasHighlight(sim, 'bigorder')) {
+    pushHighlight(sim, 'bigorder', `🛍️ 一单 ${cups} 杯大单，进账 ${money(income)}`);
+  }
+  if (type && type.id === 'influencer' && !hasHighlight(sim, 'infl')) {
+    pushHighlight(sim, 'infl', `📸 第一位网红顾客下单了（${cups} 杯 ${rec ? rec.name : ''}）`);
+  }
+  if (trendHit && sim.trendCups >= 8 && !hasHighlight(sim, 'trend')) {
+    pushHighlight(sim, 'trend', `🌟 今日流行「${rec.name}」已卖 ${sim.trendCups} 杯`);
+  }
+}
+
+/* ---- 每日高光（V3）的三个小工具 ---- */
+function hasHighlight(sim, kind) {
+  return !!(sim.highlights || []).some(h => h.kind === kind);
+}
+function pushHighlight(sim, kind, text) {
+  if (!Array.isArray(sim.highlights)) sim.highlights = [];
+  if (sim.highlights.length >= 3) return;
+  sim.highlights.push({ kind: kind, text: text });
 }
 
 function rushStation(s, idx) {
@@ -656,12 +897,20 @@ function rushStation(s, idx) {
   sim.lastClick = now;
   sim.lastClickWall = wall;
   sim.comboBest = Math.max(sim.comboBest, sim.combo);
+  /* 每日高光（V3）：连击里程碑。comboBest 在打烊时还会再补一条兜底，
+     这里记的是"当时那一下"——带上杯序和当时的小费，比事后的总数更有画面感。 */
+  if (sim.combo === 5 && !hasHighlight(sim, 'combo')) {
+    pushHighlight(sim, 'combo', `⚡ 第 ${sim.orders} 单时打出 5 连击`);
+  } else if (sim.combo === 10 && !hasHighlight(sim, 'combo10')) {
+    pushHighlight(sim, 'combo10', `🔥 第 ${sim.orders} 单时打出 10 连击`);
+  }
   const bonus = 1 + Math.min(1.0, sim.combo * 0.05);
   st.order.progress += CFG.RUSH_BOOST * bonus;
   sim.clicks++;
   s.stats.clicks++;
   bumpQuest(s, 'clicks', 1);
-  const t = st.order.price * CFG.RUSH_TIP * bonus;
+  /* 🃏 策略卡：自助点单机提高小费、极速出杯降低小费 */
+  const t = st.order.price * CFG.RUSH_TIP * bonus * cardMul(s, 'tip');
   s.cash += t; sim.revenue += t; sim.tips += t;
   /* 小费进了 sim.revenue（结算报表会算），任务进度也该跟着走，
      否则「营业额冲高」的进度条永远比报表少一截。 */
@@ -700,8 +949,12 @@ function tick(s, dt) {
   if (!sim.closing) {
     const x = Math.min(1, sim.t / sim.duration);
     const curve = 0.55 + 1.0 * Math.sin(Math.PI * x);
-    sim.arrivalAcc += sim.rate * curve * dt;
-    while (sim.arrivalAcc >= 1 && sim.spawned < sim.traffic) {
+    /* 限时促销（V2）生效中：到达速率 ×1.6，同时把当天的客人上限抬高 ——
+       只提速不抬上限的话等于"把后面的客人提前叫来"，玩家反而亏了。 */
+    const saleOn = sim.t < sim.saleUntil;
+    sim.arrivalAcc += sim.rate * curve * (saleOn ? CFG.SALE_TRAFFIC : 1) * dt;
+    const cap = sim.saleCap > 0 ? sim.saleCap : sim.traffic;
+    while (sim.arrivalAcc >= 1 && sim.spawned < cap) {
       sim.arrivalAcc -= 1;
       spawnCustomer(s);
     }
@@ -718,6 +971,16 @@ function tick(s, dt) {
       sim.typeLost[c.type] = (sim.typeLost[c.type] || 0) + 1;
       bumpQuest(s, 'lost', 1);
       sim.floaters.push({ text: '走了…', kind: 'bad' });
+      /* V7 事件型顾客：没接住特殊顾客要扣口碑（repBad）。
+         这是"服务特殊顾客有代价"的一半 —— 只给好处不给代价，
+         玩家会无脑忽略其他客人。 */
+      if (c.special) {
+        const sp = specialById(c.special);
+        if (sp && sp.repBad) {
+          sim.repGain += num(sp.repBad, 0);
+          sim.floaters.push({ text: `${sp.emoji} ${sp.name} 不满离店`, kind: 'bad' });
+        }
+      }
     }
   }
 
@@ -750,14 +1013,17 @@ function tick(s, dt) {
 
 /* ---------------- 结算 ---------------- */
 function endDay(s) {
+  /* 守卫：sim 只在 openShop 成功后才建。prep / report 阶段（或开门被拒后）
+     调进来会直接读 null.revenue 崩掉，而结算是主流程必经的一步。 */
+  if (!s || !s.sim) return null;
   const sim = s.sim;
   const d = diffOf(s);
   /* 无尽模式的难度阶梯：只抬目标数字、成本不变，等于难度没变，
      玩家靠时间堆就能过。每上一个里程碑，工资与租金同步上浮，
      逼着他继续提人效 —— 这才是「越来越难」。 */
   const ep = endlessPressure(s);
-  const wages = Math.round(s.staff.reduce((a, b) => a + b.wage, 0) * ep);
-  let rentRaw = (CFG.RENT_PER_SHOP * s.shops + CFG.SHOP_UPKEEP * (s.shops - 1)) * d.rentMult * ep;
+  const wages = Math.round(s.staff.reduce((a, b) => a + b.wage, 0) * ep * cardMul(s, 'wage'));
+  let rentRaw = (CFG.RENT_PER_SHOP * s.shops + CFG.SHOP_UPKEEP * (s.shops - 1)) * d.rentMult * ep * cardMul(s, 'rent');
   for (const st of s.staff) if (st.trait === 'wise') rentRaw *= 0.92;
   const rent = Math.round(rentRaw);
   const net = sim.revenue - sim.cogs - wages - rent - (s.dayMarketing || 0);
@@ -773,12 +1039,14 @@ function endDay(s) {
   }
   let repDelta = (sat - 0.68) * 10 + (1.0 - avgRatio) * 1.5 + s.up.decor * 0.15;
   for (const st of s.staff) if (st.trait === 'nice') repDelta += 0.6;
-  repDelta += sim.repGain * 0.25;
+  repDelta += sim.repGain * 0.25 * cardMul(s, 'repGain');
   const before = s.rep;
   s.rep = clamp(s.rep + repDelta, 0, 100);
 
+  /* 🃏 策略卡：通宵营业让员工更抗造 */
+  const drain = cardMul(s, 'stamina');
   for (const st of s.staff) {
-    let cost = 28;
+    let cost = 28 * drain;
     if (st.trait === 'iron') cost *= 0.65;
     st.stamina = clamp(st.stamina - cost, 0, 100);
   }
@@ -788,7 +1056,12 @@ function endDay(s) {
   s.stats.totalLost += sim.lost;
   s.stats.totalServed += (sim.orders || 0);
   s.stats.days++;
-  if ((sim.cups || 0) >= 12 && sim.lost === 0) s.flags.perfectDay = true;
+  /* 零流失日。门槛是 24 杯而不是 12：第 1 天客流只有 10~16 杯、
+     单个工位稍微盯一下就能零流失，实测有 53% 的第二天都能白拿这 ¥600，
+     而它一项就占了新档首日成就现金的四成以上（首日成就现金平均 ¥773，
+     相当于开局资金的 107%）。抬到 24 杯后它变成"经营上轨道之后的好日子"，
+     前期不再白送一笔。 */
+  if ((sim.cups || 0) >= 24 && sim.lost === 0) s.flags.perfectDay = true;
 
   const worth = netWorth(s);
   /* 结算页的环比要用「前一天」那份，而下面马上就要覆盖 s.report 了，
@@ -803,6 +1076,21 @@ function endDay(s) {
     trendCups: sim.trendCups, clicks: sim.clicks, comboBest: sim.comboBest,
     tips: sim.tips, traffic: sim.traffic,
     typeServed: Object.assign({}, sim.typeServed), typeLost: Object.assign({}, sim.typeLost),
+    /* 每日高光（V3）：打烊时补两条"只有看完全天才知道"的 ——
+       连击峰值和零流失。营业中记的是"当时那一下"，这里补的是"今天做到了什么"。 */
+    contractResult: s.contractResult || null,
+    /* V5 章节关卡的结算结果：同样在 report 构建后回填（见 endDay 的说明） */
+    stageResult: s.stageResult || null,
+    highlights: (function () {
+      const out = arr(sim.highlights).map(h => ({ kind: String(h.kind), text: String(h.text) }));
+      if (sim.comboBest >= 3 && !out.some(h => h.kind.indexOf('combo') === 0)) {
+        out.push({ kind: 'comboBest', text: `⚡ 今天最高 ${sim.comboBest} 连击，小费进账 ${money(sim.tips)}` });
+      }
+      if (sim.lost === 0 && sim.orders >= 6 && out.length < 3) {
+        out.push({ kind: 'nolost', text: '🎯 零流失日 · 一位客人都没跑掉' });
+      }
+      return out.slice(0, 3);
+    })(),
     rivalShare: rivalShare(s), worth,
     pressure: ep, lastMarketing: s.lastMarketing || 0,
   };
@@ -824,6 +1112,23 @@ function endDay(s) {
   /* 净利型任务在此刻才结算得出来，随后统一终判「越少越好」型 */
   bumpQuest(s, 'profit', net);
   closeQuests(s);
+  /* 合同也在此刻终判：它看的是当日全部指标（净利/满意率都只有打烊才算得出）。
+     放在 checkAchievements 之前 —— 合同失败会扣口碑，而口碑影响当日成就判定。
+     注意 s.report 在本函数更早处就已经构建好了（合同要用 report.net / report.sat），
+     所以结算结果要**回填**进那个对象，日报才拿得到。只在真的结算出结果时写回：
+     endDay 被二次调用时 settleContract 返回 null，直接赋值会把上一份抹掉。 */
+  const cr = settleContract(s);
+  if (cr) {
+    s.contractResult = cr;
+    if (s.report) s.report.contractResult = cr;
+  }
+  /* V5 章节关卡：同样在打烊终判，同样要**回填**进已经构建好的 report。
+     放在合同之后、成就之前 —— 关卡奖励也会影响当日现金与成就判定口径。 */
+  const sr = settleStage(s);
+  if (sr) {
+    s.stageResult = sr;
+    if (s.report) s.report.stageResult = sr;
+  }
 
   updateRival(s);
   s.newAchList = checkAchievements(s);
@@ -846,6 +1151,11 @@ function endDay(s) {
   }
 
   if (s.cash < 0) s.debtDays++; else s.debtDays = 0;
+
+  /* 打烊抽卡：每 CARD_EVERY 天给三选一，最多拿 CARD_MAX 张。
+     放在这里而不是 nextDay，是为了让「结算 → 选卡 → 新的一天」成一个连续动作，
+     玩家看到昨天的报表再决定要不要改路线，而不是新的一天开始后凭记忆选。 */
+  s.cardOffer = drawCards(s);
 }
 
 /** 中期目标：当前这个 5 天窗口要在净资产上达到的锚点。
@@ -873,6 +1183,14 @@ function endlessPressure(s) {
 function startEndless(s) {
   s.endless = true;
   s.milestone = Math.max(1, s.milestone || 0);
+  /* 进入无尽 = 从干净的备货状态重新开始一段，必须把上一段的营业现场清掉。
+     否则从结算页走「提前收官 → 继续经营」进来时，phase 还停在 'report'、
+     s.sim / s.report 还挂着，openShop 会被「今天的账还没结」挡死；
+     而 finishRun 已经 clearSave() 过，重载页也救不回来 —— 一局直接没了。 */
+  s.phase = 'prep';
+  s.sim = null;
+  s.report = null;
+  s.cardOffer = null;
   pushLog(s, '♾️ 进入无尽模式：目标将持续升级！');
   return goalOf(s);
 }
@@ -881,6 +1199,7 @@ function startEndless(s) {
 function nextDay(s) {
   s.endlessLevelUp = false;
   s.day++;
+  s.cardOffer = null;      /* 抽卡是一次性的，跨天作废（选择发生在 enterNextDay 之前） */
   /* 营销是「当天一次性投入」，开门时扣掉、打烊后归零。
      以前这个归零是完全静默的：玩家第二天看到营销还是 ¥0，
      会以为昨天那笔钱没生效，或者干脆忘了每天都要重新投。
@@ -900,6 +1219,7 @@ function nextDay(s) {
   for (const st of s.staff) st.stamina = clamp(st.stamina + 34, 0, 100);
   refreshCandidates(s, false);
   rollQuests(s);
+  rollContract(s);   /* 合同每天换一个：备货阶段就要知道"今天要凑什么" */
   if (RNG.next() < 0.42 && !s.pendingEvent) {
     let pool = EVENTS.filter(e => !s.doneEvents || !s.doneEvents.includes(e.id));
     /* 事件抽完之后不能就这么静默地「再也不出事件」：
@@ -978,6 +1298,30 @@ function checkAchievements(s) {
   return got;
 }
 
+/** 成就的 ★ 入账（现金在 checkAchievements 里已经给了，这里只管跨局声望）。
+ *  规则：**跨局首次**达成才给 ★，之后再达成只给现金 ——
+ *  32 条合计 150 ★，做成「慢慢集齐」的长期目标，而不是每局发一笔、
+ *  两局就把开局资金顶到上限（那样第三局起又没东西可追了）。
+ *  返回本批次首次达成的成就 id，供 UI 决定要不要在飘字里写 "+N★"。
+ *  注意：以前这个 ★ 从来没写进过 META（toast 承诺 "+3★" 却没有兑现），是个静默丢奖励的 bug。 */
+function claimAchStars(meta, got) {
+  const first = [];
+  if (!meta || !Array.isArray(got) || !got.length) return first;
+  if (!meta.ach || typeof meta.ach !== 'object') meta.ach = {};
+  let add = 0;
+  for (const a of got) {
+    if (!a || meta.ach[a.id]) continue;
+    meta.ach[a.id] = true;
+    first.push(a.id);
+    add += (a.reward && a.reward.bp) || 0;
+  }
+  if (add > 0) {
+    meta.bp = num(meta.bp, 0) + add;
+    meta.maxBpEarned = Math.max(num(meta.maxBpEarned, 0), meta.bp);
+  }
+  return first;
+}
+
 /* ---------------- 转生 ---------------- */
 function prestigeGain(s) {
   const nw = Math.max(0, netWorth(s));
@@ -1031,8 +1375,9 @@ function grantQuest(s, it) {
   const cash = questRewardOf(q, s);
   s.cash += cash;
   it.got = cash;
+  /* questDone（累计完成数）曾在这里累加、清洗器里保留，但全仓没有任何
+     读取方 —— 连探针都不用。删掉；questCash 有对账探针要读，必须留。 */
   s.stats.questCash = (s.stats.questCash || 0) + cash;
-  s.stats.questDone = (s.stats.questDone || 0) + 1;
   pushLog(s, `✅ 每日任务达成：${q.emoji} ${q.name} +${money(cash)}`);
   return { id: q.id, name: q.name, emoji: q.emoji, cash };
 }
@@ -1088,13 +1433,728 @@ function questViews(s) {
   return list;
 }
 
+/* ---------------- 每日合同（V1）----------------
+ * 和每日任务的差别只在**决策窗口**：任务打烊后判定（玩家事前不知道），
+ * 合同开门前就摆在备货页，玩家能围绕它改采购、改菜单、改定价。
+ * 判定框架共用（都在打烊时用当日指标算），换来的是备货阶段的明确目标。
+ */
+function contractById(id) { return CONTRACTS.find(c => c.id === id) || null; }
+
+/** 当日指标快照：合同的 check 只认这一个对象，加新指标不用改判定式 */
+function contractMetrics(s) {
+  const sim = s.sim || s.report || {};
+  const orders = num(sim.orders, 0);
+  const revenue = num(sim.revenue, 0);
+  return {
+    cups: num(sim.cups, 0),
+    orders,
+    lost: num(sim.lost, 0),
+    revenue,
+    net: num((s.report && s.report.net), 0),
+    avgPrice: orders > 0 ? revenue / orders : 0,
+    sat: num((s.report && s.report.sat), 1),
+    clicks: num(sim.clicks, 0),
+    comboBest: num(sim.comboBest, 0),
+    trendCups: num(sim.trendCups, 0),
+    typeServed: Object.assign({}, sim.typeServed || {}),
+  };
+}
+
+/** 每天开局抽一个合同（备货页可见）；已抽过的优先不重复 */
+function rollContract(s) {
+  if (!CONTRACTS.length) { s.contract = null; return null; }
+  const recent = arr(s.contractLog).slice(-4).map(String);
+  const pool = CONTRACTS.filter(c => recent.indexOf(c.id) < 0);
+  const from = (pool.length ? pool : CONTRACTS);
+  const c = from[Math.floor(rnd(0, from.length))] || from[0];
+  s.contract = { id: c.id, done: false };
+  s.contractLog = arr(s.contractLog).concat(c.id);
+  if (s.contractLog.length > 8) s.contractLog = s.contractLog.slice(-8);
+  return s.contract;
+}
+
+/** 合同的难度缩放：门槛按难度放宽、失败惩罚按难度减轻。
+ *  没有这一步时 hard 的玩家会反复违约 —— 违约扣口碑，而口碑低 → 客流少 →
+ *  更完不成 → 口碑更低，是个会自我加速的死循环（实测把 hard 达标率
+ *  从 70% 拖到 60%、连玩曲线出现衰减）。 */
+function contractScale(s) {
+  const d = DIFFICULTY[diffOf(s).key] || DIFFICULTY.normal;
+  return {
+    goal: num(d.contractGoal, 1),
+    penalty: num(d.contractPenalty, 0.6),
+  };
+}
+
+/** 打烊结算：达成发钱，失败扣口碑（口碑直接决定次日客流，所以失败有真实代价） */
+function settleContract(s) {
+  const c = s.contract && contractById(s.contract.id);
+  if (!c || s.contract.done) return null;
+  const sc = contractScale(s);
+  const m = contractMetrics(s);
+  const g = scaledGoal(c, sc.goal);
+  const ok = !!c.check(m, g);
+  s.contract.done = ok;
+  const repLoss = Math.round(num(c.failRep, -3) * sc.penalty);
+  if (ok) {
+    s.cash += c.cash;
+    pushLog(s, `📜 今日合同达成：${c.emoji} ${c.name} +${money(c.cash)}`);
+  } else if (repLoss < 0) {
+    s.rep = Math.max(0, num(s.rep, 26) + repLoss);
+    pushLog(s, `📜 今日合同未达成：${c.emoji} ${c.name}（口碑 ${repLoss}）`);
+  } else {
+    pushLog(s, `📜 今日合同未达成：${c.emoji} ${c.name}`);
+  }
+  return { id: c.id, name: c.name, emoji: c.emoji, ok, cash: ok ? c.cash : 0, rep: ok ? 0 : repLoss };
+}
+
+/** 门槛换算：比例类（满意率）不能跟着缩放，否则 0.92×1.22 > 1 永远不可能达成 */
+function scaledGoal(c, k) {
+  const g = num(c.goal, 1);
+  if (c.metric === 'sat') return g;              /* 满意率是比例，难度不该动它 */
+  return g * k;
+}
+
+/* ---------------- 营业中两个即时决策（V2）----------------
+ * 26 秒营业原本只有"点点工位"一种操作 —— 全程看队列移动、点什么加速，
+ * 没有任何策略空间。这两个动作各每天一次，给的是**时机判断**：
+ *   限时促销：客流 ×1.6 持续 8 秒，代价是那段时间每杯收入 -¥2
+ *             （"看客流不对就促销清一波库存"）
+ *   临时下架：下架今天卖得最差的那款（"备货押错了，及时止损"）
+ */
+function saleActive(s) {
+  return !!(s.sim && s.sim.t < s.sim.saleUntil);
+}
+function flashSale(s) {
+  if (!s.sim || s.phase !== 'open') return { ok: false, msg: '只有营业中才能促销' };
+  if (s.sim.saleUsed) return { ok: false, msg: '今天的促销已经用过了' };
+  if (s.sim.closing) return { ok: false, msg: '已经打烊清场，卖不动了' };
+  s.sim.saleUsed = true;
+  s.sim.saleUntil = s.sim.t + CFG.SALE_SECONDS;
+  /* 上限也要抬：只提速不抬总量等于"把后面的客人提前叫来"，玩家白亏 */
+  s.sim.saleCap = Math.round(Math.max(s.sim.traffic, num(s.sim.spawned, 0)) * 1.2);
+  pushLog(s, `📣 限时促销 ${CFG.SALE_SECONDS} 秒：客流 ×${CFG.SALE_TRAFFIC}，每杯 -${money(CFG.SALE_UNIT_SUB)}`);
+  return { ok: true, seconds: CFG.SALE_SECONDS };
+}
+function pullMenu(s) {
+  if (!s.sim || s.phase !== 'open') return { ok: false, msg: '只有营业中才能临时下架' };
+  if (s.sim.pulled) return { ok: false, msg: '今天已经下架过一款了' };
+  const menu = arr(s.menu);
+  if (menu.length <= 1) return { ok: false, msg: '菜单里只剩一款了，不能再撤' };
+  const sold = s.sim.byRecipe || {};
+  /* 挑今天卖得最少的（没卖过算 0）；并列时取靠后那道，改动更"止损" */
+  let worst = null, worstC = Infinity;
+  for (const rid of menu) {
+    const c = num(sold[rid], 0);
+    if (c < worstC) { worstC = c; worst = rid; }
+  }
+  if (!worst) return { ok: false, msg: '没有可下架的配方' };
+  s.menu = menu.filter(r => r !== worst);
+  s.sim.pulled = worst;
+  const rec = recipeById(worst);
+  pushLog(s, `📥 临时下架 ${rec ? rec.emoji + rec.name : worst}（今天只卖了 ${worstC} 杯）`);
+  return { ok: true, id: worst, name: rec ? rec.name : worst, emoji: rec ? rec.emoji : '🥤', sold: worstC };
+}
+/** 营业中 HUD 用：两个按钮的可用状态 */
+function openOps(s) {
+  if (!s.sim || s.phase !== 'open') return null;
+  const on = saleActive(s);
+  return {
+    sale: { used: !!s.sim.saleUsed, active: on, left: Math.max(0, Math.ceil(s.sim.saleUntil - s.sim.t)) },
+    pull: { used: !!s.sim.pulled, id: s.sim.pulled || null },
+  };
+}
+
+/** 备货页展示用：当前合同 + 实时进度（营业中也能看到自己走到哪了） */
+function contractView(s) {
+  const c = s.contract && contractById(s.contract.id);
+  if (!c) return null;
+  const sc = contractScale(s);
+  const m = contractMetrics(s);
+  const g = scaledGoal(c, sc.goal);
+  /* 单指标型合同才能给进度条；双条件型只给完成态 */
+  const single = (c.metric === 'cups' || c.metric === 'orders' || c.metric === 'revenue'
+    || c.metric === 'clicks' || c.metric === 'trend' || c.metric === 'net');
+  const raw = single ? num(m[c.metric === 'trend' ? 'trendCups' : c.metric], 0) : null;
+  /* desc 里的数字要跟缩放后的门槛一致，否则备货页写的和实际判定对不上 */
+  const shown = c.metric === 'sat' ? c.desc
+    : c.desc.replace(String(c.goal), String(Math.round(g * 100) / 100));
+  return {
+    id: c.id, emoji: c.emoji, name: c.name, desc: shown,
+    cash: c.cash, failRep: Math.round(num(c.failRep, -3) * sc.penalty), done: !!s.contract.done,
+    goal: c.metric === 'sat' ? c.goal : Math.round(g * 100) / 100,
+    unit: c.unit || '', prefix: c.prefix || '',
+    prog: raw, ratio: single && g > 0 ? clamp(raw / g, 0, 1) : (s.contract.done ? 1 : 0),
+  };
+}
+
+/* ============================================================
+ *  第二批玩法系统（V5~V8）
+ *  数据表在 js/data.js（STAGES / STAGE_DIFFS / SIGNATURE_TIERS /
+ *  SPECIAL_CUSTOMERS / ENDING_AXES），这里只放逻辑。
+ * ============================================================ */
+
+/* ---------------- V5 章节关卡 ----------------
+ * 30 天切成 6 章（每章 5 天），每章 3 个关卡按顺序打通。
+ * 与每日合同（V1）的时间尺度不同：合同是「今天凑什么」，一天一换；
+ * 关卡是「这一章要闯哪几关」，跨 5 天推进 —— 中期目标。
+ *
+ * 难度档在**备货阶段**选（开门前就知道），打烊时结算。
+ * 失败**不扣口碑**（只扣奖励）—— 这是刻意的：第一批的合同违约扣口碑会复利
+ * （违约→口碑跌→客流少→更违约），把 hard 拖进死循环。关卡失败只是
+ * 「这一关没过」，没有连锁惩罚，玩家敢挑高难度才有意思。
+ */
+function stageById(id) { return STAGES.find(x => x.id === id) || null; }
+function stageDiffById(id) { return STAGE_DIFFS.find(x => x.id === id) || STAGE_DIFFS[0]; }
+
+/** 当前是第几章（1 起）。第 30 天属于第 6 章。 */
+function chapterOf(s) {
+  return clamp(Math.floor((num(s.day, 1) - 1) / STAGE_DAYS) + 1, 1, STAGE_CHAPTERS);
+}
+/** 本章的三个关卡（按 order 升序） */
+function chapterStages(s) {
+  const ch = chapterOf(s);
+  return STAGES.filter(x => x.chapter === ch).sort((a, b) => a.order - b.order);
+}
+/** 玩家已通过的关卡 id 集合（跨章节累计） */
+function stageDoneSet(s) {
+  const raw = s.stage && s.stage.done;
+  const out = {};
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const k of Object.keys(raw)) if (stageById(k)) out[k] = true;
+  }
+  return out;
+}
+/** 当前待打的关卡：本章第一个没打通的。全打通了就返回 null（本章已通关） */
+function currentStage(s) {
+  const done = stageDoneSet(s);
+  const list = chapterStages(s);
+  for (const st of list) if (!done[st.id]) return st;
+  return null;
+}
+/**
+ * 关卡门槛的缩放。
+ * 三层：① 难度档（玩家选的）② 游戏难度（easy/normal/hard）③ 天数成长。
+ * 比例型指标（sat）**不跟着难度缩放** —— 0.9×1.2 = 1.08 永远不可能达成
+ * （第一批合同已经踩过这个坑，见 scaledGoal 的注释）。
+ * 「越少越好」型（lost）方向相反：门槛是流失上限，缩放要反向 ——
+ * 难度越高，能容忍的流失越少，所以 goal 越缩越小才对（这里用 1/k）。
+ */
+function stageGoalOf(s, st, diff) {
+  if (!st) return 0;
+  const d = diffOf(s);
+  let g = num(st.goal, 1);
+  if (st.metric === 'sat') {
+    /* 比例型：只吃难度档的微量加成，且封顶 0.99 */
+    g = Math.min(0.99, g + (num(diff.goalMul, 1) - 1) * 0.02);
+  } else if (st.metric === 'lost') {
+    /* 上限型：难度越高允许流失越少 */
+    g = Math.max(0, Math.round(g / Math.max(1, num(diff.goalMul, 1))));
+  } else {
+    g = g * num(diff.goalMul, 1);
+  }
+  /* 游戏难度缩放：easy 门槛低、hard 门槛高（但只吃一档，避免 hard 完全打不动） */
+  const gd = num(d.stageGoal, 1);
+  if (st.metric !== 'sat') g = st.metric === 'lost' ? Math.max(0, Math.round(g / gd)) : g * gd;
+  /* 天数成长：越到后期目标越高（一天的量本来就更大） */
+  const t = 1 + Math.max(0, num(s.day, 1) - 1) * 0.012;
+  if (st.metric !== 'sat') g = g * t;
+  return st.metric === 'sat' ? Math.round(g * 1000) / 1000 : Math.max(1, Math.round(g));
+}
+/**
+ * 关卡奖励。
+ * **必须压得很低**：关卡每天最多结算一次，30 天 18 关全通也只有
+ * 18 × 平均 ~¥110 ≈ ¥2000，摊到每天不到合同的 1/3 —— 合同是「每天都会发的钱」，
+ * 关卡是「阶段性的、更难拿到的钱」。如果这里给到和合同同量级，
+ * 标准难度的达标率会被悄悄抬上去（第一批的教训 1）。
+ */
+function stageCashOf(s, st, diff) {
+  if (!st) return 0;
+  return Math.round(num(st.cash, 0) * num(diff.cashMul, 1));
+}
+
+/** 选关卡难度（备货阶段）。只能改难度，不能换关卡 —— 换关卡会让"专精"失去意义。 */
+function setStageDiff(s, diffId) {
+  const d = stageDiffById(diffId);
+  if (!s.stage) s.stage = {};
+  s.stage.diff = d.id;
+  return { ok: true, diff: d.id };
+}
+
+/** 打烊结算关卡：达标发钱，不达标无惩罚。返回结算结果供日报展示。 */
+function settleStage(s) {
+  const st = currentStage(s);
+  if (!st) return null;
+  const diff = stageDiffById(s.stage && s.stage.diff);
+  const m = contractMetrics(s);
+  const g = stageGoalOf(s, st, diff);
+  /* 判定口径与合同一致：走同一份当日指标快照 */
+  let prog = 0;
+  if (st.metric === 'sat') prog = m.sat;
+  else if (st.metric === 'lost') prog = m.lost;
+  else if (st.metric === 'infl') prog = m.typeServed.influencer || 0;
+  else if (st.metric === 'trend') prog = m.trendCups;
+  else prog = num(m[st.metric], 0);
+
+  const ok = st.metric === 'lost' ? prog <= g : prog >= g;
+  const cash = ok ? stageCashOf(s, st, diff) : 0;
+  if (ok) {
+    s.cash += cash;
+    if (!s.stage) s.stage = {};
+    if (!s.stage.done) s.stage.done = {};
+    s.stage.done[st.id] = true;
+    s.stats.stageCash = (s.stats.stageCash || 0) + cash;
+    pushLog(s, `🏔️ 关卡达成：${diff.emoji}${st.name}（${diff.name}） +${money(cash)}`);
+  } else {
+    pushLog(s, `🏔️ 关卡未达成：${st.name}（${diff.name}） · ${st.desc.replace('{g}', g)}`);
+  }
+  return {
+    id: st.id, name: st.name, emoji: st.emoji, diff: diff.id, diffName: diff.name,
+    diffEmoji: diff.emoji, goal: g, prog: Math.round(prog * 100) / 100, ok, cash,
+    desc: st.desc.replace('{g}', g),
+  };
+}
+
+/** 备货页展示用：当前章节 + 待打关卡 + 难度选择 */
+function stageView(s) {
+  const ch = chapterOf(s);
+  const list = chapterStages(s);
+  const done = stageDoneSet(s);
+  const cur = currentStage(s);
+  const diff = stageDiffById(s.stage && s.stage.diff);
+  const cleared = list.filter(x => done[x.id]).length;
+  /* 本章全通 → 展示"本章已通关"，引导玩家往下一章走 */
+  const chapterDone = list.length > 0 && cleared >= list.length;
+  return {
+    chapter: ch, chapterCount: STAGE_CHAPTERS, cleared, total: list.length,
+    chapterDone, chapterProgress: list.length ? cleared / list.length : 0,
+    stages: list.map(x => ({
+      id: x.id, name: x.name, emoji: x.emoji, desc: x.desc, done: !!done[x.id],
+      current: cur && cur.id === x.id,
+    })),
+    cur: cur ? {
+      id: cur.id, name: cur.name, emoji: cur.emoji,
+      desc: cur.desc.replace('{g}', stageGoalOf(s, cur, diff)),
+      goal: stageGoalOf(s, cur, diff), cash: stageCashOf(s, cur, diff),
+      metric: cur.metric, unit: cur.unit || '', prefix: cur.prefix || '',
+    } : null,
+    diffs: STAGE_DIFFS.map(d => ({
+      id: d.id, name: d.name, emoji: d.emoji, star: d.star,
+      cur: d.id === diff.id,
+      goal: cur ? stageGoalOf(s, cur, d) : 0,
+      cash: cur ? stageCashOf(s, cur, d) : 0,
+    })),
+    diffId: diff.id,
+  };
+}
+
+/* ---------------- V6 招牌配方 ----------------
+ * 某款配方的**累计**卖出杯数跨局继承，逐级解锁永久加成。
+ * 累计量存在 META.sig（跨局），本局进度存在 s.sigRun。
+ *
+ * 为什么不存本局：每局清零就没有"攒"的动机，玩家不会有"这局专门练芋泥"的策略。
+ * 跨局累计才让「单品爆款」与「全菜单均衡」成为两条真正不同的路线。
+ *
+ * 加成是**乘性/小额**的（销量权重 / 售价 / 每杯成本），不额外发钱 ——
+ * 这是第一批教训 1 的直接应用：往经济里加"每天都会发的钱"会偷改难度。
+ */
+function sigTierOf(cups) {
+  const n = num(cups, 0);
+  let lv = 0, tier = null;
+  for (const t of SIGNATURE_TIERS) {
+    if (n >= t.cups) { lv = t.lv; tier = t; }
+  }
+  return { lv, tier };
+}
+/** 某配方的累计销量（跨局基线 + 本局新增） */
+function sigCupsOf(s, rid) {
+  const base = (s.sig && s.sig[rid]) || 0;
+  const run = (s.sigRun && s.sigRun[rid]) || 0;
+  return num(base, 0) + num(run, 0);
+}
+/** 某配方当前等级 */
+function sigLevelOf(s, rid) {
+  return sigTierOf(sigCupsOf(s, rid));
+}
+/** 某配方累计卖出（completeOrder 里调用） */
+function addSigCups(s, rid, cups) {
+  if (!rid) return;
+  if (!s.sigRun) s.sigRun = {};
+  s.sigRun[rid] = num(s.sigRun[rid], 0) + num(cups, 0);
+}
+/** 招牌等级带来的销量权重加成（乘在 pop 上） */
+function sigSaleMul(s, rid) {
+  const t = sigLevelOf(s, rid).tier;
+  return t ? 1 + num(t.saleMul, 0) : 1;
+}
+/** 招牌等级带来的售价加成（元） */
+function sigPriceAdd(s, rid) {
+  const t = sigLevelOf(s, rid).tier;
+  return t ? num(t.priceAdd, 0) : 0;
+}
+/** 招牌等级带来的每杯成本减免（元） */
+function sigCostCut(s, rid) {
+  const t = sigLevelOf(s, rid).tier;
+  return t ? num(t.costCut, 0) : 0;
+}
+/** 备货页 / 研发页展示用：全部配方的招牌进度 */
+function sigViews(s) {
+  const out = [];
+  for (const r of RECIPES) {
+    const cups = sigCupsOf(s, r.id);
+    const { lv, tier } = sigTierOf(cups);
+    const next = SIGNATURE_TIERS.find(t => t.cups > cups) || null;
+    out.push({
+      id: r.id, name: r.name, emoji: r.emoji, cups: Math.round(cups), lv,
+      tierName: tier ? tier.name : '', tierEmoji: tier ? tier.emoji : '',
+      desc: tier ? tier.desc : '尚未成为招牌（累计卖出 60 杯解锁）',
+      nextCups: next ? next.cups : 0,
+      ratio: next ? clamp(cups / next.cups, 0, 1) : 1,
+      maxed: !next,
+    });
+  }
+  return out;
+}
+
+/* ---------------- V7 事件型顾客 ----------------
+ * 现有 5 种顾客只是权重，玩家视角里"都是排队的小人"。这里加 3 种**可识别**的
+ * 特殊顾客：营业中随机出现，脸上一眼能认出来，服务他们有明确回报或代价。
+ *
+ * 概率极低（每天最多来 2 位），稀有款（critic）只在当天第 1 位顾客时判定 ——
+ * 不然一天来好几个"评论家"就不稀有了。
+ */
+function specialById(id) { return SPECIAL_CUSTOMERS.find(x => x.id === id) || null; }
+
+/** 抽一个特殊顾客类型；返回 null 表示今天不出。
+ *  配额：每天最多 1 位（specialCount 上限），critic 只可能占这一位。
+ *  配额从 2 降到 1 是平衡修正（见 data.js SPECIAL_CUSTOMERS 的说明）：
+ *  顶替常规顾客的机制在产能紧张时是净亏，出现的频率越高、伤害越大。
+ *
+ *  ★ 改成「额外到店」后，critic 的 rare 判定也放宽了：
+ *    以前"当天第 1 位顾客"是按常规客流计数，特殊顾客插在前面会占掉这个位置；
+ *    现在特殊顾客是**额外**的，判定改用「今天还没出过特殊顾客」——
+ *    于是「今天的第 1 位特殊顾客」可以是 critic。 */
+function pickSpecialType(s) {
+  const sim = s.sim;
+  if (!sim) return null;
+  if (num(sim.specialCount, 0) >= 1) return null;
+  const first = num(sim.specialCount, 0) <= 0;
+  const pool = SPECIAL_CUSTOMERS.filter(t => !t.rare || first);
+  if (!pool.length) return null;
+  const t = weightedPick(pool, x => num(x.weight, 0));
+  if (!t) return null;
+  sim.specialCount = num(sim.specialCount, 0) + 1;
+  return t;
+}
+
+/* ---------------- V8 结局四维评级 ----------------
+ * 现有结局只看「净资产/目标」一个维度，S 级只有一种拿法。
+ * 这里按利润/口碑/服务/经营四维各评一个称号，让「同一个 S 级有多种拿法」。
+ *
+ * 阈值按**难度目标**归一化（不是写死绝对数）：hard 的目标高、cup 数自然多，
+ * 写死绝对阈值会让 hard 永远拿不到「连锁巨头」。
+ */
+function endingAxes(s) {
+  const d = diffOf(s);
+  const st = s.stats || {};
+  const revenue = num(st.totalRevenue, 0);
+  const profit = num(st.totalProfit, 0);
+  const served = num(st.totalServed, 0);
+  const lost = num(st.totalLost, 0);
+  const total = served + lost;
+  /* 零样本时满意率取 0 而不是 1 —— 「一个人都没服务过」不等于「五星好评」。
+     早期版本兜底成 1，结果破产局（0 单 0 流失）会在结局页拿到
+     "服务·五星好评"这种自相矛盾的称号。 */
+  const sat = total > 0 ? served / total : 0;
+  const goal = num(goalOf(s), 1);
+  const values = {
+    profit: revenue > 0 ? profit / revenue : 0,
+    rep: num(s.rep, 0),
+    service: sat,
+    /* 经营维度 = 累计卖出杯数（规模）。
+       为什么用**固定**杯数而不是按难度归一化：
+       实测（tools/sim.js 逐日中位数累加）三档难度的累计总杯数其实很接近 ——
+         easy ~2700 / normal ~2644 / hard ~3020
+       难度的差异体现在**单杯利润**（目标金额不同）而不是杯数，
+       所以按目标金额去缩放杯数门槛是错的方向：
+         ① 早期版本按 goal/300 归一化，算出 normal 要 76000 杯 —— 永远达不到
+         ② 反过来（难度高门槛低）会让 easy 比 hard 更容易拿"连锁巨头"，也不对
+       固定阈值最直观：1500 杯 = 街角名店（约 55% 的玩家能达到），
+       3000 杯 = 连锁巨头（约 20~30%，需要认真扩张）。 */
+    scale: num(st.totalCups, 0),
+  };
+  const out = [];
+  for (const ax of ENDING_AXES) {
+    const v = num(values[ax.key], 0);
+    let tier = 0, title = null;
+    for (let i = 0; i < ax.tiers.length; i++) {
+      if (v >= num(ax.tiers[i].need, Infinity)) { tier = i + 1; title = ax.tiers[i]; }
+    }
+    out.push({
+      key: ax.key, name: ax.name, emoji: ax.emoji, tier, value: v,
+      title: title ? title.title : null, desc: title ? title.desc : '未达称号线',
+    });
+  }
+  return out;
+}
+/** 综合称号：取四维里最高的一档作为主称号 */
+function endingTitle(s) {
+  const axes = endingAxes(s);
+  let best = null;
+  for (const a of axes) {
+    if (a.tier > 0 && (!best || a.tier > best.tier)) best = a;
+  }
+  return { axes, best };
+}
+
+/* ============================================================
+ *  经营维度：场地类型 / 经营城市 / 经营地图位置
+ *
+ *  与本文件其它"玩家可选属性"的写法保持一致：纯函数 + 返回 {ok,msg}，
+ *  UI 决定怎么提示。这里不碰 DOM / storage，小游戏端可直接复用。
+ *
+ *  校验分三层（与"可配置字典 + 弱地理校验"的定位匹配）：
+ *    ① **白名单**：场地类型 / 省市 id 必须存在于字典 —— 挡存档篡改与字典下线
+ *    ② **结构**：区级 id 必须是 6 位数字，且其前缀必须等于所属城市 id
+ *    ③ **地理**：经纬度必须落在 GEO 的境内包围盒内（弱校验，只挡离谱错值）
+ *  坐标系固定 GCJ-02（高德），存/取都不做转换 —— 转换只能在边界层显式发生。
+ * ============================================================ */
+
+/** 省市区 id 形态：省 2 位、市 6 位、区 6 位（GB/T 2260 前 2 位为省、中 2 位为市） */
+function isRegionId(id, digits) {
+  const s = String(id == null ? '' : id);
+  if (s.length !== digits || !/^\d+$/.test(s)) return false;
+  return true;
+}
+
+/** 坐标合法性：必须在境内包围盒内。返回规范化后的 {lng,lat} 或 null */
+function normalizeGeo(raw) {
+  const src = obj(raw);
+  const lng = Number(src.lng), lat = Number(src.lat);
+  /* 先判有限数再判范围：NaN / Infinity 会被范围比较放行（NaN 的所有比较都是 false），
+     所以必须先单独挡掉，否则 NaN 会一路存进存档。 */
+  if (!Number.isFinite(lng) || !Number.isFinite(lat)) return null;
+  if (lng < GEO.MIN_LNG || lng > GEO.MAX_LNG) return null;
+  if (lat < GEO.MIN_LAT || lat > GEO.MAX_LAT) return null;
+  /* 保留固定小数位：超过 6 位是 GPS 芯片噪声，不是精度 */
+  const r = n => Number(n.toFixed(GEO.PRECISION));
+  return { lng: r(lng), lat: r(lat) };
+}
+
+/** 经营地图位置（含坐标 + 坐标系标识）。coordSys 是**显式冗余**，防将来混用。 */
+function geoView(raw) {
+  const g = normalizeGeo(raw);
+  return g ? { lng: g.lng, lat: g.lat, coordSys: GEO.COORD_SYS } : null;
+}
+
+/** 设置经营坐标。validateCity 可选：传入城市 id 时同时校验「选了城市才允许定位」 */
+function setGeo(s, raw, cityId) {
+  const g = normalizeGeo(raw);
+  if (!g) return { ok: false, msg: `坐标无效：须为 ${GEO.COORD_SYS}（高德）口径，且经度 ${GEO.MIN_LNG}~${GEO.MAX_LNG}、纬度 ${GEO.MIN_LAT}~${GEO.MAX_LAT}` };
+  const cid = cityId == null ? (s.venue && s.venue.cityId) : cityId;
+  if (cid && !cityById(cid)) return { ok: false, msg: '请先选择有效的经营城市' };
+  if (!s.venue) s.venue = {};
+  s.venue.lng = g.lng;
+  s.venue.lat = g.lat;
+  s.venue.coordSys = GEO.COORD_SYS;
+  return { ok: true, geo: geoView(g) };
+}
+
+/** 清除经营坐标（回到「未选点」） */
+function clearGeo(s) {
+  if (!s.venue) s.venue = {};
+  delete s.venue.lng;
+  delete s.venue.lat;
+  delete s.venue.coordSys;
+  return { ok: true };
+}
+
+/**
+ * 城市中心坐标（GCJ-02）。给「定位当前城市」用 ——
+ * 等价于"先按市中心记一个位置，之后可再用地图选点精确到店"。
+ *
+ * 未收录的城市返回**空**而不是编一个假坐标：
+ * 假坐标会让门店看起来"已经定位在某处"，而实际什么都不知道。
+ */
+function cityGeoOf(cityId) {
+  const c = CITY_CENTERS[cityId];
+  if (!c || !Number.isFinite(c.lng) || !Number.isFinite(c.lat)) return null;
+  return { lng: c.lng, lat: c.lat };
+}
+
+/** 把坐标记成「所选城市的市中心」。城市没有中心坐标时直接拒绝，不写脏值。 */
+function setGeoToCityCenter(s) {
+  const v = s.venue || {};
+  const g = cityGeoOf(v.cityId);
+  if (!g) return { ok: false, msg: '该城市暂无中心坐标，请在地图上选点' };
+  return setGeo(s, g, v.cityId);
+}
+
+/* ---- 「下一项」循环切换（小游戏端触屏交互用，H5 走 <select>）----
+ * 列表长（272 个市）时，"点一下切下一个"是触屏上唯一省事的做法：
+ * 弹层选择器要多一次点击、还容易被遮罩误触。
+ */
+
+/** 场地类型：切到下一种（到末尾回到第一种） */
+function nextVenueType(s) {
+  const i = VENUE_TYPES.findIndex(t => t.id === ((s.venue || {}).type));
+  const t = VENUE_TYPES[(i + 1 + VENUE_TYPES.length) % VENUE_TYPES.length];
+  if (!t) return { ok: false, msg: '没有可用的场地类型' };
+  setVenueType(s, t.id);
+  return { ok: true, type: t.id, name: t.name, emoji: t.emoji };
+}
+
+/** 省级：切到下一个省，并把市带成该省第一个市（否则省市区会不一致） */
+function nextProvince(s) {
+  const i = PROVINCES.findIndex(p => p.id === ((s.venue || {}).provId));
+  const p = PROVINCES[(i + 1 + PROVINCES.length) % PROVINCES.length];
+  const first = p && citiesOfProvince(p.id)[0];
+  if (!p || !first) return { ok: false, msg: '没有可用的城市' };
+  const r = setVenueCity(s, first.id);
+  return r.ok ? { ok: true, provId: p.id, cityName: first.name } : r;
+}
+
+/** 市级：在**当前省内**循环切换 */
+function nextCity(s) {
+  const v = s.venue || {};
+  const list = citiesOfProvince(v.provId);
+  if (!list.length) return { ok: false, msg: '该省暂无可选城市' };
+  const i = list.findIndex(c => c.id === v.cityId);
+  const c = list[(i + 1 + list.length) % list.length];
+  const r = setVenueCity(s, c.id);
+  return r.ok ? { ok: true, cityId: c.id, cityName: c.name } : r;
+}
+
+/** 区级：在**当前市内**循环切换（含「不指定」）。城市没有区级数据时拒绝。 */
+function nextDistrict(s) {
+  const v = s.venue || {};
+  const list = districtsOfCity(v.cityId);
+  if (!list.length) return { ok: false, msg: '该城市暂未收录区级（可选仅到市级）' };
+  const opts = [{ id: '', name: '不指定' }].concat(list);
+  const i = opts.findIndex(d => (d.id || '') === (v.districtId || ''));
+  const d = opts[(i + 1 + opts.length) % opts.length];
+  const r = setVenueCity(s, v.cityId, d.id || '');
+  return r.ok ? { ok: true, districtId: d.id || '', districtName: d.name } : r;
+}
+
+/**
+ * 设置经营场地类型。
+ * 未知 id 一律拒绝（不静默回退）—— 调用方是 UI，回退会让玩家以为自己选中了。
+ * 老存档的清洗在 sanitizeVenue 里做（那里**必须**回退，不能拒绝）。
+ */
+function setVenueType(s, id) {
+  const v = venueTypeById(id);
+  if (!v) return { ok: false, msg: '未知的场地类型' };
+  if (!s.venue) s.venue = {};
+  s.venue.type = v.id;
+  return { ok: true, type: v.id, name: v.name, emoji: v.emoji };
+}
+
+/**
+ * 设置经营城市（省市区）。
+ * 省与市**都要校验**，且市必须属于所选省 —— 只校验其中一半会让
+ * 「省=江苏 / 市=北京」这种组合写进存档，UI 上三级联动会显示不出来。
+ * 区级可选：有值才校验，且前缀必须匹配城市 id。
+ */
+function setVenueCity(s, cityId, districtId) {
+  const c = cityById(cityId);
+  if (!c) return { ok: false, msg: '请选择有效的经营城市（限中国大陆）' };
+  let did = districtId == null || districtId === '' ? null : String(districtId);
+  if (did != null) {
+    if (!isRegionId(did, 6)) return { ok: false, msg: '区级代码格式不正确' };
+    /* 区前缀必须等于城市 id（GB/T 2260：前 4 位是市，前 2 位是省），
+       否则「市=北京(1101) / 区=上海某区(3101xx)」这种错配会静默通过 */
+    /* 区代码与市代码的关系：市代码 6 位（区代码的前 4 位 + 顺序码 2 位）。
+       GB/T 2260 里市代码是 6 位（如 深圳市 440300），而区代码是 6 位，
+       两者**前 4 位相同**（4403 = 省44 + 市03）。所以比对前 4 位。
+       写成整等比较会因为市代码多两位而永远不匹配 —— 区级会被静默丢弃。 */
+    if (did.slice(0, 4) !== c.id.slice(0, 4)) return { ok: false, msg: '区级与所选城市不匹配' };
+  }
+  if (!s.venue) s.venue = {};
+  s.venue.provId = c.prov;
+  s.venue.cityId = c.id;
+  if (did == null) delete s.venue.districtId;
+  else s.venue.districtId = did;
+  /* 换城市后旧坐标必然对不上新城区，直接清掉而不是留着自相矛盾 */
+  if (s.venue.lng != null) clearGeo(s);
+  return { ok: true, provId: c.prov, cityId: c.id, districtId: did };
+}
+
+/** 经营维度的展示模型（给 UI 用，含名称与是否已选点） */
+function venueView(s) {
+  const v = s.venue || {};
+  const t = venueTypeById(v.type) || venueTypeById(VENUE_DEFAULT) || null;
+  const p = provinceById(v.provId) || null;
+  const c = cityById(v.cityId) || cityById(CITY_DEFAULT) || null;
+  const d = v.districtId ? (districtsOfCity(c && c.id).find(x => x.id === v.districtId) || null) : null;
+  const g = geoView({ lng: v.lng, lat: v.lat });
+  return {
+    type: t ? t.id : null, typeName: t ? t.name : '', typeEmoji: t ? t.emoji : '🏘️',
+    typeDesc: t ? t.desc : '',
+    provId: p ? p.id : null, provName: p ? p.name : '',
+    cityId: c ? c.id : null, cityName: c ? c.name : '',
+    districtId: d ? d.id : null, districtName: d ? d.name : '',
+    hasDistrictData: districtsOfCity(c && c.id).length > 0,
+    geo: g, hasGeo: !!g,
+    coordSys: GEO.COORD_SYS,
+  };
+}
+
+/**
+ * 经营维度的清洗 —— **存量数据兼容的关键入口**。
+ *
+ * 三种来源都会走到这里：
+ *   ① 老存档（v2，早于本特性）—— 三个字段**完全不存在**
+ *   ② 玩家手改/导入的脏存档 —— id 不在字典里、坐标越界、字段类型不对
+ *   ③ 正常新存档 —— 原样通过
+ *
+ * 策略是「**缺失→补默认，非法→退默认，不抛错**」：
+ *   存档是玩家自己的进度，一个不认识的场地类型不该让他打不开游戏。
+ *   代价是丢一点点自定义数据，换来的是老存档 100% 可读 —— 这个取舍必须写明。
+ *
+ * 注意：这里**不校验版本号**（importSave 认的是 s.v === 2，且不该为此升版本 ——
+ * 升版本会让所有存量存档直接失效，正是我们要避免的）。
+ */
+function sanitizeVenue(raw) {
+  const src = obj(raw);
+  const out = {};
+  // ① 场地类型：不在字典 → 退默认（社区）
+  out.type = venueTypeById(src.type) ? String(src.type) : VENUE_DEFAULT;
+  // ② 城市：**以城市为准，省只是冗余字段**。
+  //    城市更具体（一个城市只属于一个省），所以：
+  //      a) 城市有效 → 省直接取城市的 prov。这样「只有城市没有省」的半截字段
+  //         能被救回来，而不是像"省市区错配"那样整条退默认 ——
+  //         省是冗余的，城市对了省就一定能推出来，没必要丢弃用户数据。
+  //      b) 城市无效 → 退默认（北京）。单独存在的省没有意义，无法确定城市。
+  const c = cityById(src.cityId);
+  if (c) {
+    out.provId = c.prov;
+    out.cityId = c.id;
+  } else {
+    out.provId = CITY_DEFAULT.slice(0, 2);
+    out.cityId = CITY_DEFAULT;
+  }
+  // ③ 区级：可选。有值才校验格式 + 前缀；不合法就当没填（不影响省市）
+  const did = src.districtId == null || src.districtId === '' ? '' : String(src.districtId);
+  if (did && isRegionId(did, 6) && did.slice(0, 4) === out.cityId.slice(0, 4)) out.districtId = did;
+  // ④ 坐标：缺失/非法 → 不写 lng/lat（表示"未选点"），而不是写 0（0,0 在公海）
+  const g = normalizeGeo({ lng: src.lng, lat: src.lat });
+  if (g) {
+    out.lng = g.lng;
+    out.lat = g.lat;
+    out.coordSys = GEO.COORD_SYS;
+  }
+  return out;
+}
+
 /* ---------------- 存档（3 槽位 + 导入导出 + 降级提示） ---------------- */
 let CUR_SLOT = 0;
 let STORAGE_OK = true;          // 隐私模式 / 配额满时为 false，供 UI 提示
 let STORAGE_ERR = '';
 
 function slotKey(i) { return CFG.SAVE_PREFIX + i; }
-function getSlot() { return CUR_SLOT; }
+/* CUR_SLOT 只经 setSlot 写入、那里已经夹过；这里再夹一次是零成本兜底，
+   免得将来有人在别处直接动它。saltKey 拿到越界值会读写到不存在的键上。 */
+function getSlot() { return clamp(CUR_SLOT | 0, 0, CFG.SAVE_SLOTS - 1); }
 function setSlot(i) { CUR_SLOT = clamp(i | 0, 0, CFG.SAVE_SLOTS - 1); }
 
 /* ============================================================
@@ -1206,41 +2266,130 @@ function str(v, max) {
 }
 function arr(v) { return Array.isArray(v) ? v : []; }
 function obj(v) { return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {}; }
+
+/**
+ * 引擎内部拼 HTML 片段时用的转义。
+ * 引擎是纯逻辑层，拿不到渲染层的 esc()，但 adviceOf() 这类函数会返回带 <b>
+ * 标签的文案、里面还插着来自存档的对手名 —— 渲染层看到 <b> 就整段放行，
+ * 于是存档里的 <img onerror> 会原样变成 DOM。这条规则必须和 ui.js 的 esc() 一致。
+ */
+const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+function escText(v) {
+  if (v === null || v === undefined) return '';
+  return String(v).replace(/[&<>"']/g, c => ESC_MAP[c]);
+}
 function int(v, dflt) { return Math.round(num(v, dflt)); }
 function pos(v, dflt) { return Math.max(0, num(v, dflt)); }
+
+/**
+ * 数值上界。脏存档塞 1e300 是「有限」的，num() 照单全收，
+ * 于是净资产、客流、成本整套体系被改写得没法看（money() 会渲染成 ¥1e+300）。
+ * 正常游戏里最大的数是净资产（几万块），1e12 留了八个数量级的余量。
+ */
+const NUM_CAP = 1e12;
+/** 带上下界的取值：挡住 ±1e300 这类「合法但荒谬」的输入 */
+const numCap = (v, dflt) => clamp(num(v, dflt), -NUM_CAP, NUM_CAP);
+/** 非负且带上限 —— 绝大多数资源类字段用这个 */
+const posCap = (v, dflt) => clamp(pos(v, dflt), 0, NUM_CAP);
+
+/** 引擎会往 s.flags 里写的全部 key。清洗器按这张表做白名单，
+ *  两者必须同步维护 —— 新增 flag 时忘了加进来，读档就会被静默丢掉。 */
+const FLAG_KEYS = ['poached', 'bargain', 'researched', 'trendMaster', 'bigOrder',
+  'perfectDay', 'fiveTypes', 'starMagnet', 'rivalDown', 'goalHit'];
+/** 其中唯一一个计数器（其余都是布尔标记） */
+const FLAG_COUNTER = 'researched';
+
+/** 原料价格乘数表：只认已知原料 id，值夹到 NEWS 表实际取值（0.68~1.4）再放宽一档 */
+function sanitizeFx(raw) {
+  const src = obj(raw), out = {};
+  for (const g of ING) {
+    const v = num(src[g.id], 0);
+    if (v > 0) out[g.id] = clamp(v, 0.5, 1.6);
+  }
+  return out;
+}
+
+/**
+ * 日报清洗。它只喂给结算页与「较昨日」环比展示，以前只判了 typeof === 'object'
+ * 就放行 —— 塞一个 { revenue: 1e300, net: Infinity } 的坏档，结算页就会显示
+ * ¥Infinity，环比箭头也算出错方向。这里逐字段收敛，脏值一律落到安全缺省。
+ */
+function sanitizeReport(r) {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return null;
+  const types = raw => {
+    const src = obj(raw), out = {};
+    for (const k in src) {
+      if (typeof k !== 'string' || k.length > 24) continue;
+      out[k] = pos(src[k], 0);
+    }
+    return out;
+  };
+  return {
+    day: Math.max(1, int(r.day, 1)),
+    served: pos(r.served, 0), orders: pos(r.orders, 0), lost: pos(r.lost, 0),
+    priceLost: pos(r.priceLost, 0), stockout: pos(r.stockout, 0),
+    revenue: num(r.revenue, 0), cogs: num(r.cogs, 0),
+    wages: pos(r.wages, 0), rent: pos(r.rent, 0), marketing: pos(r.marketing, 0),
+    net: num(r.net, 0),
+    sat: clamp(num(r.sat, 1), 0, 1),
+    repBefore: clamp(num(r.repBefore, 0), 0, 100), repAfter: clamp(num(r.repAfter, 0), 0, 100),
+    repDelta: num(r.repDelta, 0),
+    trendCups: pos(r.trendCups, 0), clicks: pos(r.clicks, 0), comboBest: pos(r.comboBest, 0),
+    tips: num(r.tips, 0), traffic: pos(r.traffic, 0),
+    typeServed: types(r.typeServed), typeLost: types(r.typeLost),
+    rivalShare: clamp(num(r.rivalShare, 0), 0, 1), worth: num(r.worth, 0),
+    /* 无尽模式的难度压力，下限 0.5、无上限（里程碑可以一直叠） */
+    pressure: Math.max(0.5, num(r.pressure, 1)),
+    lastMarketing: pos(r.lastMarketing, 0),
+  };
+}
 
 function sanitizeState(s) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
 
   s.v = 2;
   s.diff = DIFFICULTY[s.diff] ? s.diff : 'normal';
-  s.day = Math.max(1, int(s.day, 1));
-  s.cash = num(s.cash, 0);
+  /* 天数上界要分两种：普通局跑满 CFG.DAYS 天就该收官（isFinished 判的是
+     day > CFG.DAYS），脏存档把 day 写成 9999 会让读档后当场判定结束；
+     无尽模式没有终点，只要挡住荒谬值就行。
+     （s.endless 的清洗在下面，这里按同一规则先取一次布尔值即可。） */
+  s.day = clamp(int(s.day, 1), 1, s.endless ? 9999 : CFG.DAYS);
+  s.cash = numCap(s.cash, 0);
   s.rep = clamp(num(s.rep, 26), 0, 100);
-  s.shops = Math.max(1, int(s.shops, 1));
-  s.debtDays = pos(s.debtDays, 0);
-  s.marketing = pos(s.marketing, 0);
-  s.dayMarketing = pos(s.dayMarketing, 0);
-  s.invested = pos(s.invested, 0);
-  s.shopSpend = pos(s.shopSpend, 0);
-  s.bpBonus = pos(s.bpBonus, 0);
-  s.loginBonus = pos(s.loginBonus, 0);
-  s.eventTrafficMul = num(s.eventTrafficMul, 1);
+  /* 分店数直接决定租金与工位数，给个硬上限，避免脏值把它顶到几千 */
+  s.shops = clamp(int(s.shops, 1), 1, 99);
+  s.debtDays = posCap(s.debtDays, 0);
+  s.marketing = posCap(s.marketing, 0);
+  s.dayMarketing = posCap(s.dayMarketing, 0);
+  s.invested = posCap(s.invested, 0);
+  s.shopSpend = posCap(s.shopSpend, 0);
+  s.bpBonus = posCap(s.bpBonus, 0);
+  /* startBonus 只用于 UI 展示（本局开局资金里有多少来自声望），
+     脏值一律归零，不能让玩家改存档凭空多出一笔钱（现金本身下面也会夹） */
+  s.startBonus = Math.min(pos(s.startBonus, 0), CFG.BP_START_CAP);
+  s.loginBonus = posCap(s.loginBonus, 0);
+  /* lastTime 是离线收益的时间基准，之前是清洗盲区：
+     负数 / -Infinity 会让它一进游戏就领满额离线补贴，
+     NaN 则让整个离线功能静默失效。未来时间同样不合理。 */
+  s.lastTime = pos(int(s.lastTime, 0), 0);
+  if (s.lastTime > Date.now() + 60000) s.lastTime = Date.now();
+  /* 客流倍率：脏值填 1e9 会让一天涌进上亿人，整局直接失控 */
+  s.eventTrafficMul = clamp(num(s.eventTrafficMul, 1), 0, 10);
   s.endless = !!s.endless;
   s.daily = !!s.daily;
-  s.milestone = pos(s.milestone, 0);
-  s.nextStaffId = Math.max(1, int(s.nextStaffId, 1));
+  s.milestone = posCap(s.milestone, 0);
+  s.nextStaffId = clamp(int(s.nextStaffId, 1), 1, NUM_CAP);
   s.trendKnown = !!s.trendKnown;
 
   /* 原料：只认已知 id，负数/非法值归零 */
   const inv = {};
-  for (const g of ING) inv[g.id] = pos(obj(s.inv)[g.id], 0);
+  for (const g of ING) inv[g.id] = posCap(obj(s.inv)[g.id], 0);
   s.inv = inv;
   const prices = {}, prevPrices = {}, avgCost = {};
   for (const g of ING) {
-    prices[g.id] = pos(obj(s.prices)[g.id], g.base);
-    prevPrices[g.id] = pos(obj(s.prevPrices)[g.id], g.base);
-    avgCost[g.id] = pos(obj(s.avgCost)[g.id], g.base);
+    prices[g.id] = posCap(obj(s.prices)[g.id], g.base);
+    prevPrices[g.id] = posCap(obj(s.prevPrices)[g.id], g.base);
+    avgCost[g.id] = posCap(obj(s.avgCost)[g.id], g.base);
   }
   s.prices = prices; s.prevPrices = prevPrices; s.avgCost = avgCost;
 
@@ -1263,13 +2412,15 @@ function sanitizeState(s) {
 
   /* 员工 / 候选人 */
   const traitIds = TRAITS.map(t => t.id);
-  s.staff = arr(s.staff).slice(0, 12).map((st, i) => ({
+  /* 用 CFG.STAFF_MAX 而不是写死 12：以前这里截到 12、而运行时能雇到更多，
+     于是「雇满 → 存档 → 读档」会凭空少掉几个员工，遣散费也不会退。 */
+  s.staff = arr(s.staff).slice(0, CFG.STAFF_MAX).map((st, i) => ({
     id: int(st && st.id, i + 1),
     name: str(st && st.name, 12) || '员工',
     emoji: str(st && st.emoji, 8) || '🧑',
     skill: clamp(num(st && st.skill, 1), 0.2, 5),
     trait: traitIds.indexOf(st && st.trait) >= 0 ? st.trait : null,
-    wage: pos(st && st.wage, 60),
+    wage: posCap(st && st.wage, 60),
     stamina: clamp(num(st && st.stamina, 100), 0, 100),
   }));
   s.candidates = arr(s.candidates).slice(0, 6).map(c => ({
@@ -1288,7 +2439,14 @@ function sanitizeState(s) {
   s.rival.rep = clamp(num(s.rival.rep, 40), 0, 100);
   s.rival.aggro = clamp(num(s.rival.aggro, 1), 0.5, 3);
   s.rival.proof = clamp(int(s.rival.proof, 0), 0, 5);
-  s.rival.cd = obj(s.rival.cd);
+  /* 对手行动的冷却表。脏值（字符串 / NaN）会让 `(cd[key] || 0) > s.day`
+     这个判断失效 —— NaN 比较恒为 false，等于冷却可以无限绕过。 */
+  const cd0 = obj(s.rival.cd), cd = {};
+  for (const k in cd0) {
+    if (typeof k !== 'string' || k.length > 24) continue;
+    cd[k] = clamp(int(cd0[k], 0), 0, CFG.DAYS * 4);
+  }
+  s.rival.cd = cd;
 
   /* 日志：限条数 + 单条限长，避免超长 payload 与内存膨胀 */
   s.log = arr(s.log).slice(-60).map(l => str(l, 120));
@@ -1296,24 +2454,77 @@ function sanitizeState(s) {
   /* 统计 / 历史 */
   const st0 = obj(s.stats);
   s.stats = {
-    totalCups: pos(st0.totalCups, 0), totalRevenue: pos(st0.totalRevenue, 0),
-    totalProfit: num(st0.totalProfit, 0), bestDayProfit: num(st0.bestDayProfit, 0),
-    totalLost: pos(st0.totalLost, 0), totalServed: pos(st0.totalServed, 0),
-    clicks: pos(st0.clicks, 0), days: pos(st0.days, 0),
-    questCash: pos(st0.questCash, 0), questDone: pos(st0.questDone, 0),
+    totalCups: posCap(st0.totalCups, 0), totalRevenue: posCap(st0.totalRevenue, 0),
+    totalProfit: numCap(st0.totalProfit, 0), bestDayProfit: numCap(st0.bestDayProfit, 0),
+    totalLost: posCap(st0.totalLost, 0), totalServed: posCap(st0.totalServed, 0),
+    clicks: posCap(st0.clicks, 0), days: posCap(st0.days, 0),
+    questCash: posCap(st0.questCash, 0),
+    /* V5 关卡奖励累计（E3 对账探针要读这个科目） */
+    stageCash: posCap(st0.stageCash, 0),
   };
-  s.history = arr(s.history).slice(-400).map(h => ({
-    day: int(h && h.day, 0), revenue: num(h && h.revenue, 0), net: num(h && h.net, 0),
-    worth: num(h && h.worth, 0), rep: num(h && h.rep, 0),
-    cups: pos(h && h.cups, 0), orders: pos(h && h.orders, 0), lost: pos(h && h.lost, 0),
+  /* 字段必须和 pushHistory 写入的那一份对齐。
+     以前这里漏了 rival，读档后曲线图里整条对手份额线都会变成 undefined。 */
+  s.history = arr(s.history).slice(-MAX_HISTORY).map(h => ({
+    day: clamp(int(h && h.day, 0), 0, 9999), revenue: numCap(h && h.revenue, 0),
+    net: numCap(h && h.net, 0), worth: numCap(h && h.worth, 0), rep: numCap(h && h.rep, 0),
+    cups: posCap(h && h.cups, 0), orders: posCap(h && h.orders, 0), lost: posCap(h && h.lost, 0),
+    rival: posCap(h && h.rival, 0),
   }));
 
-  s.ach = obj(s.ach);
-  s.flags = obj(s.flags);
-  s.doneEvents = arr(s.doneEvents).map(e => str(e, 40));
+  /* 成就：key 白名单。以前直接 obj(s.ach) 放行，改存档塞一堆假 id
+     就能让「已达成 132/32」—— 两个版本的 UI 都是拿 Object.keys(s.ach).length 算的。 */
+  const ach = {};
+  for (const a of ACHIEVEMENTS) if (obj(s.ach)[a.id]) ach[a.id] = true;
+  s.ach = ach;
+  /* flags 直接驱动成就判定（perfectDay / fiveTypes / rivalDown …）。
+     不做白名单的话，改存档塞几个 true 就能白嫖成就的现金与 ★，
+     成就系统等于形同虚设。注意 researched 是计数器而非布尔。 */
+  const fl = obj(s.flags), flags = {};
+  for (const k of FLAG_KEYS) {
+    if (k === FLAG_COUNTER) flags[k] = pos(fl[k], 0);
+    else if (fl[k]) flags[k] = true;
+  }
+  s.flags = flags;
+  /* EVENTS 表只有十来条，事件池却按整个表长度来切片；给它一个硬上限，
+     免得脏存档塞几千条让「已发生事件」永远为真、新事件再也抽不出来。 */
+  s.doneEvents = arr(s.doneEvents).slice(0, EVENTS.length + 8).map(e => str(e, 40));
 
   /* 每日任务：只认池子里还存在的 id，进度夹到非负；
      旧存档没有这个字段、或天数对不上（异常数据），直接按当天重抽一份。 */
+  /* 合同：只认白名单里的 id，脏数据一律丢掉（存档可被玩家编辑） */
+  const cRaw = s.contract;
+  s.contract = (cRaw && contractById(cRaw.id))
+    ? { id: String(cRaw.id), done: !!cRaw.done } : null;
+  s.contractLog = arr(s.contractLog).filter(x => contractById(x)).map(String).slice(-8);
+  /* 合同结算结果同理：是上一份报表的快照，读档后不该再冒出来发第二次钱 */
+  s.contractResult = null;
+  /* V5 章节关卡：难度档只认配置里真有的 id；已通关的关卡只认真实存在的 id。
+     脏存档塞一堆假 id 就能"通关"所有关卡 —— 虽然关卡奖励是钱，必须挡住。 */
+  const stg = obj(s.stage);
+  const stgDone = {};
+  const stgDoneRaw = obj(stg.done);
+  for (const k of Object.keys(stgDoneRaw)) if (stageById(k)) stgDone[k] = true;
+  s.stage = { diff: stageDiffById(stg.diff).id, done: stgDone };
+  s.stageResult = null;
+  /* V6 招牌配方：跨局基线（s.sig）与本局新增（s.sigRun）分开存 ——
+     收官时要把本局新增累加进 META，基线是上一局带进来的，不能重复累加。 */
+  const sigRaw = obj(s.sig), sig = {};
+  for (const rid of Object.keys(sigRaw)) {
+    if (recipeById(rid)) sig[rid] = clamp(num(sigRaw[rid], 0), 0, 1000000);
+  }
+  s.sig = sig;
+  const sigRunRaw = obj(s.sigRun), sigRun = {};
+  for (const rid of Object.keys(sigRunRaw)) {
+    if (recipeById(rid)) sigRun[rid] = clamp(num(sigRunRaw[rid], 0), 0, 1000000);
+  }
+  s.sigRun = sigRun;
+  /* 经营维度（场地类型 / 城市 / 地图坐标）：
+     老存档**完全没有**这三个字段，脏存档可能塞了字典外的 id 或越界坐标。
+     一律在这里收敛：缺失 → 补默认，非法 → 退默认，绝不抛错
+     —— 存档是玩家自己的进度，一个不认识的场地类型不该让他打不开游戏。
+     详见 sanitizeVenue 的注释（含"为什么不为它升版本号"）。 */
+  s.venue = sanitizeVenue(s.venue);
+
   s.quests = arr(s.quests)
     .filter(it => it && questById(it.id))
     .slice(0, QUEST_COUNT)
@@ -1328,8 +2539,10 @@ function sanitizeState(s) {
   else s.questDay = s.day;
 
   /* 引导状态：读档一律不自动续播，避免指向不存在的元素 */
-  s.tut = Object.assign({ active: false, step: 0, done: false }, obj(s.tut));
-  s.tut.active = false;
+  /* obj(s.tut) 会原样覆盖默认值，所以每个字段都得自己夹一遍。
+     越界 step 虽然被 TUT.start() 的边界判断兜住、不会崩，但会原样污染存档。 */
+  const t0 = obj(s.tut);
+  s.tut = { active: false, step: clamp(int(t0.step, 0), 0, 9999), done: !!t0.done };
 
   /* 枚举白名单 */
   s.weather = weatherById(s.weather && s.weather.id) || WEATHERS[1];
@@ -1338,21 +2551,37 @@ function sanitizeState(s) {
   s.pendingEvent = (s.pendingEvent && typeof s.pendingEvent.id === 'string')
     ? (eventById(s.pendingEvent.id) || null) : null;
   s.news = (s.news && typeof s.news.text === 'string')
-    ? { id: str(s.news.id, 24), text: str(s.news.text, 80), fx: obj(s.news.fx) } : null;
-  s.newsFx = (s.newsFx && typeof s.newsFx === 'object') ? s.newsFx : null;
+    ? { id: str(s.news.id, 24), text: str(s.news.text, 80), fx: sanitizeFx(s.news.fx) } : null;
+  /* newsFx 是原料价格乘数，会直接乘到进货价上。不清洗的话塞 { tea: 0.01 }
+     就能用 1% 的价进货。表里正常取值 0.68~1.4，留一档余量。 */
+  s.newsFx = sanitizeFx(s.newsFx);
 
   /* 运行时字段 */
   s.sim = null;
   s.newQuests = [];
   /* 营业中途的存档无法恢复现场，一律退回准备阶段 */
   s.phase = (s.phase === 'report' || s.phase === 'over') ? s.phase : 'prep';
-  s.report = (s.report && typeof s.report === 'object') ? s.report : null;
-  s.lastReport = (s.lastReport && typeof s.lastReport === 'object') ? s.lastReport : null;
+  s.report = sanitizeReport(s.report);
+  s.lastReport = sanitizeReport(s.lastReport);
   /* 结算页的「较昨日」环比要用前一天那份；坏档时置空即可，最多是不显示涨跌 */
-  s.prevReport = (s.prevReport && typeof s.prevReport === 'object') ? s.prevReport : null;
+  s.prevReport = sanitizeReport(s.prevReport);
   s.lastMarketing = pos(s.lastMarketing, 0);
   /* 中期目标达成记录：只认 5 的倍数天数，脏数据直接丢掉 */
   s.msHit = arr(s.msHit).filter(d => d % MILESTONE_EVERY === 0 && d > 0 && d <= CFG.DAYS);
+  /* 🃏 策略卡：只认配置里真有的 id，去重、去脏、夹到上限 ——
+     改存档凭空加卡等于直接改数值，必须在入口挡住 */
+  const cardIds = [];
+  for (const raw of arr(s.cards)) {
+    const c = cardById(str(raw, 40));
+    if (c && cardIds.indexOf(c.id) < 0) cardIds.push(c.id);
+  }
+  s.cards = cardIds.slice(0, CFG.CARD_MAX);
+  const offs = [];
+  for (const raw of arr(s.cardOffer)) {
+    const c = cardById(str(raw, 40));
+    if (c && offs.indexOf(c.id) < 0 && s.cards.indexOf(c.id) < 0) offs.push(c.id);
+  }
+  s.cardOffer = offs.slice(0, CFG.CARD_OFFER_N);
   return s;
 }
 
@@ -1368,19 +2597,34 @@ function loadGame(slot) {
   } catch (e) { return null; }
 }
 
+/* 槽位摘要记忆化：key 是 slotKey(i)，value 是 { raw, val }。
+   存档原文没变就不必重新解析 —— 改存档时 raw 一定会变，天然失效。 */
+const SLOT_CACHE = {};
+
 /** 槽位摘要（用于选档界面） */
 function slotInfo(i) {
-  const raw = storageGet(slotKey(i));
-  if (!raw) return null;
+  const k = slotKey(i);
+  const raw = storageGet(k);
+  if (!raw) { delete SLOT_CACHE[k]; return null; }
+  /* 小游戏标题页每帧要画三个槽位、hasAnySave() 还要再扫一遍，
+     等于每帧六次「JSON.parse + 全量 sanitizeState」—— 整个清洗器被当成了
+     渲染循环的一部分。存档内容不变时结果必然相同，按原文缓存即可。
+     （storageGet 那一步没法省：不读就不知道内容有没有变。） */
+  const hit = SLOT_CACHE[k];
+  if (hit && hit.raw === raw) return hit.val;
+  let val = null;
   try {
     const s = sanitizeState(JSON.parse(raw));
-    if (!s) return null;
-    return {
-      day: s.day, diff: s.diff, endless: !!s.endless,
-      worth: Math.round(netWorth(s)), rep: Math.round(s.rep),
-      shops: s.shops, time: s.savedAt || s.lastTime || 0,
-    };
-  } catch (e) { return null; }
+    if (s) {
+      val = {
+        day: s.day, diff: s.diff, endless: !!s.endless,
+        worth: Math.round(netWorth(s)), rep: Math.round(s.rep),
+        shops: s.shops, time: s.savedAt || s.lastTime || 0,
+      };
+    }
+  } catch (e) { val = null; }
+  SLOT_CACHE[k] = { raw: raw, val: val };
+  return val;
 }
 function hasAnySave() {
   for (let i = 0; i < CFG.SAVE_SLOTS; i++) if (slotInfo(i)) return true;
@@ -1465,7 +2709,40 @@ function newMeta() {
        平台级排行榜要开放数据域 + 云存储（有服务端），这里先用本机的 ——
        至少让玩家有个「再破一次自己的纪录」的理由。 */
     runsTop: [],
+    /* 每日挑战（F3）：这三项原先是 main.js 里用到才临时挂上去的，
+       newMeta 里根本没有，于是 loadMeta 读老存档时它们恒为 undefined，
+       两版标题页的「今日最佳」判断全靠 undefined 兜底。收进工厂函数，
+       让 META 的形状有唯一来源。 */
+    dailyDate: '', dailyBest: 0, dailyBestEver: 0, dailyLog: [],
+    /* V6 招牌配方：跨局继承的累计销量（{ 配方 id: 杯数 }）。
+       这是第二批唯一的"跨局成长线"：这一局卖得多，下一局该款更值钱。
+       单独放一个字段而不是塞进 ach —— 它的语义是**可累加的进度**，
+       不是"达成就打勾"的布尔。 */
+    sig: {},
   };
+}
+
+/**
+ * 把本局的招牌销量写回 META（跨局继承）。
+ * 必须在**收官/转生**时调用 —— 和成就（s.ach → m.ach）是同一套时机。
+ *
+ * 累加而不是覆盖：s.sig 是上一局带进来的基线，s.sigRun 才是本局新增，
+ * 写回时只加 sigRun。搞混了就会把上一局的量重复累加（每局翻一倍）。
+ *
+ * 每日挑战（s.daily）不写回 —— 全网同种子，继承数据会破坏公平性。
+ */
+function mergeSignature(meta, s) {
+  if (!meta || !s) return meta;
+  if (s.daily) return meta;
+  if (!meta.sig || typeof meta.sig !== 'object') meta.sig = {};
+  const run = s.sigRun || {};
+  for (const rid of Object.keys(run)) {
+    if (!recipeById(rid)) continue;
+    const add = num(run[rid], 0);
+    if (add <= 0) continue;
+    meta.sig[rid] = num(meta.sig[rid], 0) + add;
+  }
+  return meta;
 }
 
 /** 收官时把这一局记进本机战绩榜（按净资产降序，只留前 RUN_TOP_N 条） */
@@ -1484,6 +2761,73 @@ function pushRunRecord(m, s, result) {
   if (m.runsTop.length > CFG.RUN_TOP_N) m.runsTop.length = CFG.RUN_TOP_N;
   return m;
 }
+
+/* ============================================================
+ *  每日挑战 · 同种子日榜（F3）
+ *
+ *  全网同一天共用同一个种子（RNG.setSeed('bubble-' + todayKey())），
+ *  不同玩家打的确实是同一局 —— 这是「日榜」能成立的前提。
+ *
+ *  这里只管本机这一半：把成绩落进 META，供两版渲染，以及
+ *  平台能力不可用时（浏览器预览 / 宿主不支持）的降级展示。
+ *  上报与拉榜那一半在 minigame/src/caps.js。
+ * ============================================================ */
+
+/** 上报给平台的分数：必须是 [0, int32_MAX) 的正整数（平台会拒掉越界的） */
+function rankScore(nw) {
+  return clamp(Math.round(num(nw, 0)), 0, CFG.RANK_SCORE_MAX);
+}
+
+/**
+ * 记录一次每日挑战成绩。
+ *
+ * 关键点是**只在比今天已有的成绩更好时才覆盖**：一天可以打好几局，
+ * 榜单上该显示当天最好的那一局，而不是最后一局。否则玩家用一局
+ * 摆烂成绩把自己的名次冲掉了，还会以为榜在乱排。
+ *
+ * 返回值告诉调用方这次刷新了什么，两版据此决定文案和是否上报。
+ */
+function recordDaily(m, key, nw) {
+  const none = { score: 0, newToday: false, newEver: false, prevToday: 0, prevEver: 0 };
+  if (!m) return none;
+  const v = rankScore(nw);
+  const sameDay = String(m.dailyDate || '') === String(key || '');
+  const prevToday = sameDay ? Math.max(0, Math.round(num(m.dailyBest, 0))) : 0;
+  const prevEver = Math.max(0, Math.round(num(m.dailyBestEver, 0)));
+
+  if (!sameDay) { m.dailyDate = key; m.dailyBest = v; }
+  else if (v > prevToday) { m.dailyBest = v; }
+  if (v > prevEver) m.dailyBestEver = v;
+
+  /* 日志：一天一条取当天最好，按日期升序，超上限丢最早的 */
+  if (!Array.isArray(m.dailyLog)) m.dailyLog = [];
+  let hit = null;
+  for (const it of m.dailyLog) { if (it && it.d === key) { hit = it; break; } }
+  if (hit) { if (v > num(hit.best, 0)) hit.best = v; }
+  else m.dailyLog.push({ d: key, best: v });
+  m.dailyLog.sort((a, b) => (String(a.d) < String(b.d) ? -1 : String(a.d) > String(b.d) ? 1 : 0));
+  if (m.dailyLog.length > CFG.DAILY_LOG_MAX) {
+    m.dailyLog = m.dailyLog.slice(m.dailyLog.length - CFG.DAILY_LOG_MAX);
+  }
+
+  return {
+    score: v,
+    newToday: v > prevToday,
+    newEver: v > prevEver,
+    prevToday: prevToday,
+    prevEver: prevEver,
+  };
+}
+
+/** 最近 n 天（日期升序）。没打过的日子不补 0 —— 补了会被读成「那天打了 0 分」 */
+function dailyRecent(m, n) {
+  const log = (m && Array.isArray(m.dailyLog)) ? m.dailyLog : [];
+  return log.slice(-Math.max(1, n)).map(it => ({
+    d: String((it && it.d) || ''),
+    best: Math.max(0, num(it && it.best, 0)),
+  }));
+}
+
 function loadMeta() {
   const raw = storageGet(CFG.META_KEY);
   if (!raw) return newMeta();
@@ -1492,6 +2836,26 @@ function loadMeta() {
     /* JSON.parse('null') 是 null、脏数据也可能是数组，这里一并挡掉 */
     if (!m || typeof m !== 'object' || Array.isArray(m)) return newMeta();
     const out = Object.assign(newMeta(), m);
+    /* Object.assign 是原样覆盖 —— 上面只挡了「不是对象」，
+       字段本身的类型还没收敛。这些数字会直接决定开局资金 / 成就 ★，
+       也会被标题页拼进 innerHTML，脏值既会破坏数值也会破坏渲染。 */
+    out.bp = clamp(num(out.bp, 0), 0, CFG.BP_MAX || 9999);
+    out.runs = pos(int(out.runs, 0), 0);
+    out.maxBpEarned = pos(num(out.maxBpEarned, 0), 0);
+    out.loginStreak = pos(int(out.loginStreak, 0), 0);
+    out.loginBest = pos(int(out.loginBest, 0), 0);
+    out.pendingCash = clamp(pos(num(out.pendingCash, 0), 0), 0, LOGIN_CAP_CASH);
+    out.ach = obj(out.ach);
+    /* V6 招牌配方的跨局累计销量：只认真实存在的配方 id，值夹到合理上界。
+       存档可被玩家编辑 —— 不清洗的话塞个 1e9 就能让所有配方直接满级。 */
+    const sigRaw = obj(out.sig), sig = {};
+    for (const rid of Object.keys(sigRaw)) {
+      if (recipeById(rid)) sig[rid] = clamp(num(sigRaw[rid], 0), 0, 1000000);
+    }
+    out.sig = sig;
+    const best = obj(out.best);
+    out.best = {};
+    for (const k of Object.keys(DIFFICULTY)) out.best[k] = pos(num(best[k], 0), 0);
     /* runsTop 可能来自旧版本或脏数据。Object.assign 会原样覆盖，
        不逐条校验的话战绩榜会渲染出 NaN / undefined。 */
     if (!Array.isArray(out.runsTop)) out.runsTop = [];
@@ -1507,6 +2871,20 @@ function loadMeta() {
       }))
       .sort((a, b) => b.worth - a.worth)
       .slice(0, CFG.RUN_TOP_N);
+    /* 每日挑战三项：老存档没有 dailyBestEver / dailyLog，Object.assign 会把
+       它们留成 undefined（日期被写成 undefined 的话，日榜标题会直接显示
+       "今日种子 undefined"）。日期格式也一并校验，改存档塞个超长字符串
+       会让柱图把布局顶烂。 */
+    out.dailyDate = /^\d{4}-\d{2}-\d{2}$/.test(String(out.dailyDate || '')) ? out.dailyDate : '';
+    out.dailyBest = clamp(Math.round(num(out.dailyBest, 0)), 0, CFG.RANK_SCORE_MAX);
+    out.dailyBestEver = clamp(Math.round(num(out.dailyBestEver, 0)), 0, CFG.RANK_SCORE_MAX);
+    if (!Array.isArray(out.dailyLog)) out.dailyLog = [];
+    out.dailyLog = out.dailyLog
+      .filter(it => it && typeof it === 'object' && !Array.isArray(it)
+        && /^\d{4}-\d{2}-\d{2}$/.test(String(it.d || '')))
+      .map(it => ({ d: String(it.d), best: clamp(Math.round(num(it.best, 0)), 0, CFG.RANK_SCORE_MAX) }))
+      .sort((a, b) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0))
+      .slice(-CFG.DAILY_LOG_MAX);
     return out;
   } catch (e) { return newMeta(); }
 }
@@ -1601,7 +2979,12 @@ function dailyOrderCapacity(s) {
 }
 
 /** 手速一般时的可达订单数（计入点击加成） */
-function dailyClickOrderCapacity(s) { return Math.round(dailyOrderCapacity(s) * 1.35 + 8); }
+/** 点击加速能达到的产能上限。
+ *  baseCap 可传入调用方已经算好的 dailyOrderCapacity()，省掉一次重复计算
+ *  （dailyOrderCapacity 要遍历全体员工，建议列表里两处都要用）。 */
+function dailyClickOrderCapacity(s, baseCap) {
+  return Math.round((baseCap == null ? dailyOrderCapacity(s) : baseCap) * 1.35 + 8);
+}
 
 /** 库存能支撑多少位客人（把杯数换算成人次） */
 function maxOrdersFromStock(s) {
@@ -1631,7 +3014,7 @@ function adviceOf(s) {
   if (predicted > capOrders * 1.15) {
     out.push({
       level: 'warn', icon: '🚀',
-      text: `产能约 <b>${capOrders}</b> 单 < 预计客流 <b>${predicted}</b> 人（点击加速可到约 ${dailyClickOrderCapacity(s)} 单），忙不过来会流失口碑。去「⬆️ 升级」升封口机，或「👥 员工」招人 +1 出杯位。`,
+      text: `产能约 <b>${capOrders}</b> 单 < 预计客流 <b>${predicted}</b> 人（点击加速可到约 ${dailyClickOrderCapacity(s, capOrders)} 单），忙不过来会流失口碑。去「⬆️ 升级」升封口机，或「👥 员工」招人 +1 出杯位。`,
       act: 'up',
     });
   } else if (predicted < capOrders * 0.6 && s.cash > 500) {
@@ -1689,7 +3072,9 @@ function adviceOf(s) {
     if (share >= 0.2) {
       out.push({
         level: 'warn', icon: '🦑',
-        text: `对手「<b>${s.rival.name}</b>」抢走了约 <b>${Math.round(share * 100)}%</b> 的客流（它口碑 ${Math.round(s.rival.rep)} vs 你 ${Math.round(s.rep)}），去「🏙️ 商圈」反制。`,
+        /* 整段文案自带 <b> 标签，不能整体 esc，只能对插值进来的对手名转义 ——
+           它来自存档，而且渲染层会被 <b> 骗过，以为这段是可信 HTML。 */
+        text: `对手「<b>${escText(s.rival.name)}</b>」抢走了约 <b>${Math.round(share * 100)}%</b> 的客流（它口碑 ${Math.round(s.rival.rep)} vs 你 ${Math.round(s.rep)}），去「🏙️ 商圈」反制。`,
         act: 'rival',
       });
     }
@@ -1704,13 +3089,14 @@ function adviceOf(s) {
 /* ---------------- 离线收益 ---------------- */
 /** 离线收益结算 */
 function claimOffline(s) {
-  const last = s.lastTime || 0;
-  if (!last) return null;
+  const last = pos(int(s.lastTime, 0), 0);
+  if (!(last > 0)) return null;
   const mins = Math.min(CFG.OFFLINE_CAP_MIN, Math.max(0, (Date.now() - last) / 60000));
   if (mins < 1) return null;
   const rate = offlinePerMin(s);
   if (rate <= 0) return null;
-  const gain = Math.round(rate * mins * (1 + (s.bpBonus || 0) * 0.02));
+  /* 同理不再乘 (1 + bp * 0.02)：声望折算的是开局现金，不是全局收益倍率 */
+  const gain = Math.round(rate * mins);
   s.cash += gain;
   s.lastTime = Date.now();
   return { mins: Math.floor(mins), gain };

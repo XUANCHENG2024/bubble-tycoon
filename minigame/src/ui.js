@@ -23,6 +23,8 @@ var VIEW = {
   pressedAct: null,         /* 当前按下的命中项，用于按下反馈 */
   stageScroll: 0,           /* 出杯位区域的滚动量（员工多到一屏放不下时） */
   stageMax: 0,              /* 出杯位区域的最大滚动量，由 drawStage 每帧回写 */
+  modalScroll: 0,           /* 弹窗内容滚动量（内容比弹窗高时，目前只有 help） */
+  modalMax: 0,              /* 弹窗内容最大滚动量，由 drawModal 每帧回写 */
   tut: { on: false, step: 0, rect: null },
   tutRush: 0,               /* 引导「点击加速」那一步已点的次数 */
   ins: { top: 0, bottom: 0 },
@@ -102,18 +104,25 @@ function drawTitle(ctx, L) {
   GFX.button(ctx, x, y, w, 46, '🚀 开始营业',
     { kind: 'primary', act: 'start', size: 15, pressed: isPressed('start') });
   y += 54;
+  /* 原来读 VIEW.dailyPlayed，但这个字段全项目从未被赋值，永远 falsy，
+     昨天打过的成绩也就永远显示不出来。直接按 META 判断。 */
+  var played = (m.dailyDate === todayKey() && m.dailyBest != null);
   if (hasAnySave()) {
-    GFX.button(ctx, x, y, bw, 40, '💾 继续存档',
-      { kind: 'ghost', act: 'continue', pressed: isPressed('continue') });
-    GFX.button(ctx, x + bw + 10, y, bw, 40,
-      /* 原来读 VIEW.dailyPlayed，但这个字段全项目从未被赋值，永远 falsy，
-         昨天打过的成绩也就永远显示不出来。直接按 META 判断。 */
-      (m.dailyDate === todayKey() && m.dailyBest != null)
-        ? '📅 今日挑战 · 最佳 ' + money(m.dailyBest) : '📅 每日挑战',
-      { kind: 'amber', act: 'daily', size: 11, pressed: isPressed('daily') });
+    /* 三等分：「🏆 日榜」和每日挑战在玩法上本就是一件事，放同一行。
+       标题页在小屏上没有第 5 个按钮的位置（下面那行已经是四等分了）。 */
+    var bwT = (w - 16) / 3;
+    GFX.button(ctx, x, y, bwT, 40, '💾 继续存档',
+      { kind: 'ghost', act: 'continue', size: 10.5, pressed: isPressed('continue') });
+    GFX.button(ctx, x + bwT + 8, y, bwT, 40, '📅 每日挑战',
+      { kind: 'amber', act: 'daily', size: 10.5, pressed: isPressed('daily') });
+    /* 打过就把今天的成绩顶到按钮上，不用点进去也知道自己今天多少分 */
+    GFX.button(ctx, x + (bwT + 8) * 2, y, bwT, 40, played ? '🏆 ' + money(m.dailyBest) : '🏆 日榜',
+      { kind: 'ghost', act: 'dailyrank', size: 10.5, pressed: isPressed('dailyrank') });
   } else {
-    GFX.button(ctx, x, y, w, 40, '📅 每日挑战',
-      { kind: 'amber', act: 'daily', pressed: isPressed('daily') });
+    GFX.button(ctx, x, y, bw, 40, played ? '📅 今日 · 最佳 ' + money(m.dailyBest) : '📅 每日挑战',
+      { kind: 'amber', act: 'daily', size: 11, pressed: isPressed('daily') });
+    GFX.button(ctx, x + bw + 10, y, bw, 40, '🏆 日榜',
+      { kind: 'ghost', act: 'dailyrank', size: 11, pressed: isPressed('dailyrank') });
   }
   y += 48;
 
@@ -150,7 +159,8 @@ function drawTitle(ctx, L) {
   y += 62;
 
   /* 元信息 */
-  text(ctx, '🌟 声望 ' + m.bp + ' ★   🏆 最高 ' + money(m.best.normal || 0) + '   🎮 已玩 ' + m.runs + ' 局',
+  text(ctx, '🌟 声望 ' + m.bp + ' ★（开局基金 ' + money(prestigeStartCash(m.bp)) + '）   🏆 最高 '
+    + money(m.best.normal || 0) + '   🎮 已玩 ' + m.runs + ' 局',
     W / 2, y, { size: 10.5, align: 'center', color: T.txt2 });
   y += 17;
   text(ctx, lg.claimed
@@ -202,6 +212,10 @@ function drawGame(ctx, L) {
   drawTabs(ctx, L);
   if (s.phase === 'open' && s.sim) drawStage(ctx, L, s);
   else drawPanelArea(ctx, L, s);
+  /* 引导跟随滚动：面板画完后才知道高亮目标在哪儿，
+     超出可视区就把该 tab 的滚动量调一下（下一帧生效）。
+     必须在 drawPanelArea **之后** —— 它要用本帧刚写入的 panelRects。 */
+  if (typeof tutFollowScroll === 'function') tutFollowScroll();
 }
 
 function drawHUD(ctx, L, s) {
@@ -234,7 +248,9 @@ function drawHUD(ctx, L, s) {
   for (var i = 0; i < icons.length; i++) {
     GFX.fillRR(ctx, bx, iy, bs, bs, 9, T.card2, T.line);
     text(ctx, icons[i].t, bx + bs / 2, iy + (bs - 15) / 2, { size: 15, align: 'center' });
-    GFX.addHit(bx, iy, bs, bs, icons[i].act, null, null);
+    /* 命中比视觉外扩 3px（间隙 6px，正好不与相邻图标重叠）：
+       26~28px 的图标是存档/回主页/说明/报表四个常用入口，太小了点不准。 */
+    GFX.addHit(bx - 3, iy - 3, bs + 6, bs + 6, icons[i].act, null, null);
     bx -= bs + gap;
   }
 
@@ -286,6 +302,9 @@ function drawPanelArea(ctx, L, s) {
   if (pinH) {
     var by = L.H - pinH;
     GFX.fillRR(ctx, 0, by - 8, W, pinH + 8, 0, 'rgba(30,12,55,.97)', T.line);
+    /* 教程第⑥步要高亮这颗按钮：记下真实矩形（以前 TUT_RECT 硬编码
+       bodyY+340，指到采购卡去了）。 */
+    (VIEW.panelRects = VIEW.panelRects || {}).open = { x: x, y: by + 6, w: w, h: 44 };
     GFX.button(ctx, x, by + 6, w, 44, '🚪 开门营业',
       { kind: 'primary', act: 'open', size: 15, pressed: isPressed('open') });
   }
@@ -295,6 +314,55 @@ function drawPanelArea(ctx, L, s) {
  *  面板 1：经营
  * ========================================================== */
 function panelManage(ctx, x, y, w, s) {
+  /* V5 章节关卡：中期目标（跨 5 天推进）。
+     位置放在**合同之前**而不是之后：备货页是纵向滚动的，但下方的采购/菜单
+     若被推出当前视口，教程第③④步的高亮与命中区就一起失效
+     （minigame-smoke 188~193 抓过这个）。关卡卡越小越靠前，越不挤后面的内容。
+     高度压到 66px：标题行（关卡名+目标+奖励）+ 难度按钮行。 */
+  var sv = stageView(s);
+  if (sv) {
+    var sh = 66;
+    (VIEW.panelRects = VIEW.panelRects || {}).stage = { x: x, y: y, w: w, h: sh };
+    GFX.fillRR(ctx, x, y, w, sh, 12, 'rgba(139,92,255,.13)', 'rgba(139,92,255,.45)');
+    text(ctx, '🏔️ 第' + sv.chapter + '章', x + 10, y + 8, { size: 11, weight: 800, color: T.purple });
+    if (sv.cur) {
+      text(ctx, sv.cur.emoji + ' ' + sv.cur.desc, x + 66, y + 9,
+        { size: 9.5, color: T.txt2, maxW: w - 76 - 52 });
+      text(ctx, '+' + money(sv.cur.cash), x + w - 10, y + 8,
+        { size: 10, weight: 800, align: 'right', color: T.green });
+    } else {
+      text(ctx, '✅ 本章已通关 · ' + sv.cleared + '/' + sv.total, x + 66, y + 9,
+        { size: 9.5, color: T.green, maxW: w - 76 });
+    }
+    /* 三个难度档按钮：门槛越高、奖励越丰厚 */
+    var dbw = (w - 20 - 16) / 3;
+    for (var di = 0; di < sv.diffs.length; di++) {
+      var d = sv.diffs[di];
+      GFX.button(ctx, x + 10 + di * (dbw + 8), y + 30, dbw, 28, d.emoji + d.name,
+        { kind: d.cur ? 'primary' : 'ghost', act: 'stagediff', id: d.id, size: 9.5, r: 9 });
+    }
+    y += sh + 10;
+  }
+  /* 每日合同（V1）：放在最上面 —— 它是"今天要凑什么"的方向盘，
+     玩家会照着它改采购、改菜单，所以必须备货页第一眼看到。 */
+  var ct = contractView(s);
+  if (ct) {
+    GFX.card(ctx, x, y, w, 84);
+    var done = ct.done;
+    text(ctx, '📜 今日合同 · ' + ct.name + (done ? ' ✅' : ''),
+      x + 10, y + 9, { size: 12.5, weight: 800, color: done ? T.green : T.amber, maxW: w - 20 });
+    var ctSub = ct.prog === null
+      ? (done ? '已达成' : '打烊时结算')
+      : (ct.prefix || '') + Math.round(ct.prog) + '/' + (ct.prefix || '') + ct.goal + (ct.unit || '');
+    if (!done && ct.failRep < 0) ctSub += ' · 未达成扣口碑 ' + ct.failRep;
+    text(ctx, ct.desc, x + 10, y + 30, { size: 11, color: T.txt2, maxW: w - 90 });
+    text(ctx, (done ? '✅ 已达成' : '+' + money(ct.cash)), x + w - 10, y + 9,
+      { size: 12, weight: 800, align: 'right', color: done ? T.txt3 : T.green });
+    text(ctx, ctSub, x + w - 10, y + 30,
+      { size: 10, align: 'right', color: T.txt3, maxW: w * 0.42 });
+    GFX.bar(ctx, x + 10, y + 52, w - 20, 6, ct.ratio, { color: done ? T.green : T.cyan });
+    y += 94;
+  }
   var tag = TAGS[s.trend] || {};
   var nextTag = TAGS[s.nextTrend] || {};
 
@@ -311,6 +379,22 @@ function panelManage(ctx, x, y, w, s) {
     text(ctx, '›', x + w - 18, y + 14, { size: 18, weight: 700, color: T.amber });
     GFX.addHit(x, y, w, 48, 'gift', null, null);
     y += 58;
+  }
+
+  /* 已持有的经营策略卡（没有则整块不渲染，不占版面） */
+  if (Array.isArray(s.cards) && s.cards.length) {
+    var rows = Math.ceil(s.cards.length / 2);
+    GFX.card(ctx, x, y, w, 22 + rows * 20);
+    text(ctx, '🃏 经营策略 ' + s.cards.length + '/' + CFG.CARD_MAX, x + 10, y + 7,
+      { size: 11.5, weight: 800 });
+    for (var ci = 0; ci < s.cards.length; ci++) {
+      var card = cardById(s.cards[ci]); if (!card) continue;
+      var colx = x + 10 + (ci % 2) * ((w - 20) / 2);
+      var coly = y + 22 + Math.floor(ci / 2) * 20;
+      text(ctx, card.emoji + ' ' + card.name, colx, coly,
+        { size: 9.5, color: T.txt2, maxW: (w - 20) / 2 - 4 });
+    }
+    y += 22 + rows * 20 + 10;
   }
 
   /* 今日情报 */
@@ -368,6 +452,7 @@ function panelManage(ctx, x, y, w, s) {
 
   /* 采购 */
   var rows = ING.length;
+  (VIEW.panelRects = VIEW.panelRects || {}).market = { x: x, y: y, w: w, h: 40 + rows * 30 + 38 };
   GFX.card(ctx, x, y, w, 40 + rows * 30 + 38);
   text(ctx, '🛒 采购', x + 10, y + 9, { size: 12.5, weight: 800 });
   text(ctx, '现金 ' + money(num(s.cash)), x + w - 10, y + 9,
@@ -386,7 +471,7 @@ function panelManage(ctx, x, y, w, s) {
     /* 三个进货按钮：+10 / +50 / 满仓 */
     /* 只留 +10 / +50。原来第三个「满」传 extra 999 给 buyIng()，
        而仓库上限最多 1500 —— 这个按钮 100% 撞「仓库装不下了」，点了永远只弹错误。 */
-    var bw = 34, bh = 24;
+    var bw = 34, bh = 27;
     var bx = x + w - 10 - (bw * 2 + 6);
     GFX.button(ctx, bx, ry + 1, bw, bh, '+10', { kind: 'ghost', act: 'buy', id: g.id, extra: 10, size: 10, r: 7, pressed: isPressed('buy', g.id, 10) });
     GFX.button(ctx, bx + bw + 6, ry + 1, bw, bh, '+50', { kind: 'ghost', act: 'buy', id: g.id, extra: 50, size: 10, r: 7, pressed: isPressed('buy', g.id, 50) });
@@ -400,6 +485,9 @@ function panelManage(ctx, x, y, w, s) {
   /* 菜单与定价 */
   var ms = s.menu || [];
   var mh = 38 + ms.length * 46;
+  /* 教程第④步要高亮这块：把真实矩形记下来（TUT_RECT 从这读，
+    以前是硬编码 y，面板内容顺序一变高亮就指错地方）。 */
+  (VIEW.panelRects = VIEW.panelRects || {}).menu = { x: x, y: y, w: w, h: mh };
   GFX.card(ctx, x, y, w, mh);
   text(ctx, '📝 菜单与定价', x + 10, y + 9, { size: 12.5, weight: 800 });
   text(ctx, '倍率 0.9~1.1 最稳', x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3 });
@@ -409,13 +497,18 @@ function panelManage(ctx, x, y, w, s) {
     var r = recipeById(rid);
     if (!r) continue;
     var price = priceOf(s, rid), cost = costOf(s, rid), ratio = num(s.ratios[rid], 1);
+    /* 点配方行本身 = 上架/下架（± 按钮左边的整片区域）。
+       以前 manage 面板只有 ± 倍率可点，教程第④步提示「点一下任意配方卡」
+       却根本点不了 —— 引导变成只能硬点「下一步」。现在和 H5 的
+       data-act="toggle" 行为对齐。 */
+    GFX.addHit(x, my, w - 116, 44, 'toggle', rid);
     text(ctx, r.emoji + ' ' + r.name, x + 10, my + 4, { size: 11.5, color: T.txt });
     text(ctx, '售 ' + money(price) + ' · 本 ¥' + cost.toFixed(1) + ' · 毛利 ' + money(price - cost),
       x + 10, my + 20, { size: 10, color: T.txt3 });
-    /* 倍率 - / + */
-    GFX.button(ctx, x + w - 106, my + 2, 26, 22, '−', { kind: 'ghost', act: 'ratio', id: rid, extra: -0.05, size: 13, r: 7 });
-    text(ctx, '×' + ratio.toFixed(2), x + w - 66, my + 6, { size: 11, align: 'center', color: T.cyan });
-    GFX.button(ctx, x + w - 42, my + 2, 26, 22, '＋', { kind: 'ghost', act: 'ratio', id: rid, extra: 0.05, size: 13, r: 7 });
+    /* 倍率 - / +：行距 46px，按钮可以放大到 30 高 —— 22px 是全游戏最难点的目标之一 */
+    GFX.button(ctx, x + w - 108, my + 3, 30, 30, '−', { kind: 'ghost', act: 'ratio', id: rid, extra: -0.05, size: 14, r: 8 });
+    text(ctx, '×' + ratio.toFixed(2), x + w - 63, my + 11, { size: 11, align: 'center', color: T.cyan });
+    GFX.button(ctx, x + w - 44, my + 3, 30, 30, '＋', { kind: 'ghost', act: 'ratio', id: rid, extra: 0.05, size: 14, r: 8 });
     my += 46;
   }
   y += mh + 10;
@@ -431,15 +524,16 @@ function panelManage(ctx, x, y, w, s) {
     x + 10, y + 28, { size: 10.5, color: T.txt3 });
   var mks = [0, 200, 500, 1000, 2000];
   var mw = (w - 20 - 8 * (mks.length - 1)) / mks.length;
+  /* 16px 高是全游戏最小目标，加到 22；提示文字相应下移到 y+66（卡片高 80 容得下） */
   for (var mi = 0; mi < mks.length; mi++) {
-    GFX.button(ctx, x + 10 + mi * (mw + 8), y + 44, mw, 16,
+    GFX.button(ctx, x + 10 + mi * (mw + 8), y + 40, mw, 22,
       mks[mi] === 0 ? '不投' : '¥' + mks[mi],
       { kind: 'ghost', act: 'mkt', id: String(mks[mi]), size: 9.5, r: 6 });
   }
   text(ctx, num(s.lastMarketing) > 0
     ? '📢 昨日投入 ' + money(num(s.lastMarketing)) + ' 已用完，今天要重新投'
     : '营销只在当天生效，打烊后归零',
-    x + 10, y + 63,
+    x + 10, y + 66,
     { size: 10, maxW: w - 20, color: num(s.lastMarketing) > 0 ? T.amber : T.txt3 });
   y += 90;
 
@@ -465,12 +559,15 @@ function panelManage(ctx, x, y, w, s) {
      text()，渲染出来是「[object Object],[object Object]」—— 两版不一致里最显眼的一个。 */
   var advs = adviceOf(s) || [];
   if (advs.length) {
+    (VIEW.panelRects = VIEW.panelRects || {}).advice = { x: x, y: y, w: w, h: 30 + advs.length * 20 };
     GFX.card(ctx, x, y, w, 30 + advs.length * 20);
     text(ctx, '📌 今日建议', x + 10, y + 8, { size: 11.5, weight: 800, color: T.amber });
     var ay = y + 26;
     for (var ai = 0; ai < advs.length; ai++) {
       var av = advs[ai] || {};
-      text(ctx, (av.icon || '·') + ' ' + (av.text || ''), x + 10, ay, {
+      /* 文案是给 H5 的 innerHTML 写的（带 <b>），Canvas 必须先剥标签，
+         否则 "</b>" 会被当成可见字符画出来。 */
+      text(ctx, (av.icon || '·') + ' ' + GFX.plainText(av.text || ''), x + 10, ay, {
         size: 10.5, maxW: w - 20,
         color: av.level === 'warn' ? T.amber : (av.level === 'good' ? T.green : T.txt2),
       });
@@ -505,6 +602,53 @@ function intel(ctx, x, y, w, k, v, sub) {
  *  面板 2：研发
  * ========================================================== */
 function panelLab(ctx, x, y, w, s) {
+  /* V6 招牌配方：跨局继承的成长线。放在研发页最上面 ——
+     玩家看到某款已经 142/150 杯，下一局就会想专门练它。 */
+  var sgs = sigViews(s);
+  var lvN = 0, mxN = 0;
+  for (var sg0 = 0; sg0 < sgs.length; sg0++) {
+    if (sgs[sg0].lv > 0) lvN++;
+    if (sgs[sg0].maxed) mxN++;
+  }
+  GFX.card(ctx, x, y, w, 34);
+  text(ctx, '🏷️ 招牌配方', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, lvN + '/' + sgs.length + ' 款 · 满级 ' + mxN, x + w - 10, y + 10,
+    { size: 10, align: 'right', color: T.cyan });
+  y += 34;
+  text(ctx, '累计卖出杯数跨局继承 · 专精一款比铺开十款更划算',
+    x + 10, y + 2, { size: 9.5, color: T.txt3, maxW: w - 20 });
+  y += 16;
+  /* 两列排布（10 款 → 5 行）：单列 10 行会把下面的配方行顶出首屏，
+     玩家打开研发页先看到一整屏招牌进度、却看不到任何能点的配方。
+     只显示「已成招牌」或「有进度」的配方 —— 0 杯的既看不到信息也占地方。 */
+  var cw2 = (w - 8) / 2;
+  var shown = [];
+  for (var sgi = 0; sgi < sgs.length; sgi++) {
+    if (sgs[sgi].lv > 0 || sgs[sgi].cups > 0) shown.push(sgs[sgi]);
+  }
+  if (!shown.length) {
+    text(ctx, '还没有任何配方卖出过 —— 先上架一款吧', x + 10, y + 6,
+      { size: 10, color: T.txt3, maxW: w - 20 });
+    y += 24;
+  } else {
+    for (var sg = 0; sg < shown.length; sg += 2) {
+      for (var cc = 0; cc < 2 && sg + cc < shown.length; cc++) {
+        var g = shown[sg + cc];
+        var gx = x + cc * (cw2 + 8);
+        GFX.fillRR(ctx, gx, y, cw2, 26, 8, 'rgba(53,229,240,.07)', null);
+        text(ctx, g.emoji, gx + 6, y + 5, { size: 13 });
+        text(ctx, g.name, gx + 26, y + 6, { size: 9.5, weight: 700, maxW: cw2 - 78 });
+        text(ctx, g.lv > 0 ? g.tierEmoji + g.tierName : '—', gx + cw2 - 50, y + 6,
+          { size: 9, color: g.lv > 0 ? T.cyan : T.txt3, maxW: 46 });
+        text(ctx, g.cups + (g.maxed ? '' : '/' + g.nextCups), gx + cw2 - 6, y + 6,
+          { size: 8.5, align: 'right', color: T.txt3, maxW: 48 });
+        GFX.bar(ctx, gx + 6, y + 19, cw2 - 12, 4, g.ratio, { color: T.cyan });
+      }
+      y += 30;
+    }
+  }
+  y += 6;
+
   GFX.card(ctx, x, y, w, 34);
   text(ctx, '🧪 已解锁配方', x + 10, y + 9, { size: 12.5, weight: 800 });
   text(ctx, '菜单位 ' + (s.menu || []).length + '/' + menuSlots(s), x + w - 10, y + 10,
@@ -515,10 +659,17 @@ function panelLab(ctx, x, y, w, s) {
   for (var i = 0; i < unlocked.length; i++) {
     var r = unlocked[i];
     var on = (s.menu || []).indexOf(r.id) >= 0;
+    /* V6 招牌配方徽章：招牌加成（售价/成本）已算进「基础」后面的数字里，
+       这里补一个等级标记，让玩家知道这款已经是自己的招牌。 */
+    var sgv = sigLevelOf(s, r.id);
     GFX.card(ctx, x, y, w, 44);
     text(ctx, r.emoji + ' ' + r.name, x + 10, y + 8, { size: 12, weight: 700 });
     text(ctx, tagNames(r.tags) + ' · 基础 ' + money(num(r.price, 0)), x + 10, y + 25,
       { size: 10, color: T.txt3 });
+    if (sgv.lv > 0) {
+      text(ctx, sgv.tier.emoji + ' ' + sgv.tier.name, x + w - 84, y + 25,
+        { size: 9.5, align: 'right', color: T.cyan, maxW: 74 });
+    }
     GFX.button(ctx, x + w - 74, y + 10, 64, 24, on ? '✅ 在售' : '上架',
       { kind: on ? 'ghost' : 'primary', act: 'toggle', id: r.id, size: 10.5, r: 8 });
     y += 52;
@@ -545,9 +696,71 @@ function panelLab(ctx, x, y, w, s) {
 }
 
 /* ============================================================
+ *  经营维度：场地类型 / 经营城市 / 经营地图位置
+ *
+ *  与 H5 的「🏙️ 经营信息」卡内容对等，但交互按 Canvas 重新设计：
+ *    · H5 用 <select> 做省市联动 → 这里改成「点一下切下一个」的循环按钮
+ *      （触屏上少一次点击，也不会被弹层遮罩误触）
+ *    · H5 的坐标是两个文本框 → 这里用「定位 / 清除」按钮
+ *      （Canvas 没有软键盘，文本框体验远差于按钮）
+ *  校验一律走引擎，两端口径必须一致。
+ * ============================================================ */
+function panelVenue(ctx, x, y, w, s) {
+  var v = venueView(s);
+
+  GFX.card(ctx, x, y, w, 62);
+  text(ctx, '🏙️ 经营信息', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, v.typeName + ' · ' + [v.provName, v.cityName, v.districtName].filter(Boolean).join(' / '),
+    x + w - 10, y + 10, { size: 9.5, align: 'right', color: T.txt3, maxW: w * 0.55 });
+  text(ctx, '场地类型（点按循环切换）', x + 10, y + 26, { size: 9.5, color: T.txt2 });
+  GFX.button(ctx, x + 10, y + 40, 124, 30, v.typeEmoji + ' ' + v.typeName + ' ▸',
+    { kind: 'primary', act: 'vtypeNext', size: 11, r: 9 });
+  text(ctx, v.typeDesc, x + 144, y + 48, { size: 9, color: T.txt3, maxW: w - 154 });
+  y += 72;
+
+  /* 省市：点一下切到下一个值。列表很长时循环是唯一合理的触屏交互 */
+  GFX.card(ctx, x, y, w, 96);
+  text(ctx, '经营城市', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '限中国大陆 · 点按循环', x + w - 10, y + 10, { size: 9, align: 'right', color: T.txt3 });
+  var halfW = (w - 30) / 2;
+  GFX.button(ctx, x + 10, y + 26, halfW, 30, '省 ' + v.provName + ' ▸',
+    { kind: 'ghost', act: 'vprovNext', size: 10, r: 9 });
+  GFX.button(ctx, x + 20 + halfW, y + 26, halfW, 30, '市 ' + v.cityName + ' ▸',
+    { kind: 'ghost', act: 'vcityNext', size: 10, r: 9 });
+  /* 区级是可选粒度：没收录的城市不画这一行，而不是给一颗点了没反应的按钮 */
+  if (v.hasDistrictData) {
+    GFX.button(ctx, x + 10, y + 60, w - 20, 30, '区 ' + (v.districtName || '（不指定）') + ' ▸',
+      { kind: 'ghost', act: 'vdistNext', size: 10, r: 9 });
+  } else {
+    text(ctx, '该城市暂未收录区级（可选仅到市级）', x + 10, y + 70, { size: 9, color: T.txt3, maxW: w - 20 });
+  }
+  y += 106;
+
+  /* 地图坐标：Canvas 无软键盘，用「定位 / 清除」 */
+  GFX.card(ctx, x, y, w, 74);
+  text(ctx, '经营地图位置', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, GEO.COORD_SYS + '（高德）', x + w - 10, y + 10, { size: 9, align: 'right', color: T.txt3 });
+  text(ctx, v.hasGeo ? (v.geo.lng + ', ' + v.geo.lat) : '尚未选点',
+    x + 10, y + 30, { size: 11, color: v.hasGeo ? T.cyan : T.txt3, maxW: w - 20 });
+  GFX.button(ctx, x + 10, y + 46, 96, 28, v.hasGeo ? '清除坐标' : '定位当前城市',
+    { kind: v.hasGeo ? 'ghost' : 'primary', act: v.hasGeo ? 'vgeoclear' : 'vgeoCity', size: 10, r: 9 });
+  text(ctx, '境内 ' + GEO.MIN_LAT + '~' + GEO.MAX_LAT + ' / ' + GEO.MIN_LNG + '~' + GEO.MAX_LNG,
+    x + 116, y + 63, { size: 8.5, color: T.txt3, maxW: w - 126 });
+  y += 84;
+  return y;
+}
+
+
+/* ============================================================
  *  面板 3：升级
  * ========================================================== */
 function panelUp(ctx, x, y, w, s) {
+  /* 经营维度放在**页面最前面**（设备升级之前），不放末尾：
+     Canvas 面板首屏只有约 600px，升级项 6 条就占了 350px —— 放在末尾的话
+     经营信息整块会被推出裁剪区（命中区直接不登记，等于这功能在小游戏端不存在）。
+     它又是"店铺的静态属性"，本来就该排在花钱升级之前。 */
+  y = panelVenue(ctx, x, y, w, s);
+
   GFX.card(ctx, x, y, w, 34);
   text(ctx, '⬆️ 店铺升级', x + 10, y + 9, { size: 12.5, weight: 800 });
   y += 44;
@@ -582,6 +795,18 @@ function panelUp(ctx, x, y, w, s) {
     kind: 'amber', act: 'shop', disabled: sc == null || !canAfford(s, sc), size: 10, r: 8,
   });
   y += 60;
+
+  /* 品牌声望（与 H5 的「🌟 品牌声望」卡对齐：说明钱从哪来、为什么不直接加客流） */
+  var mbp = num(META().bp, 0);
+  GFX.card(ctx, x, y, w, 62);
+  text(ctx, '🌟 品牌声望 ' + mbp + ' ★', x + 10, y + 8, { size: 12, weight: 700 });
+  text(ctx, '开局创业基金 ' + money(prestigeStartCash(mbp)) + '（封顶 ' + money(CFG.BP_START_CAP) + '）',
+    x + w - 10, y + 9, { size: 10, align: 'right', color: T.green });
+  text(ctx, '本局已到账 +' + money(num(s.startBonus, 0)) + '，由你决定投去雇人 / 提速 / 开店',
+    x + 10, y + 28, { size: 9.5, color: T.txt3, maxW: w - 20 });
+  text(ctx, '声望不再直接加客流（客人多到做不过来只会流失扣口碑）；现在转生 +'
+    + prestigeGain(s) + ' ★', x + 10, y + 44, { size: 9.5, color: T.txt3, maxW: w - 20 });
+  y += 72;
 
   /* 转生 / 收官 */
   GFX.button(ctx, x, y, (w - 10) / 2, 40, '♻️ 品牌升级',
@@ -693,6 +918,8 @@ function panelAch(ctx, x, y, w, s) {
   text(ctx, got + '/' + ACHIEVEMENTS.length, x + w - 10, y + 10,
     { size: 11, align: 'right', color: T.amber });
   y += 44;
+  text(ctx, '本局达成给现金；跨局首次达成额外给 ★（32 条共 150 ★）',
+    x + 10, y - 6, { size: 9.5, color: T.txt3, maxW: w - 20 });
 
   var cols = 3, cw = (w - 8 * (cols - 1)) / cols;
   for (var i = 0; i < ACHIEVEMENTS.length; i++) {
@@ -783,8 +1010,11 @@ function drawStage(ctx, L, s) {
     var cx = x + (qi % per) * (qw + 6);
     var cy = y + Math.floor(qi / per) * 58;
     var r = recipeById(c.rid) || { emoji: '🥤' };
-    GFX.fillRR(ctx, cx, cy, qw, 50, 10, T.card, T.line);
+    /* V7 事件型顾客：金色描边 + ★ 角标，一眼认出该优先伺候谁 */
+    GFX.fillRR(ctx, cx, cy, qw, 50, 10, c.special ? 'rgba(255,194,71,.14)' : T.card,
+      c.special ? 'rgba(255,194,71,.75)' : T.line);
     text(ctx, c.face || '🙂', cx + qw / 2, cy + 2, { size: 17, align: 'center' });
+    if (c.special) text(ctx, '★', cx + qw - 8, cy + 1, { size: 10, align: 'right', color: T.amber });
     text(ctx, r.emoji, cx + qw / 2, cy + 24, { size: 11, align: 'center' });
     var left = 1 - num(c.wait) / Math.max(0.001, num(c.patience));
     GFX.bar(ctx, cx + 4, cy + 42, qw - 8, 4, left, { color: left < 0.3 ? T.red : T.green });
@@ -867,7 +1097,7 @@ function drawStage(ctx, L, s) {
   y = viewTop + viewH;
 
   /* 操作按钮 */
-  var by = L.H - 92 - L.padBottom;
+  var by = L.H - 136 - L.padBottom;
   var bw = (w - 12) / 2;
   GFX.button(ctx, x, by, bw, 42,
     num(sim.rushCd) > 0 ? '⚡ 大招 (' + Math.ceil(num(sim.rushCd)) + 's)' : '⚡ 老板上阵',
@@ -876,26 +1106,60 @@ function drawStage(ctx, L, s) {
     { kind: 'ghost', act: 'pause', size: 12 });
   GFX.button(ctx, x, by + 48, bw, 38, '🚚 紧急进货', { kind: 'ghost', act: 'restock', size: 11.5 });
   GFX.button(ctx, x + bw + 12, by + 48, bw, 38, '🔔 提前打烊', { kind: 'ghost', act: 'closeearly', size: 11.5 });
+  /* 营业中两个即时决策（V2）：每天各一次。用 kind:'ghost' + 文案区分 ——
+     Canvas 版没有 H5 那种独立一行的样式，做不到"视觉上不是常规操作"，
+     至少保证用掉之后就明确写成「已用 / 已下架」，不会让人反复点。 */
+  var ops = openOps(s);
+  var saleOn = ops && ops.sale.active;
+  var saleLabel = !ops ? '📣 限时促销'
+    : (saleOn ? '📣 促销中 ' + ops.sale.left + 's'
+      : (ops.sale.used ? '📣 促销已用' : '📣 限时促销'));
+  var pullLabel = !ops ? '📥 临时下架' : (ops.pull.used ? '📥 已下架' : '📥 临时下架');
+  GFX.button(ctx, x, by + 92, bw, 38, saleLabel,
+    { kind: saleOn ? 'cyan' : 'ghost', act: 'sale', size: 11.5, disabled: !!(ops && ops.sale.used) });
+  GFX.button(ctx, x + bw + 12, by + 92, bw, 38, pullLabel,
+    { kind: 'ghost', act: 'pullmenu', size: 11.5, disabled: !!(ops && ops.pull.used) });
 }
 
 /* ============================================================
  *  弹窗
  * ========================================================== */
 function drawModal(ctx, L) {
-  if (!VIEW.modal) return;
+  if (!VIEW.modal) { VIEW.modalMax = 0; return; }
   var W = L.W, H = L.H;
   var m = VIEW.modal;
   var fn = MODALS[m.type];
   if (!fn) return;
+  /* 每次打开（VIEW.modal 被赋了新对象）都从头显示；
+     用对象身份比较而不是 type —— 关掉再开同一类型也要复位 */
+  if (VIEW._modalObj !== m) { VIEW._modalObj = m; VIEW.modalScroll = 0; }
   var box = GFX.sheet(ctx, W, H, 60, H - 40);
   GFX.clipPush(ctx, box.x, box.y, box.w, box.h);
-  fn(ctx, box, m);
+  /* 弹窗滚动：玩法说明 8 节在 375×667 上高约 660~700px，弹窗只有 567px，
+     以前 onMove 在弹窗打开时直接 return，底部章节和音效开关被裁掉且
+     **没有任何方式能看到** —— 而音效开关在小游戏版只此一处。
+     绘制用 translate 上移；命中区用 setHitOffset 同步（见 gfx.js）。 */
+  ctx.save();
+  ctx.translate(0, -Math.max(0, VIEW.modalScroll || 0));
+  GFX.setHitOffset(-Math.max(0, VIEW.modalScroll || 0));
+  var yEnd = fn(ctx, box, m);
+  GFX.setHitOffset(0);
+  ctx.restore();
+  /* 绘制器返回内容底边 y 时才有滚动；不返回（大多数弹窗）视为不超高 */
+  VIEW.modalMax = (typeof yEnd === 'number')
+    ? Math.max(0, yEnd - (box.y + box.h) + 12) : 0;
+  if ((VIEW.modalScroll || 0) > VIEW.modalMax) VIEW.modalScroll = VIEW.modalMax;
   GFX.clipPop(ctx);
+  /* 超高时给一条提示，玩家才知道能滑 */
+  if (VIEW.modalMax > 0) {
+    text(ctx, '↕ 上下滑动查看更多', box.x + box.w / 2, box.y + box.h - 12,
+      { size: 9.5, align: 'center', color: T.txt3 });
+  }
   /* 事件弹窗不给 ×：step() 每帧都会重建它，给了 × 就是「关掉→下一帧又弹出来」，
      看起来像按钮失灵。H5 的 showEvent() 同样锁死，必须选一个选项。 */
   if (m.type !== 'event' && m.type !== 'report') {
     GFX.cardBtn(ctx, box.x + box.w - 34, box.y + 14, 20, 20, [{ t: '×', size: 16 }],
-      { act: 'close', r: 10 });
+      { act: 'close', r: 10, hitPad: 5 });
   }
 }
 
@@ -974,6 +1238,30 @@ MODALS.report = function (ctx, b, m) {
     mk('净利', r.net, pr.net, { unit: '¥' });
     if (ds.length) { drawDeltas(ctx, x, y, '📊 较 Day ' + num(pr.day), ds); y += 19; }
   }
+  /* 每日高光（V3）+ 合同结算（V1）：日报不再只是一堆数字。
+     高光逐行画、合同一行结论 —— 同一段内容 H5 用 .rep-hl / .rep-ct。 */
+  var cr2 = r.contractResult;
+  if (cr2) {
+    text(ctx, (cr2.ok ? '📜 合同达成：' : '📜 合同未达成：') + cr2.emoji + ' ' + cr2.name
+      + ' · ' + (cr2.ok ? '+' + money(cr2.cash) : '口碑 ' + num(cr2.rep)),
+      x, y, { size: 10.5, weight: 700, color: cr2.ok ? T.green : T.red, maxW: w });
+    y += 17;
+  }
+  /* V5 章节关卡的结算行：与 H5 的 .rep-ct 同一段内容、同一口径 */
+  var sr2 = r.stageResult;
+  if (sr2) {
+    text(ctx, (sr2.ok ? '🏔️ 关卡达成：' : '🏔️ 关卡未达成：') + sr2.emoji + ' ' + sr2.name
+      + ' · ' + sr2.diffEmoji + sr2.diffName + ' · '
+      + (sr2.ok ? '+' + money(sr2.cash) : '目标 ' + sr2.desc),
+      x, y, { size: 10.5, weight: 700, color: sr2.ok ? T.green : T.red, maxW: w });
+    y += 17;
+  }
+  var hl = r.highlights || [];
+  for (var hi = 0; hi < hl.length; hi++) {
+    y += para(ctx, hl[hi].text, x, y, { size: 10.5, color: T.amber, maxW: w, lineH: 15 });
+  }
+  if (hl.length) y += 4;
+
   /* 营销是当日一次性投入，打烊即归零 —— 不说清楚玩家会以为钱白花了 */
   if (num(r.marketing) > 0) {
     text(ctx, '📢 营销 ' + money(r.marketing) + ' 当天有效，明日需重新设置',
@@ -989,7 +1277,7 @@ MODALS.report = function (ctx, b, m) {
   var advs2 = adviceOf(s) || [];
   if (advs2.length) {
     GFX.fillRR(ctx, x, y, w, 34, 10, 'rgba(255,194,71,.10)', 'rgba(255,194,71,.3)');
-    text(ctx, '📌 ' + (advs2[0].icon || '') + ' ' + (advs2[0].text || ''), x + 10, y + 11,
+    text(ctx, '📌 ' + GFX.plainText((advs2[0].icon || '') + ' ' + (advs2[0].text || '')), x + 10, y + 11,
       { size: 10.5, color: T.amber, maxW: w - 20 });
     y += 44;
   }
@@ -1057,6 +1345,96 @@ MODALS.event = function (ctx, b, m) {
   }
 };
 
+/* 打烊三选一：与事件弹窗同构 —— 上面标题说明，下面每张卡一行「收益 / 代价」，最后是「都不要」 */
+MODALS.card = function (ctx, b, m) {
+  var s = S();
+  var offer = Array.isArray(s.cardOffer) ? s.cardOffer : [];
+  if (!offer.length) return;
+  var x = b.x + 14, w = b.w - 28;
+  var y = b.y + 14;
+  text(ctx, '🃏 经营策略 · 三选一', x, y, { size: 15, weight: 900 });
+  y += 24;
+  text(ctx, 'Day ' + num(s.day) + ' 打烊 · 选定后在本局内持续生效', x, y, { size: 11, color: T.txt3, maxW: w });
+  y += 26;
+  for (var i = 0; i < offer.length; i++) {
+    var c = offer[i];
+    /* 高度按「收益 + 代价」两行算，用 para 换行会被裁掉一半 */
+    GFX.fillRR(ctx, x, y, w, 58, 12, T.card2, T.line);
+    text(ctx, c.emoji + ' ' + c.name, x + 11, y + 8, { size: 12.5, weight: 800, maxW: w - 90 });
+    text(ctx, '↑ ' + c.gain, x + 11, y + 27, { size: 9.5, color: T.green, maxW: w - 100 });
+    text(ctx, '↓ ' + c.cost, x + 11, y + 41, { size: 9.5, color: T.red, maxW: w - 100 });
+    GFX.button(ctx, x + w - 66, y + 16, 56, 26, '选它',
+      { kind: i === 0 ? 'primary' : 'ghost', act: 'pickcard', id: c.id, size: 11, r: 8 });
+    y += 66;
+  }
+  GFX.button(ctx, x, y, w, 36, '🚫 都不要（维持现状）', { kind: 'ghost', act: 'skipcard', size: 11 });
+};
+
+/* 每日挑战日榜（F3）
+   平台原生榜单（tt.getImRankList）由平台自己画 UI，这里给的是两版共用的
+   本地那一半：今日成绩 / 个人最佳 / 最近 7 天。
+   平台那一路不可用时（未登录 / 非抖音端），面板照常显示，只是少一个按钮 ——
+   「入口不消失」是 F3 降级的底线。 */
+MODALS.dailyrank = function (ctx, b, m) {
+  var meta = META() || {};
+  var key = todayKey();
+  var today = (meta.dailyDate === key) ? Math.max(0, Math.round(num(meta.dailyBest, 0))) : 0;
+  var ever = Math.max(0, Math.round(num(meta.dailyBestEver, 0)));
+  var recent = dailyRecent(meta, 7);
+
+  var x = b.x + 14, w = b.w - 28;
+  var y = b.y + 14;
+  text(ctx, '🏆 每日挑战 · 同种子日榜', x, y, { size: 15, weight: 900 });
+  y += 24;
+  y += para(ctx, '每天全网共用同一个种子：同一张价格表、同一批顾客、同一串事件。'
+    + '比的只有经营决策。', x, y, { size: 10.5, color: T.txt3, maxW: w, lineH: 15 }) + 10;
+
+  var cw = (w - 10) / 2;
+  GFX.fillRR(ctx, x, y, cw, 40, 10, T.card2, T.line);
+  text(ctx, '今日最好', x + 9, y + 6, { size: 9.5, color: T.txt3 });
+  text(ctx, today ? money(today) : '未挑战', x + 9, y + 20, { size: 13, weight: 800, color: T.amber });
+  GFX.fillRR(ctx, x + cw + 10, y, cw, 40, 10, T.card2, T.line);
+  text(ctx, '个人最佳', x + cw + 19, y + 6, { size: 9.5, color: T.txt3 });
+  text(ctx, ever ? money(ever) : '—', x + cw + 19, y + 20, { size: 13, weight: 800, color: T.amber });
+  y += 50;
+
+  text(ctx, recent.length ? '📈 最近 ' + recent.length + ' 天' : '📈 最近战绩',
+    x, y, { size: 11, weight: 800, color: T.txt2 });
+  y += 18;
+  var bh = 56;
+  GFX.fillRR(ctx, x, y, w, bh + 22, 10, 'rgba(0,0,0,.22)', T.line);
+  if (!recent.length) {
+    text(ctx, '还没有成绩 —— 打一局每日挑战，这里就会出现柱子。',
+      x + 10, y + bh / 2, { size: 10.5, color: T.txt3, maxW: w - 20 });
+  } else {
+    var peak = 1, i;
+    for (i = 0; i < recent.length; i++) if (recent[i].best > peak) peak = recent[i].best;
+    var slot = w / recent.length;
+    for (i = 0; i < recent.length; i++) {
+      var r = recent[i];
+      var hgt = Math.max(4, Math.round(r.best / peak * bh));
+      var bx = x + i * slot + slot * 0.18, bw2 = slot * 0.64;
+      /* 个人最佳那一根换成琥珀色：一眼能看出自己哪天打得最好 */
+      GFX.fillRR(ctx, bx, y + 8 + (bh - hgt), bw2, hgt, 3,
+        (ever > 0 && r.best >= ever) ? 'rgba(255,194,71,.85)' : 'rgba(53,229,240,.78)');
+      text(ctx, String(r.d).slice(5), x + i * slot + slot / 2, y + bh + 10,
+        { size: 8.5, align: 'center', color: T.txt3 });
+    }
+  }
+  y += bh + 30;
+
+  if (CAPS.rankListOn()) {
+    GFX.button(ctx, x, y, w, 40, '🌐 查看全网日榜',
+      { kind: 'amber', act: 'ranklist', size: 12.5, pressed: isPressed('ranklist') });
+    y += 48;
+  }
+  /* 只有标题页才给「挑战今天这一局」：结局页上点它会把结算画面顶掉 */
+  if (VIEW.screen === 'title') {
+    GFX.button(ctx, x, y, w, 40, '🚀 挑战今天这一局',
+      { kind: 'primary', act: 'daily', size: 12.5, pressed: isPressed('daily') });
+  }
+};
+
 /* 玩法说明 */
 MODALS.help = function (ctx, b, m) {
   var x = b.x + 14, w = b.w - 28;
@@ -1065,7 +1443,9 @@ MODALS.help = function (ctx, b, m) {
   y += 24;
   var secs = [
     ['🎯 目标', '30 天内把净资产做到目标金额即通关；现金连续 2 天为负则破产。'],
-    ['🔁 每天流程', '① 进货（原料价格每日波动，低价囤货 = 纯利润）\n② 配菜单与定价（倍率 0.9~1.1 最稳）\n③ 开门营业（26 秒实时经营，点出杯位可加速，还有小费和连击）\n④ 结算（满意率决定口碑，口碑决定客流）\n⑤ 投资（升级 / 研发 / 招人 / 开分店）'],
+    ['📅 每日挑战', '每天全网共用同一个种子：同一张价格表、同一批顾客、同一串事件，比的只有经营决策。\n一天可以打很多局，「🏆 日榜」记的是当天最好的那一局。'],
+    ['🔁 每天流程', '① 进货（原料价格每日波动，低价囤货 = 纯利润）\n② 配菜单与定价（倍率 0.9~1.1 最稳）\n③ 开门营业（26 秒实时经营，点出杯位可加速，还有小费和连击）\n④ 结算（满意率决定口碑，口碑决定客流）\n⑤ 打烊三选一（每 ' + CFG.CARD_EVERY + ' 天抽一次）\n⑥ 投资（升级 / 研发 / 招人 / 开分店）'],
+    ['🃏 经营策略卡', '每张卡都有得有失（例：外卖平台 客流 +25% / 每杯收入 -¥0.8），选定后本局内一直生效。\n它改的是收益结构而不是收益总量 —— 抽到什么不重要，怎么围绕它调整才是玩法。\n最多持有 ' + CFG.CARD_MAX + ' 张；手感不对可以选「都不要」。'],
     ['👥 客群', '顾客分 5 类：学生党 / 打工人 / 网红 / 家庭客 / 街坊长辈，口味偏好、价格容忍度、耐心、单次杯数都不同。'],
     ['🏙️ 竞争', '隔壁会抢客流，去「🏙️ 商圈」用挖角 / 营销压制 / 差异化反击。'],
     ['💡 核心策略', '产能与客流的赛跑：客流涨太快而产能不够，客人会流失、口碑暴跌。出杯位 = 员工数 + 分店数 + 1。'],
@@ -1076,10 +1456,12 @@ MODALS.help = function (ctx, b, m) {
     y += 18;
     y += para(ctx, secs[i][1], x, y, { size: 11, color: T.txt2, maxW: w, lineH: 16 }) + 10;
   }
-  /* 音效开关 */
+  /* 音效开关。返回内容底边 y —— drawModal 据此算滚动上限，
+     让小屏（375×667）上被裁掉的底部章节和这个开关变得可以滑到。 */
   GFX.button(ctx, x, y, w, 38,
     (VIEW.sound ? '🔊 音效：开' : '🔇 音效：关'),
     { kind: 'ghost', act: 'sound', size: 12 });
+  return y + 44;
 };
 
 /* 平台福利中心：侧边栏复访 / 加桌面 / 订阅消息 / 激励广告 / 内购 */
@@ -1230,6 +1612,24 @@ function drawEnd(ctx, L) {
   }
   y += Math.ceil(its.length / 2) * 40 + 12;
 
+  /* V8 结局四维称号：同一个 S 级有多种拿法（利润/口碑/服务/经营） */
+  var axs = (m.axes || []);
+  if (axs.length) {
+    GFX.fillRR(ctx, x, y, w, 26 + Math.ceil(axs.length / 2) * 30, 12, T.card, T.line);
+    text(ctx, '🏅 经营四维', x + 10, y + 8, { size: 12, weight: 800 });
+    var axw = (w - 20 - 6) / 2;
+    for (var ai = 0; ai < axs.length; ai++) {
+      var ax = axs[ai];
+      var axx = x + 10 + (ai % 2) * (axw + 6);
+      var axy = y + 30 + Math.floor(ai / 2) * 30;
+      text(ctx, ax.emoji + ' ' + ax.name + (ax.title ? ' · ' + ax.title : ''),
+        axx, axy, { size: 9.5, weight: 700, color: ax.tier > 0 ? T.amber : T.txt3, maxW: axw });
+      text(ctx, GFX.plainText(ax.desc), axx, axy + 13,
+        { size: 8.5, color: T.txt3, maxW: axw });
+    }
+    y += 26 + Math.ceil(axs.length / 2) * 30 + 10;
+  }
+
   var by = Math.min(H - 108, y + 8);
   /* 无尽入口：H5 在结局页有一张「♾️ 继续经营」卡，小游戏原本没有，
      导致 startEndless() 在这版没有任何调用点 —— 无尽模式彻底不可达。 */
@@ -1240,15 +1640,18 @@ function drawEnd(ctx, L) {
       { kind: 'cyan', act: 'endless', size: 11, r: 9, pressed: isPressed('endless') });
     by += 52;
   }
-  /* 分享：抖音生态里这是最便宜的拉新手段，也必须是玩家点击直接触发。
-     宿主不支持时连按钮都不给，避免「点了没反应」。 */
-  if (CAPS.shareOn()) {
-    GFX.button(ctx, x, by, (w - 10) / 2, 44, '📤 分享战绩',
-      { kind: 'amber', act: 'share', size: 12.5, pressed: isPressed('share') });
-    GFX.button(ctx, x + (w - 10) / 2 + 10, by, (w - 10) / 2, 44, '🔄 再来一局',
-      { kind: 'primary', act: 'again', size: 12.5, pressed: isPressed('again') });
-  } else {
-    GFX.button(ctx, x, by, w, 44, '🔄 再来一局', { kind: 'primary', act: 'again', size: 14 });
+  /* 底行按钮：分享是抖音生态里最便宜的拉新手段，也必须是玩家点击直接触发，
+     宿主不支持时连按钮都不给，避免「点了没反应」。
+     「🏆 日榜」只在每日挑战这一局结束时插进来 —— 玩家刚打完，
+     正是最想知道自己在什么位置的时刻；普通局插它就只是挤占宽度。 */
+  var rowActs = [];
+  if ((VIEW.end || {}).daily) rowActs.push({ t: '🏆 日榜', kind: 'ghost', act: 'dailyrank', size: 12 });
+  if (CAPS.shareOn()) rowActs.push({ t: '📤 分享战绩', kind: 'amber', act: 'share', size: 12.5 });
+  rowActs.push({ t: '🔄 再来一局', kind: 'primary', act: 'again', size: rowActs.length >= 2 ? 12.5 : 14 });
+  var rw = rowActs.length >= 2 ? (w - 10 * (rowActs.length - 1)) / rowActs.length : w;
+  for (var bi = 0; bi < rowActs.length; bi++) {
+    GFX.button(ctx, x + bi * (rw + 10), by, rw, 44, rowActs[bi].t,
+      { kind: rowActs[bi].kind, act: rowActs[bi].act, size: rowActs[bi].size, pressed: isPressed(rowActs[bi].act) });
   }
   GFX.button(ctx, x, by + 52, w, 40, '🏠 回到主菜单', { kind: 'ghost', act: 'home', size: 12.5 });
 }
@@ -1262,7 +1665,9 @@ function drawToasts(ctx, L) {
     var t = VIEW.toasts[i];
     var a = Math.min(1, t.life / 300);
     ctx.globalAlpha = a;
-    var y = 60 + i * 34;
+    /* 第一条要避开刘海：HUD 的数值胶囊带占了顶部约 54~94px（含 padTop），
+       以前写死 60，iPhone 刘海机型（ins.top≈44）下第一条正好压在胶囊上。 */
+    var y = Math.max(60, L.padTop + 62) + i * 34;
     ctx.font = '700 12px ' + FONT;
     var tw = ctx.measureText(t.msg).width + 24;
     GFX.fillRR(ctx, (W - tw) / 2, y, tw, 26, 13, 'rgba(38,18,68,.94)', T.line2);
@@ -1318,11 +1723,21 @@ function drawTutorial(ctx, L) {
   var hint = (step.advance && step.advance !== 'next') ? (step.hint || '') : '';
   var ch = hint ? 172 : 150;
   var cy = H - ch - 24 - L.padBottom;
+  /* 卡片是全不透明的：高亮区在屏幕下半段时（最典型是第⑥步的
+     「开门营业」钉在底部），卡片必须上移避开 —— 否则它正好盖住
+     正在教玩家点的那颗按钮，只剩底下一条边可点还容易误触「跳过」。 */
+  if (VIEW.tut.rect) {
+    var hr = VIEW.tut.rect;
+    if (hr.y + hr.h > cy + 8) {
+      var above = hr.y - ch - 12;
+      if (above > (L.hudH || 60) + 40) cy = above;
+    }
+  }
   GFX.fillRR(ctx, 16, cy, W - 32, ch, 18, T.bg2, T.line2);
   text(ctx, (VIEW.tut.step + 1) + '/' + TUTORIAL.length, 30, cy + 12, { size: 10, color: T.txt3 });
   text(ctx, step.title, 30, cy + 26, { size: 14, weight: 900, color: T.txt, maxW: W - 70 });
   var ty = cy + 48;
-  ty += para(ctx, step.text.replace(/<br>/g, ' ').replace(/<[^>]+>/g, ''), 30, ty,
+  ty += para(ctx, GFX.plainText(step.text), 30, ty,
     { size: 11.5, color: T.txt2, maxW: W - 70, lineH: 17 });
   if (hint) {
     ty += 6;

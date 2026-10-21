@@ -169,7 +169,9 @@ body::before {
 
 .icon-btn {
   background: var(--card); border: 1px solid var(--line); color: var(--txt);
-  width: 34px; height: 34px; border-radius: 10px; cursor: pointer; font-size: 15px;
+  /* 38px：iPad 竖屏（768px）落在 640px 断点外拿不到放大，34px 太小；
+     手机端由媒体查询抬到 44px */
+  width: 38px; height: 38px; border-radius: 10px; cursor: pointer; font-size: 15px;
   display: flex; align-items: center; justify-content: center; transition: .15s;
 }
 .icon-btn:hover { background: var(--card2); transform: translateY(-2px); }
@@ -278,6 +280,101 @@ body::before {
 .mkt-btns .btn { padding: 5px 8px; font-size: 11px; border-radius: 8px; }
 
 /* 每日任务条 */
+/* 每日合同卡（V1）：金色描边，和「今日任务」区分开 ——
+   合同是备货的方向盘，任务是顺手完成的小目标，视觉上要一眼分得清。 */
+.contract {
+  border: 1px solid rgba(255, 194, 71, .45);
+  background: linear-gradient(180deg, rgba(255, 194, 71, .10), rgba(255, 194, 71, .03));
+}
+.contract.done { border-color: rgba(74, 222, 128, .45); background: linear-gradient(180deg, rgba(74, 222, 128, .10), rgba(74, 222, 128, .03)); }
+.ct-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ct-e { font-size: 20px; }
+.ct-n { font-weight: 800; font-size: 13.5px; color: var(--amber); }
+.contract.done .ct-n { color: var(--green); }
+.ct-desc { font-size: 12.5px; color: var(--txt2); flex: 1; min-width: 120px; }
+.ct-r { font-size: 12.5px; font-weight: 800; color: var(--green); flex: none; }
+.contract.done .ct-r { color: var(--txt3); }
+.ct-bar {
+  margin-top: 8px; height: 6px; border-radius: 9px; overflow: hidden;
+  background: rgba(255, 255, 255, .1);
+}
+.ct-bar i { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, var(--amber), var(--green)); border-radius: 9px; transition: width .25s; }
+.ct-sub { margin-top: 6px; font-size: 11px; color: var(--txt3); }
+
+/* 章节关卡卡（V5）：紫色描边，和金色合同区分 ——
+   合同是"今天"，关卡是"这一章"，两个时间尺度要一眼分得清。 */
+.stage {
+  border: 1px solid rgba(139, 92, 255, .45);
+  background: linear-gradient(180deg, rgba(139, 92, 255, .12), rgba(139, 92, 255, .03));
+}
+.stage.done { border-color: rgba(74, 222, 128, .45); background: linear-gradient(180deg, rgba(74, 222, 128, .10), rgba(74, 222, 128, .03)); }
+.stg-steps { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.stg-step {
+  font-size: 11px; padding: 3px 8px; border-radius: 9px;
+  background: rgba(255, 255, 255, .07); color: var(--txt3);
+  border: 1px solid transparent;
+}
+.stg-step.on { background: rgba(74, 222, 128, .16); color: var(--green); }
+.stg-step.cur { border-color: rgba(139, 92, 255, .6); color: var(--purple); background: rgba(139, 92, 255, .14); }
+.stg-cur { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.stg-e { font-size: 19px; }
+.stg-n { font-weight: 800; font-size: 13.5px; color: var(--purple); }
+.stg-d { font-size: 12.5px; color: var(--txt2); flex: 1; min-width: 110px; }
+.stg-r { font-size: 12.5px; font-weight: 800; color: var(--green); flex: none; }
+.stg-diffs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+.stg-dl { font-size: 11px; color: var(--txt3); }
+.stg-hint { font-size: 10.5px; color: var(--txt3); flex: 1; min-width: 150px; line-height: 1.5; }
+.stg-sub { margin-top: 6px; font-size: 12px; }
+
+/* 招牌配方卡（V6）：青色系，和研发卡区分 */
+.sig-card { border: 1px solid rgba(53, 229, 240, .35); }
+.sig-row {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, .06);
+  font-size: 11.5px;
+}
+.sig-row:last-child { border-bottom: none; }
+.sg-e { font-size: 15px; flex: none; }
+.sg-n { flex: 1; min-width: 62px; color: var(--txt); font-weight: 700; }
+.sg-lv { font-size: 10.5px; color: var(--cyan); flex: none; min-width: 52px; }
+.sg-lv.none { color: var(--txt3); }
+.sg-c { font-size: 10.5px; color: var(--txt3); flex: none; min-width: 54px; text-align: right; }
+.sg-bar { width: 54px; height: 5px; border-radius: 9px; background: rgba(255, 255, 255, .1); overflow: hidden; flex: none; }
+.sg-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--purple)); border-radius: 9px; }
+
+/* 配方卡上的招牌徽章（V6） */
+.rc-badge.sig { background: rgba(53, 229, 240, .9); color: #06202a; left: auto; right: 6px; }
+
+/* 结局四维称号（V8） */
+.ax-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.ax {
+  display: flex; align-items: center; gap: 7px;
+  padding: 7px 9px; border-radius: 11px;
+  background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .08);
+}
+.ax.on { background: rgba(255, 194, 71, .12); border-color: rgba(255, 194, 71, .32); }
+.ax-e { font-size: 17px; flex: none; }
+.ax-b { min-width: 0; }
+.ax-n { font-size: 11.5px; font-weight: 800; color: var(--txt2); }
+.ax.on .ax-n { color: var(--amber); }
+.ax-d { font-size: 10px; color: var(--txt3); line-height: 1.4; }
+
+/* 日报里的「今天的一句话」：每日高光（V3）+ 合同结算（V1）
+   —— 连续 30 天看同一种数字表会麻，这里给日报一个情感锚点。 */
+.rep-hl {
+  margin-top: 8px; padding: 9px 11px; border-radius: 12px;
+  background: linear-gradient(180deg, rgba(255, 194, 71, .12), rgba(255, 194, 71, .03));
+  border: 1px solid rgba(255, 194, 71, .3);
+}
+.rep-hl .hl-i { font-size: 12px; color: var(--amber); line-height: 1.7; }
+.rep-ct {
+  margin-top: 8px; padding: 7px 11px; border-radius: 11px;
+  font-size: 12px; font-weight: 700;
+  border: 1px solid rgba(255, 255, 255, .1);
+}
+.rep-ct.ok { color: var(--green); border-color: rgba(74, 222, 128, .35); background: rgba(74, 222, 128, .08); }
+.rep-ct.bad { color: #ff8080; border-color: rgba(255, 128, 128, .3); background: rgba(255, 128, 128, .07); }
+
 .quest {
   display: flex; align-items: center; gap: 8px;
   padding: 7px 0; border-bottom: 1px solid rgba(255, 255, 255, .06);
@@ -343,6 +440,46 @@ body::before {
 .up-lv { display: flex; gap: 3px; margin-top: 5px; }
 .up-pip { width: 14px; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, .16); }
 .up-pip.on { background: linear-gradient(90deg, var(--cyan), var(--pink)); }
+
+/* 经营维度（场地类型 / 城市 / 地图坐标） */
+.venue .vlabel {
+  display: flex; align-items: baseline; gap: 7px;
+  font-size: 11.5px; font-weight: 800; color: var(--txt2);
+  margin: 12px 0 7px;
+}
+.venue .vlabel:first-of-type { margin-top: 4px; }
+.venue .vhint { font-size: 10px; font-weight: 400; color: var(--txt3); }
+.vtypes { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+.vtype {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  padding: 7px 2px; border-radius: 10px; cursor: pointer;
+  background: rgba(255, 255, 255, .05); border: 1px solid transparent;
+  color: var(--txt2); font-size: 10.5px; font-family: inherit;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.vtype:hover { background: rgba(255, 255, 255, .1); }
+.vtype.on {
+  background: rgba(53, 229, 240, .14);
+  border-color: rgba(53, 229, 240, .55);
+  color: var(--cyan);
+}
+.vt-e { font-size: 17px; line-height: 1; }
+.vt-n { font-size: 10px; white-space: nowrap; }
+.vrow { display: flex; gap: 7px; margin-bottom: 7px; }
+.vsel {
+  flex: 1; min-width: 0; padding: 8px 9px; border-radius: 9px;
+  background: rgba(255, 255, 255, .07); border: 1px solid var(--line);
+  color: var(--txt); font-size: 12.5px; font-family: inherit;
+}
+.vsel:focus { outline: none; border-color: var(--cyan); }
+.vgeo { display: flex; gap: 7px; align-items: center; margin-bottom: 6px; }
+.vin {
+  min-width: 0; padding: 8px 9px; border-radius: 9px;
+  background: rgba(255, 255, 255, .07); border: 1px solid var(--line);
+  color: var(--txt); font-size: 12.5px; font-family: inherit;
+}
+.vin:focus { outline: none; border-color: var(--cyan); }
+.vnote { display: block; font-size: 10.5px; color: var(--txt3); line-height: 1.6; }
 
 /* 员工 */
 .st {
@@ -427,6 +564,12 @@ body::before {
 }
 .cust .cp i { display: block; height: 100%; background: var(--amber); }
 .cust.angry .cf { animation: shake .4s infinite; }
+/* V7 事件型顾客：金色描边 + 右上角星标，一眼认出该优先伺候谁 */
+.cust.sp { border-radius: 9px; box-shadow: 0 0 0 1.5px rgba(255, 194, 71, .75); background: rgba(255, 194, 71, .1); }
+.cust .csp {
+  position: absolute; top: -5px; right: -3px;
+  font-size: 10px; color: var(--amber); text-shadow: 0 0 4px rgba(0, 0, 0, .8);
+}
 @keyframes shake { 0%, 100% { transform: translateX(0); } 50% { transform: translateX(3px); } }
 
 .stations {
@@ -456,6 +599,16 @@ body::before {
 
 .stage-actions { flex: 0 0 auto; display: flex; gap: 7px; margin-top: 10px; }
 .stage-actions .btn { flex: 1; font-size: 12.5px; padding: 11px 6px; }
+/* 营业中两个即时决策（V2）：单独一行。视觉上和「暂停/进货/打烊」这类
+   常规操作区分开 —— 它们是每天一次的判断，不是随时可点的开关。 */
+.stage-ops { flex: 0 0 auto; display: flex; gap: 7px; margin-top: 6px; }
+.stage-ops .btn-op {
+  flex: 1; font-size: 12px; padding: 9px 6px; min-height: 40px;
+  background: rgba(255, 194, 71, .10); border: 1px solid rgba(255, 194, 71, .35); color: var(--amber);
+}
+.stage-ops .btn-op:disabled { opacity: .42; background: rgba(255, 255, 255, .05); border-color: var(--line); color: var(--txt3); }
+.stage-ops .btn-op.on { background: rgba(255, 194, 71, .26); border-color: var(--amber); color: #fff; }
+.stage-ops .btn-op i { font-style: normal; opacity: .8; font-size: 11px; }
 
 /* ---------------- 飘字 / Toast ---------------- */
 .floater {
@@ -470,8 +623,11 @@ body::before {
 .floater.good { color: var(--green); }
 .floater.bad { color: var(--red); }
 
+/* top 要带上安全区：viewport-fit=cover 下刘海屏状态栏约 44px，
+   写死 12px 会让第一条 toast 整体藏在状态栏后面 —— 而 toast 是本作
+   最主要的操作反馈通道（签到 / 导入 / 购买提示全走它）。 */
 #toasts {
-  position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
+  position: fixed; top: calc(12px + var(--sat)); left: 50%; transform: translateX(-50%);
   z-index: 120; display: flex; flex-direction: column; gap: 6px; align-items: center;
   pointer-events: none; width: max-content; max-width: 92vw;
 }
@@ -546,6 +702,40 @@ body::before {
 .ev-opt:hover { border-color: var(--pink); background: rgba(255, 77, 157, .14); transform: translateX(3px); }
 .ev-opt .eo-l { font-weight: 800; font-size: 13.5px; }
 .ev-opt .eo-d { font-size: 11px; color: var(--txt3); margin-top: 2px; }
+
+/* 打烊三选一：策略卡的收益 / 代价用颜色区分，「得失」必须一眼看出来 */
+.cd-up { color: var(--green); font-weight: 700; }
+.cd-down { color: var(--red); font-weight: 700; }
+.cd-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.cd-chip {
+  font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px;
+  background: rgba(155, 122, 255, .16); border: 1px solid rgba(155, 122, 255, .38); color: var(--txt2);
+}
+
+/* 每日挑战日榜（F3）：最近 7 天的迷你柱图。
+   用纯 CSS 高度条而不是再引一次 canvas —— 几根柱子不值得背一份绘制依赖，
+   而且小游戏端那一份是 Canvas 画的，两边本来就各画各的。 */
+.rk-now { display: flex; gap: 10px; margin-top: 8px; }
+.rk-now > div {
+  flex: 1; padding: 8px 10px; border-radius: var(--r1);
+  background: var(--card2); border: 1px solid var(--line);
+}
+.rk-k { font-size: 10px; color: var(--txt3); }
+.rk-v { font-size: 16px; font-weight: 900; color: var(--amber); }
+.rk-bars { display: flex; align-items: flex-end; gap: 6px; height: 96px; margin-top: 10px; }
+.rk-bar {
+  flex: 1; display: flex; flex-direction: column; justify-content: flex-end;
+  align-items: center; height: 100%; min-width: 0;
+}
+/* 柱子画在固定高度容器的底部：没有 height:100% 的父容器撑着，
+   百分比高度会塌成 0，整排柱子就变成一条线 */
+.rk-bar > i {
+  display: block; width: 100%; max-width: 26px; border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, var(--cyan), rgba(53, 229, 240, .25));
+}
+.rk-bar.on > i { background: linear-gradient(180deg, var(--amber), rgba(255, 194, 71, .25)); }
+.rk-bar > b { font-size: 9.5px; color: var(--txt3); margin-top: 4px; font-weight: 700; }
+.rk-bar > span { font-size: 9px; color: var(--txt3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
 
 /* 结局 */
 #screen-end { align-items: center; justify-content: center; }
@@ -736,7 +926,7 @@ body::before {
 
   /* 触摸命中区：Apple HIG 建议 ≥44px。图标按钮和 Tab 原本都偏小 */
   .tab { min-width: 50px; min-height: 44px; font-size: 11.5px; padding: 8px 2px 10px; }
-  .icon-btn { min-width: 40px; min-height: 40px; }
+  .icon-btn { min-width: 44px; min-height: 44px; }
 
   /* 营业中 4 个按钮在窄屏换行，避免挤成一条 */
   .stage-actions { flex-wrap: wrap; }
@@ -744,7 +934,12 @@ body::before {
   .stations { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
   .stn { min-height: 84px; }
   .btn { font-size: 13px; }
-  .btn-sm { min-height: 38px; }
+  /* 小按钮在触摸设备上统一抬到 44px：38px 只差一点，但调研/研发/解雇/
+     雇佣/商圈动作都是备货阶段的常用操作，点空的代价不小 */
+  .btn-sm { min-height: 44px; }
+  /* 采购行的 +10/+30：默认约 25px 高，是 H5 全游戏最小的一批触摸目标，
+     而且每天连点十几次 —— 640px 查询以前漏了它 */
+  .mkt-btns .btn { min-height: 44px; padding: 8px 10px; }
   .close-x { min-width: 40px; min-height: 40px; }
 
   /* backdrop-filter 在中低端安卓 GPU 上代价极高（每帧全屏模糊），
