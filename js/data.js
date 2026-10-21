@@ -78,47 +78,217 @@ const TAGS = {
   sweet:  { name: '甜党', emoji: '🍬', color: '#FFD97D' },
 };
 
+/* ============================================================
+ *  V9 菜系（Cuisine）与制作配套（工坊）
+ *
+ *  为什么要加这一层：现有的「口味标签」（TAGS）是**属性**维度 ——
+ *  一款饮料可以同时是「奶香+浓郁」，两个标签的配方在经营上没有任何区别。
+ *  菜系是**产品线**维度：经典奶茶 / 鲜果茶 / 咖啡 / 抹茶 / 甜品，
+ *  它对应的是「门店的招牌品类」—— 这才是玩家真正会做的取舍。
+ *
+ *  两级分类的分工：
+ *    菜系（cuisine）→ 决定**能不能做**：需要对应的制作工坊
+ *    口味（tags）  → 决定**谁来买**：客群按口味偏好挑
+ *  这样「做出来」和「卖得掉」变成两件独立的事，玩家得两头顾。
+ *
+ *  ★ 制作工坊是这套系统的配套核心，也是它区别于「纯加数值」的关键：
+ *    工坊不是给全局加成，而是**生产资质** ——
+ *    没有对应工坊，该菜系的配方**根本不能上架**。
+ *    于是「研发一款新配方」不再只是花钱，而是要先有生产线，
+ *    玩家的中期决策从「我该做什么」变成「我该开哪条产品线」。
+ *    硬约束（而非软加成）的好处：不会像第一二批那样往经济里塞钱，
+ *    改难度曲线（第一批的教训 1）。
+ * ============================================================ */
+
+/** 菜系：产品线。每款配方归属且仅归属一个菜系。 */
+const CUISINES = [
+  { id: 'classic', name: '经典奶茶系', emoji: '🧋', color: '#C7A6FF', desc: '走量基本盘，复购最稳' },
+  { id: 'fruit',   name: '鲜果茶系',   emoji: '🍓', color: '#FF8FB1', desc: '夏季爆款，成本随鲜果波动' },
+  { id: 'coffee',  name: '咖啡系',     emoji: '☕', color: '#FFB26B', desc: '打工人刚需，客单价高' },
+  { id: 'matcha',  name: '抹茶系',     emoji: '🍵', color: '#7BD389', desc: '毛利最高，但小众' },
+  { id: 'dessert', name: '甜品系',     emoji: '🍮', color: '#FFD97D', desc: '靠糖与珍珠取胜，成本敏感' },
+];
+
+/**
+ * 制作工坊：每个菜系一条生产线。
+ * 等级决定该菜系配方能不能上架（level 0 = 不能），以及上架后的销量权重加成。
+ * 建成成本随等级递增 —— 开第二条线是**大额、长期**的投入，
+ * 这正是它能形成中期决策的原因（而不是随手点一下就有的加成）。
+ */
+/* ★ 造价必须与玩家的**实际现金流**匹配，不是与"感觉上很重"匹配。
+     初版把 1 级工坊定在 ¥1200~1900，而同期的设备 1 级只要 ¥200~450 ——
+     贵了一个数量级。实测（tools/diag-workshop.js 带 TRACE）：
+     玩家现金长期在 ¥1000~2000 徘徊，**永远攒不到开第二条线的钱**，
+     整个工坊系统成了"看得见用不上"的死功能。
+     现在 1 级定在 ¥600~900（与「招牌展位 +1」同量级，玩家跳一跳够得着），
+     2 级 ¥1500~2500，3 级 ¥3500~6000（与设备满级同量级，属于中期大件）。
+     系数差异保留：越"小众"的菜系（咖啡/抹茶）开线越贵。 */
+/* ★ 1 级造价必须让**最难难度的玩家也开得起第二条线**。
+     hard 开局现金只有 ¥520，若 1 级工坊要 ¥600，玩家掏空周转金就破产，
+     于是永远只能做 classic 系那 4 款 —— 工坊系统对 hard 成了纯负担
+     （配对实测 hard 达标率被拖掉 11pp：76%→65%）。
+     现在 1 级定在 ¥350~500：hard 掏得出来、normal/easy 更轻松，
+     而「开多条线要占多少现金」仍由 2/3 级的 ¥1500~6000 体现。 */
+/* ★ 收益设计（这是本系统最关键、也反复最多次的一处）：
+     初版把工坊做成**硬约束**（没工坊 → 该系配方不能上架/研发）——
+     实测证明那是错的：11/14 款配方都多一道前置，研发曲线被拉长，
+     且「不玩这个系统」等于**不能玩**（配对实测 hard 掉 11pp）。
+     改成软约束后又发现第二个问题：**收益太弱，买了没人买**。
+       Lv.1 成本 ¥400，收益是「该系研发费 -25%」= 一款入门款省 ¥80；
+       Lv.2 成本 ¥1400，收益是「销量权重 +8%」≈ 30 天多卖 24 杯 ≈ ¥600。
+     投入产出比太差 → 玩家（和 sim 的 AI）自然不会开线，
+     实测「开 1 条线」的破产率反而比「不开线」高（钱花了、菜单还是空的）。
+     现在给的是**够量**的收益（Lv.1 就有 +8% 权重 + 30% 研发折扣，
+     Lv.3 再加 18% 高端款加成），三层都只是"更好卖 / 更便宜"，
+     从不把门关上。于是工坊是**可选的经营深度**：开了更好，不开照旧玩，
+     既有玩法一点没被削弱，新维度是「加」上去的而不是「换」掉的。 */
+/* tier3Bonus 字段 = 该菜系**高端款**的销量权重加成（需工坊 Lv.3）。
+   它原先是「解锁许可」（没工坊就不能做高端款），被两轮配对实测证伪后改成加成，
+   详见下方 CRAFT_WORKSHOPS 的注释。 */
+/**
+ * 制作工坊（CRAFT_WORKSHOPS）：每条菜系一条产线，四层收益：
+ *   ① researchCut —— 该系研发费折扣（Lv.1 起）        「把钱花在刀刃上」
+ *   ② costCut     —— 该系配方每杯成本下降（随等级）  「自家产线，料更省」
+ *   ③ saleBonus   —— 该系配方销量权重加成（随等级递增）「做出来的更抢手」
+ *   ④ tier3Bonus  —— 该系**高端款**销量权重加成（Lv.3）  「旗舰产线的门面」
+ *
+ * ★ 为什么 ②「降成本」是必备层（不是可选项）—— 一条被参数扫描证实的教训：
+ *   工坊最初只有权重加成（相对量）。用 tools/diag-sweep.js 扫过
+ *   saleBonus 从 0.08 一直到 0.68（8 倍），结果 AI **一次线都没开**（产线恒 1.00 条）。
+ *   账算得出来：Day 30 日销约 71 杯，权重 +12% 只是把该系占比从 50% 拉到 56%
+ *   （≈ 多卖 4 杯/天），而 Lv.2 造价 ¥900 —— 20 天也赚不回来。
+ *   根因：**权重是相对量，永远不抬客流总量**，收益有天然天花板，
+ *   而造价是绝对量。凡是"加成型"收益配"绝对量"成本，理性玩家都不会买。
+ *   成本下降才是绝对量：直接进每杯毛利，且**与销量无关**（卖得越多越赚）。
+ *   数值由 tools/diag-sweep.js 参数扫描定标（每档 30 局固定种子配对，
+ *   与 diag-invest.js 交叉验证一致；最终取 0.16/0.27）：
+ *     cut 0.14/0.24 → easy +16.3pp
+ *     cut 0.16/0.27 → **easy +21.0 / normal −2.3 / hard +1.1pp**✅ 产线 2.6~3.5 条
+ *     cut 0.18/0.30 → easy +21.2 / normal −0.2 / hard +0.7pp（但 easy 破产 3/30）
+ *     cut 0.20/0.34 → easy +20.8pp（产线 3.87，已过头）
+ *   选 0.16/0.27 而非净值更高的 0.18：它在**三个难度上破产率都降到 0**
+ *   （0.18 在 easy 仍有 3/30）。对玩家来说"不破产"比"多 2pp 净值"重要得多。
+ *   easy 的 +21pp 不是数值放过头 —— 扫 0.14~0.20 全区间都是 +16~+21pp，
+ *   且简单难度本就该给正反馈（它是让玩家熟悉这套系统的难度）。
+ *
+ * ★ 这组数字之前曾测出「+1.5pp / 产线 2.46」，是**假结论**，两个原因：
+ *   ① sweep 的 mutator 顺手把工坊从 4 级砍成 3 级（cost 长度 4→3），
+ *      测的是一个虚构配置；② 它与 diag-invest.js 各写一份关闭清单，
+ *      基线条件不一致（差 13pp）。两者都已修：mutator 只覆盖被扫维度，
+ *      关闭清单抽到共享模块 tools/v9-off.js，并由 v9OffLeakCheck() 强制自检。
+ *
+ * ★ 第四层为什么是「加成」而不是「解锁许可」（这段结论花了两轮实测）：
+ *   初版把高端款（tier3+）设成"必须有旗舰工坊才能研发"，
+ *   后来把门槛从 Lv.3 降到 Lv.2 —— 两次都被配对实测证伪。
+ *   逐款诊断（tools/diag-invest.js）的证据：
+ *     6 款 tier3 配方在开系统的组里，解锁局数 18~19/20 **→ 0/20**。
+ *   门槛不是"太早"或"太高"，是**方向错了**：
+ *     理性玩家 30 天攒不出第二条线的钱，门槛就等于永久锁死 40% 配方表，
+ *     而且玩家不会知道自己被锁了（研发页只写"现金不足"）。
+ *   与 canListRecipe 同原则：**能不能做归既有玩法，做得好不好才是新维度。**
+ */
+const CRAFT_WORKSHOPS = [
+  { id: 'classic', name: '经典奶茶工坊', emoji: '🧋', cost: [0, 260, 900, 2000], costCut: [0, 0.16, 0.27, 0.34], saleBonus: [0, 0.08, 0.20, 0.34], researchCut: 0.30, tier3Bonus: 0.18 },
+  { id: 'fruit',   name: '鲜果茶工坊',   emoji: '🍓', cost: [0, 300, 1000, 2200], costCut: [0, 0.16, 0.27, 0.34], saleBonus: [0, 0.08, 0.20, 0.34], researchCut: 0.30, tier3Bonus: 0.18 },
+  { id: 'coffee',  name: '咖啡工坊',     emoji: '☕', cost: [0, 380, 1250, 2700], costCut: [0, 0.16, 0.27, 0.34], saleBonus: [0, 0.08, 0.20, 0.34], researchCut: 0.30, tier3Bonus: 0.18 },
+  { id: 'matcha',  name: '抹茶工坊',     emoji: '🍵', cost: [0, 360, 1200, 2600], costCut: [0, 0.16, 0.27, 0.34], saleBonus: [0, 0.08, 0.20, 0.34], researchCut: 0.30, tier3Bonus: 0.18 },
+  { id: 'dessert', name: '甜品工坊',     emoji: '🍮', cost: [0, 320, 1050, 2300], costCut: [0, 0.16, 0.27, 0.34], saleBonus: [0, 0.08, 0.20, 0.34], researchCut: 0.30, tier3Bonus: 0.18 },
+];
+
+/**
+ * 开局赠送的工坊。
+ *
+ * ★ 这不是"送钱"，而是**让第一条产品线立刻成立**：
+ *   工坊的收益是「降本 + 权重 + 研发折扣」，但这些都要**先有那条系的配方**才生效。
+ *   三个难度的开局现金（easy 1100 / normal 700 / hard 520）都买不起第二条线，
+ *   而开局只有「经典珍珠奶茶」一款配方（classic 系）。
+ *   不给赠送工坊的话，玩家第一笔钱只能用于研发/设备，
+ *   而降本/权重这些收益要等到有配方才拿得到 —— 前期几乎感知不到这套系统，
+ *   「工坊」变成一个要攒很久才想起它的机制。
+ *   语义上也说得通：老店本来就会做珍珠奶茶这一款。
+ *   注意：给的只是 Lv.1（够用），要开第二条线仍然得自己掏钱。
+ */
+const WORKSHOP_START = { classic: 1 };
+
+/**
+ * 主打菜系加成：菜单上**同一菜系**的配方越多，整体越畅销。
+ * 这是菜系层的「集中经营」奖励，和招牌配方（单品层）形成两个维度的取舍：
+ *   广度流 —— 每个菜系都开一条线，配方多、客群覆盖全
+ *   深度流 —— 只做一两个菜系，销量更集中
+ * 阈值设计成 2/3 款，因为 2 款是「能做出一条产品线」的最低门槛，
+ * 4 款以上几乎不可能（菜单位上限只有 8）。
+ */
+const CUISINE_FOCUS = [
+  { need: 2, bonus: 0.06, label: '双拼' },
+  { need: 3, bonus: 0.12, label: '三连' },
+  { need: 4, bonus: 0.18, label: '全系' },
+];
+
 /* ---------- 配方 ---------- */
 const RECIPES = [
-  { id: 'boba', name: '经典珍珠奶茶', emoji: '🧋', tags: ['milky', 'rich'], pop: 100,
+  { id: 'boba', name: '经典珍珠奶茶', emoji: '🧋', tags: ['milky', 'rich'], pop: 100, cuisine: 'classic',
     req: { tea: 2, milk: 2, pearl: 1, sugar: 1 }, price: 22, tier: 1, unlocked: true,
     desc: '街边小店的生命线，永远不会错的选择。' },
-  { id: 'greentea', name: '芝士奶盖绿茶', emoji: '🍵', tags: ['tea', 'fresh'], pop: 84,
+  { id: 'greentea', name: '芝士奶盖绿茶', emoji: '🍵', tags: ['tea', 'fresh'], pop: 84, cuisine: 'classic',
     req: { tea: 3, milk: 1, sugar: 1 }, price: 19, tier: 1,
-    research: { cash: 180, ing: { tea: 12, milk: 8 } },
+    research: { cash: 150, ing: { tea: 10, milk: 6 } },
     desc: '低成本入门款，利润空间薄但走量。' },
-  { id: 'passion', name: '满杯百香果', emoji: '🥭', tags: ['fruity', 'fresh'], pop: 94,
+  { id: 'passion', name: '满杯百香果', emoji: '🥭', tags: ['fruity', 'fresh'], pop: 94, cuisine: 'fruit',
     req: { tea: 1, fruit: 3, sugar: 1 }, price: 26, tier: 1,
-    research: { cash: 260, ing: { fruit: 14, tea: 6 } },
+    research: { cash: 150, ing: { fruit: 8, tea: 4 } },
     desc: '夏天的人气王，鲜果便宜时血赚。' },
-  { id: 'taro', name: '芋泥波波', emoji: '🍠', tags: ['milky', 'rich'], pop: 90,
+  { id: 'taro', name: '芋泥波波', emoji: '🍠', tags: ['milky', 'rich'], pop: 90, cuisine: 'classic',
     req: { milk: 3, pearl: 2, sugar: 2 }, price: 28, tier: 2,
     research: { cash: 420, ing: { milk: 18, pearl: 12 } },
     desc: '扎实管饱，冬天与寒流天的宠儿。' },
-  { id: 'coco', name: '生椰拿铁', emoji: '🥥', tags: ['milky', 'rich'], pop: 98,
+  { id: 'coco', name: '生椰拿铁', emoji: '🥥', tags: ['milky', 'rich'], pop: 98, cuisine: 'coffee',
     req: { milk: 3, tea: 2 }, price: 24, tier: 2,
-    research: { cash: 480, ing: { milk: 20, tea: 14 } },
+    research: { cash: 260, ing: { milk: 12, tea: 8 } },
     desc: '打工人续命水，复购率极高。' },
-  { id: 'grape', name: '青提冰茶', emoji: '🍇', tags: ['fruity', 'fresh'], pop: 92,
+  { id: 'grape', name: '青提冰茶', emoji: '🍇', tags: ['fruity', 'fresh'], pop: 92, cuisine: 'fruit',
     req: { fruit: 2, tea: 2, sugar: 1 }, price: 25, tier: 2,
     research: { cash: 460, ing: { fruit: 16, tea: 12 } },
     desc: '清爽解腻，高温天直接起飞。' },
-  { id: 'matcha', name: '抹茶奶绿', emoji: '🍡', tags: ['tea', 'milky'], pop: 102,
+  { id: 'matcha', name: '抹茶奶绿', emoji: '🍡', tags: ['tea', 'milky'], pop: 102, cuisine: 'matcha',
     req: { tea: 2, milk: 2, sugar: 2 }, price: 26, tier: 2,
-    research: { cash: 520, ing: { tea: 20, milk: 16 } },
+    research: { cash: 280, ing: { tea: 12, milk: 9 } },
     desc: '颜值担当，拍照发圈自带流量。' },
-  { id: 'brownsugar', name: '黑糖鹿丸', emoji: '🍮', tags: ['sweet', 'rich'], pop: 114,
+  { id: 'brownsugar', name: '黑糖鹿丸', emoji: '🍮', tags: ['sweet', 'rich'], pop: 114, cuisine: 'dessert',
     req: { pearl: 3, milk: 2, sugar: 2 }, price: 32, tier: 3,
-    research: { cash: 900, ing: { pearl: 24, milk: 18, sugar: 14 } },
+    research: { cash: 520, ing: { pearl: 14, milk: 10, sugar: 8 } },
     desc: '爆款潜质，甜党见了走不动路。' },
-  { id: 'sakura', name: '樱花荔枝饮', emoji: '🌸', tags: ['fruity', 'sweet'], pop: 122,
+  { id: 'sakura', name: '樱花荔枝饮', emoji: '🌸', tags: ['fruity', 'sweet'], pop: 122, cuisine: 'fruit',
     req: { fruit: 3, milk: 1, sugar: 2 }, price: 34, tier: 3,
     research: { cash: 1050, ing: { fruit: 26, milk: 12, sugar: 12 } },
     desc: '限定颜值款，溢价能力拉满。' },
-  { id: 'star', name: '星球特调', emoji: '🌌', tags: ['fruity', 'milky', 'tea', 'fresh', 'rich', 'sweet'], pop: 168,
+  { id: 'star', name: '星球特调', emoji: '🌌', tags: ['fruity', 'milky', 'tea', 'fresh', 'rich', 'sweet'], pop: 168, cuisine: 'dessert',
     req: { tea: 2, milk: 2, fruit: 2, pearl: 1, sugar: 1 }, price: 46, tier: 4,
     research: { cash: 2400, ing: { tea: 20, milk: 20, fruit: 20, pearl: 16, sugar: 12 } },
     desc: '隐藏传说款：通吃所有流行趋势。' },
+  /* ---- V9 新增：为每个菜系补足 2 款以上，让「主打菜系」成立 ----
+     数值口径与同类老配方对齐（pop 略低于同档、售价与成本结构相近），
+     刻意**不**做成"更强的新品"—— 新配方的价值是**给菜系提供第二条腿**，
+     而不是数值碾压。 */
+  { id: 'taro2', name: '芋圆鲜奶', emoji: '🟣', tags: ['milky', 'rich'], pop: 96, cuisine: 'classic',
+    req: { milk: 3, pearl: 2, sugar: 1 }, price: 27, tier: 2,
+    research: { cash: 560, ing: { milk: 20, pearl: 14, sugar: 8 } },
+    desc: '经典奶系第二款：珍珠换芋圆，客群重叠度高。' },
+  { id: 'lime', name: '鸭屎香柠檬茶', emoji: '🍋', tags: ['tea', 'fresh'], pop: 106, cuisine: 'fruit',
+    req: { tea: 3, fruit: 2, sugar: 2 }, price: 29, tier: 3,
+    research: { cash: 880, ing: { tea: 18, fruit: 20, sugar: 12 } },
+    desc: '果茶系第二款：香水柠檬配茶底，清爽系客群。' },
+  { id: 'latte', name: '厚乳拿铁', emoji: '☕', tags: ['milky', 'rich'], pop: 108, cuisine: 'coffee',
+    req: { milk: 3, tea: 2, sugar: 1 }, price: 30, tier: 3,
+    research: { cash: 920, ing: { milk: 22, tea: 16, sugar: 8 } },
+    desc: '咖啡系第二款：厚乳基底，客单价高但奶耗大。' },
+  { id: 'matcha2', name: '抹茶红豆冰', emoji: '🍵', tags: ['tea', 'sweet'], pop: 100, cuisine: 'matcha',
+    req: { tea: 2, milk: 1, sugar: 2 }, price: 28, tier: 3,
+    research: { cash: 860, ing: { tea: 20, milk: 10, sugar: 14 } },
+    desc: '抹茶系第二款：不加珍珠，走清爽路线。' },
+  { id: 'taro3', name: '双皮奶冻', emoji: '🥛', tags: ['sweet', 'milky'], pop: 104, cuisine: 'dessert',
+    req: { milk: 3, sugar: 2, pearl: 1 }, price: 30, tier: 3,
+    research: { cash: 900, ing: { milk: 22, sugar: 14, pearl: 10 } },
+    desc: '甜品系第二款：奶冻加珍珠，与黑糖鹿丸共用甜品客群。' },
 ];
 
 /* ---------- 永久升级 ---------- */
@@ -1285,6 +1455,9 @@ const STRATEGY_CARD_INDEX = buildIndex(STRATEGY_CARDS, 'id');
 const VENUE_TYPE_INDEX = buildIndex(VENUE_TYPES, 'id');
 const PROVINCE_INDEX = buildIndex(PROVINCES, 'id');
 const CITY_INDEX = buildIndex(CITIES, 'id');
+/* V9 菜系与工坊索引 */
+const CUISINE_INDEX = buildIndex(CUISINES, 'id');
+const WORKSHOP_INDEX = buildIndex(CRAFT_WORKSHOPS, 'id');
 
 /** 取值一律返回 undefined（而不是抛错），调用方按需兜底 —— 与原来的 Array#find 行为一致 */
 function ingById(id) { return ING_INDEX.get(id); }
@@ -1311,6 +1484,14 @@ function citiesOfProvince(provId) {
 function districtsOfCity(cityId) {
   const list = DISTRICTS[cityId];
   return Array.isArray(list) ? list : [];
+}
+
+/* ---------- V9 菜系与工坊取值 ---------- */
+function cuisineById(id) { return CUISINE_INDEX.get(id); }
+function workshopById(id) { return WORKSHOP_INDEX.get(id); }
+/** 某菜系下的全部配方（按解锁层级排） */
+function recipesOfCuisine(cuisineId) {
+  return RECIPES.filter(r => r.cuisine === cuisineId);
 }
 
 /**

@@ -209,7 +209,10 @@ function applyCard(s, id) {
 function costOf(s, rid) {
   const r = recipeById(rid);
   let c = CFG.PACK_COST;
-  for (const k in r.req) c += (r.req[k] || 0) * (s.avgCost[k] || ingById(k).base);
+  /* 用量走 reqOf：与 consumeStock / 备货完全同一口径。
+     否则玩家看到的单杯毛利与结算时的 cogs 对不上（"毛利 14 实际只赚 6"）。 */
+  const req = reqOf(s, rid);
+  for (const k in req) c += req[k] * (s.avgCost[k] || ingById(k).base);
   /* 招牌配方（V6）：等级越高，每杯成本越省（熟练度/规模效应） */
   return Math.max(0.1, c - sigCostCut(s, rid));
 }
@@ -361,6 +364,11 @@ function newGame(diffKey, bpBonus, sigCarry) {
     stageResult: null,
     /* V6 招牌配方：s.sig = 跨局继承的累计销量基线，s.sigRun = 本局新增 */
     sig: sig, sigRun: {},
+    /* V9 制作工坊：{ 菜系 id: 等级 }。0 = 没建，该系配方不能上架。
+       开局赠送 1 条产品线（经典奶茶系 Lv.1）—— 三个难度的开局现金都买不起
+       最便宜的工坊，没有它玩家开局一架配方都上架不了（死锁）。
+       存量存档（无此字段）读档时由 sanitizeState 补全 —— 见该函数的说明。 */
+    workshops: Object.assign({}, WORKSHOP_START),
     /* 经营维度：场地类型 / 城市 / 地图位置。
        三个字段都是**可选**的，老存档读出来时由 sanitizeVenue 补默认值。
        坐标不预置 —— 默认给一个坐标等于替玩家编造经营地，应如实留空。 */
@@ -534,10 +542,25 @@ function autoFill(s) {
   }
   return { spent, bought };
 }
-function hasStock(s, rid, cups) {
+/** 该配方单杯的**实际配方用量**（已含 V9 工坊降本）
+ *
+ * ★ 降本必须在这里统一收口 —— 所有"要备多少料"的路径都得走它：
+ *   hasStock / maxCupsFromStock / UI 的备货建议 / AI 的采购逻辑。
+ *   若只有 consumeStock 扣得少，而备货仍按原 req 买，就会变成
+ *   「料买得一样多、扣得比以前少」→ 库存越堆越多 → 现金全压在原料上，
+ *   降本收益被积压吞掉。实测踩过：产线开了、权重也加了，净效应却是负的。 */
+function reqOf(s, rid) {
   const r = recipeById(rid);
+  const out = {};
+  if (!r || !r.req) return out;
+  const cut = workshopCostCut(s, r.cuisine);
+  for (const k in r.req) out[k] = Math.max(1, r.req[k] * (1 - cut));
+  return out;
+}
+function hasStock(s, rid, cups) {
   const n = cups || 1;
-  for (const k in r.req) if ((s.inv[k] || 0) < r.req[k] * n) return false;
+  const req = reqOf(s, rid);
+  for (const k in req) if ((s.inv[k] || 0) < req[k] * n) return false;
   return true;
 }
 function consumeStock(s, rid, worker) {
@@ -547,8 +570,13 @@ function consumeStock(s, rid, worker) {
   /* 「省料大师」按原料逐项打折：需求 1 时改为概率少耗，避免出现 Math.max(1,…) 抵消折扣 */
   const thrift = worker && worker.trait === 'thrift';
   let cost = CFG.PACK_COST;
-  for (const k in r.req) {
-    let need = r.req[k];
+  /* 用量统一走 reqOf（含 V9 工坊降本），避免"备货按降后、扣料按降前"两处漂移。
+     ★ 降本必须落在**真实扣料**上：最初只改 costOf，cogs 仍走原值——
+       菜单毛利数字变好看了，结算时库存照扣、钱照花，降本成了**纸面收益**，
+       净效应 ≈ 0。玩家看到毛利 +12%，账上却没多赚一分。 */
+  const req = reqOf(s, rid);
+  for (const k in req) {
+    let need = req[k];
     if (thrift) {
       const saved = need * 0.1;
       need = need - Math.floor(saved);
@@ -566,6 +594,11 @@ function toggleMenu(s, rid) {
   const i = s.menu.indexOf(rid);
   if (i >= 0) { s.menu.splice(i, 1); return '下架'; }
   if (s.menu.length >= menuSlots(s)) return false;
+  /* V9 工坊是**生产资质**：没有对应工坊就做不出该系产品。
+     这个硬约束必须在引擎入口拦住 —— 只靠 UI 隐藏按钮的话，
+     改存档或直接调函数就能上架做不出的东西。 */
+  const cl = canListRecipe(s, rid);
+  if (!cl.ok) return cl.msg;
   s.menu.push(rid);
   if (s.ratios[rid] == null) s.ratios[rid] = 1.0;
   return '上架';
@@ -575,11 +608,28 @@ function setRatio(s, rid, r) { s.ratios[rid] = clamp(num(r, 1), 0.5, 2.0); }
 /* ---------------- 研发 ---------------- */
 function researchCost(s, rid) {
   const r = recipeById(rid);
-  return Math.round((r.research ? r.research.cash : 300) * diffOf(s).costMult);
+  const base = r.research ? r.research.cash : 300;
+  /* V9 工坊 Lv.1 起，该系研发费打折（先让这条产品线跑起来） */
+  const cut = r.cuisine ? workshopResearchCut(s, r.cuisine) : 0;
+  const discounted = base * (1 - clamp(num(cut, 0), 0, 0.5));
+  return Math.round(discounted * diffOf(s).costMult);
 }
 function canResearch(s, rid) {
   const r = recipeById(rid);
   if (!r || s.recipes.includes(rid) || !r.research) return { ok: false, msg: '无法研发' };
+  /* ★ 这里**刻意不对 tier3 配方加工坊门槛**。
+     曾经加过（先要 Lv.3、后降到 Lv.2），两次都被配对实测证伪 ——
+     因为它犯了和「上架硬约束」同一个错误：把新系统变成"能不能玩"的前置。
+     逐款诊断（tools/diag-invest.js）给出的证据很直接：
+       6 款 tier3 配方（樱花荔枝饮 / 厚乳拿铁 / 抹茶红豆冰 /
+       黑糖鹿丸 / 鸭屎香柠檬茶 / 双皮奶冻）在「V9 全开」组里
+       解锁局数从 18~19/20 **直接掉到 0/20** ——
+       因为理性 AI 在 30 天里根本攒不到第二条线的钱，
+       于是这条"门槛"实际效果是**永久锁死 40% 的配方表**。
+     门槛下调治不好，因为病根不是门槛高，是"门槛存在"。
+     现在高端款一律可做，工坊改为给它**加成**（见 workshopTier3Bonus）：
+       工坊满级 → 高端款销量权重 +18%
+     与 canListRecipe 保持一致：能不能做是既有玩法，做得好不好才是 V9。 */
   if (s.cash < researchCost(s, rid)) return { ok: false, msg: '现金不足' };
   for (const k in r.research.ing) {
     if ((s.inv[k] || 0) < r.research.ing[k]) return { ok: false, msg: ingById(k).name + '不足' };
@@ -738,6 +788,9 @@ function spawnOne(s, type) {
     let p = rec.pop;
     /* 招牌配方（V6）：等级越高，该款越抢手 —— 跨局累计出来的"招牌效应" */
     p *= sigSaleMul(s, rid);
+    /* V9 菜系：工坊等级（销量权重）+ 主打菜系（客流倾斜） */
+    p *= cuisineWeightMul(s, rid);
+    p *= cuisineFocusWeight(s, rid);
     if (rec.tags.includes(s.trend)) p *= 1.55;
     if (s.weather.boom && rec.tags.includes(s.weather.boom)) p *= 1.25;
     if (s.weather.bust && rec.tags.includes(s.weather.bust)) p *= 0.78;
@@ -2146,6 +2199,239 @@ function sanitizeVenue(raw) {
   return out;
 }
 
+/* ============================================================
+ *  V9 菜系（Cuisine）与制作工坊（Craft Workshop）
+ *
+ *  设计要点（与前两批的教训直接相关）：
+ *   ① 工坊是**生产资质**而非数值加成 —— 没有工坊，该菜系配方**不能上架**。
+ *      硬约束的好处是它**不改经济总量**（不像给全局加成会偷改难度曲线，
+ *      第一批教训 1），却照样能形成中期决策。
+ *   ② 硬约束必须在**引擎入口**拦住（toggleMenu / canResearch），
+ *      不能只靠 UI 隐藏按钮 —— 否则改存档或直接调函数就能上架做不出的东西。
+ *   ③ 菜系加成全部走**销量权重**（谁被选中的概率），不动价格与成本，
+ *      避免与招牌配方（V6）的加成在同一个维度上叠乘失控。
+ * ============================================================ */
+
+/** 该菜系的工坊等级（0 = 没建，做不出该系产品） */
+function workshopLevel(s, cuisineId) {
+  const ws = s.workshops && s.workshops[cuisineId];
+  return clamp(int(ws, 0), 0, 3);
+}
+
+/** 升级到下一级工坊的成本；已满级返回 null */
+function workshopCost(s, cuisineId) {
+  const w = workshopById(cuisineId);
+  if (!w) return null;
+  const lv = workshopLevel(s, cuisineId);
+  if (lv >= w.cost.length - 1) return null;
+  const raw = w.cost[lv + 1];
+  /* ★ 工坊造价**不跟 difficulty.costMult 走**：
+       那个系数是给「进货 / 研发 / 升级」用的 —— 难度高时东西更贵，
+       但**工坊带来的收益与难度无关**（同样是 +8% 销量权重、同样解锁一款配方）。
+       若也跟着 ×1.15，hard 玩家就是「花更多钱换同样的东西」，
+       实测 hard 达标率被拖掉 9pp（78%→69%），等于给最难的难度又加了一道坎。
+       这里改用独立的系数：工坊是「扩张」不是「进货」，
+       难度高时反而该**便宜些**（hard 现金流本来就紧）。 */
+  const d = diffOf(s);
+  const scale = d.key === 'hard' ? 0.85 : (d.key === 'easy' ? 0.9 : 1);
+  return Math.round(raw * scale);
+}
+
+/** 建造/升级工坊。Lv.1 只开线，不附带别的动作。 */
+function buildWorkshop(s, cuisineId) {
+  const w = workshopById(cuisineId);
+  if (!w) return { ok: false, msg: '没有这个工坊' };
+  const c = workshopCost(s, cuisineId);
+  if (c == null) return { ok: false, msg: '该工坊已满级' };
+  if (s.cash < c) return { ok: false, msg: '现金不足' };
+  s.cash -= c;
+  s.invested += c;
+  if (!s.workshops) s.workshops = {};
+  s.workshops[cuisineId] = workshopLevel(s, cuisineId) + 1;
+  pushLog(s, `🏭 ${w.emoji} ${w.name} 升至 Lv.${s.workshops[cuisineId]}`);
+  return { ok: true, level: s.workshops[cuisineId], cost: c };
+}
+
+/**
+ * 该菜系的研发费折扣（工坊 Lv.1 就有）。
+ * 这是工坊的**第一层收益**：先让这条产品线跑起来（研发更便宜）。
+ */
+function workshopResearchCut(s, cuisineId) {
+  const w = workshopById(cuisineId);
+  if (!w) return 0;
+  const lv = workshopLevel(s, cuisineId);
+  if (lv < 1) return 0;
+  return num(w.researchCut, 0);
+}
+
+/**
+ * 该菜系工坊带来的**每杯成本下降比例**（工坊的**第二层收益，也是主力层**）。
+ *
+ * ★ 为什么必须有这一层（tools/diag-sweep.js 参数扫描给出的结论）：
+ *   工坊原本只有「销量权重加成」，而权重是**相对量** —— 它只改变菜单内部
+ *   各款的被选比例，不抬客流总量。扫了 8 倍（0.08→0.68），
+ *   AI 依然**一次线都没开**（产线恒 1.00 条）：
+ *     Day 30 日销约 71 杯，权重 +12% 只能把该系占比从 50% 拉到 56%
+ *     （≈ 多卖 4 杯/天 ≈ ¥56/天），而 Lv.2 造价 ¥900 —— 20 天都赚不回来。
+ *   成本下降是**绝对量**且**与销量无关**：每杯省 ¥0.7，卖 71 杯就省 ¥50/天。
+ *   「加成型收益」配「绝对量成本」，理性玩家永远不会买 —— 这是收益形态
+ *   与成本形态不匹配，不是数值没调好。
+ *
+ * 比例作用在**原料成本**上（不含包装费）：包装是固定支出，产线省不了它。
+ */
+function workshopCostCut(s, cuisineId) {
+  const w = workshopById(cuisineId);
+  if (!w || !w.costCut) return 0;
+  const lv = workshopLevel(s, cuisineId);
+  if (lv < 1) return 0;
+  return clamp(num(w.costCut[lv], 0), 0, 0.5);
+}
+
+/**
+ * 该菜系高端款（tier3+）的销量权重加成 —— 工坊的**第四层收益**。
+ *
+ * ★ 这层收益改过两次形态，每次都被实测打回，记录在此免得又走回头路：
+ *   ① 硬门槛（没工坊 → 不能做高端款）：❌ 6 款 tier3 解锁率 19/20 → 0/20
+ *   ② 降门槛（Lv.3 → Lv.2）：❌ 依然 0/20
+ *      病根是"门槛"本身 —— 理性玩家 30 天攒不出第二条线的钱，
+ *      门槛就等于永久锁死 40% 配方表，且玩家根本不知道自己被锁了。
+ *   ③ 纯加成（当前）：高端款一律可做，工坊满级给它 +18% 权重。
+ *      「能不能做」归既有玩法，「做得好不好」才是 V9 —— 与 canListRecipe 同原则。
+ *
+ * 只有工坊 Lv.3（旗舰级，¥2000~2700）才给这层收益：
+ * 既然不再把门关上，就必须让满级依然值得，否则没人升到顶。
+ */
+function workshopTier3Bonus(s, rid) {
+  const r = recipeById(rid);
+  if (!r || !r.cuisine || r.tier < 3) return 0;
+  const w = workshopById(r.cuisine);
+  /* ⚠️ 这里必须读 tier3Bonus（不是已改名的旧字段 tier3）——
+     漏改过一次：字段从 tier3（所需等级）改成 tier3Bonus（加成数值）时，
+     这一行没跟着改，于是旗舰加成恒为 0 —— 第四层收益**静默失效**，
+     而所有"能不能做"的断言都照常通过（因为它不再是门槛了）。
+     改名时全局搜旧名，比逐处记忆可靠。 */
+  if (!w || !w.tier3Bonus) return 0;
+  if (workshopLevel(s, r.cuisine) < 3) return 0;
+  return num(w.tier3Bonus, 0.18);
+}
+
+/**
+ * 该配方能不能上架。
+ *
+ * ★ 这里刻意**不做工坊硬约束**（初版是硬约束：没工坊就不能上架/研发），
+ *   实测证明那是错的：
+ *     · 硬约束让 11/14 款配方都多一道前置，研发曲线被拉长 ——
+ *       玩家原本 Day2-3 就能研 2-3 款，现在要先攒够线 + 料 + 钱才能开第一条线；
+ *     · 它让「不玩这个系统」变成**不能玩**（无工坊就没有菜单可上架），
+ *       而玩法丰富度应该来自**可选深度**，不是强制门槛；
+ *     · 配对实测 hard 难度被拖 11pp（76%→65%）。
+ *   现在的设计：工坊是**可选的经营深度** ——
+ *     开了 → 该系产品更抢手（销量权重）、能做更高端的款；
+ *     不开 → 照常用旧配方，一切照旧。
+ *   「能不能做」和「做得好不好」分开，前者是既有玩法，后者才是新维度。
+ */
+function canListRecipe(s, rid) {
+  const r = recipeById(rid);
+  if (!r) return { ok: false, msg: '没有这个配方' };
+  return { ok: true };
+}
+
+/** 该菜系的工坊是否已开（用于 UI 提示：这条线开了没有） */
+function hasWorkshop(s, cuisineId) {
+  return workshopLevel(s, cuisineId) > 0;
+}
+
+/**
+ * 菜系主打加成：菜单上同一菜系的配方越多，整体越畅销。
+ * 与招牌配方（V6，单品维度）形成两条独立的取舍线：
+ *   广度流 —— 每系都开一条线，客群覆盖全
+ *   深度流 —— 只做一两个系，销量更集中
+ */
+function cuisineFocusBonus(s, cuisineId) {
+  let n = 0;
+  for (const rid of (s.menu || [])) {
+    const r = recipeById(rid);
+    if (r && r.cuisine === cuisineId) n++;
+  }
+  let bonus = 0, label = '';
+  for (const f of CUISINE_FOCUS) {
+    if (n >= f.need) { bonus = f.bonus; label = f.label; }
+  }
+  return { count: n, bonus, label };
+}
+
+/** 某配方的销量权重加成合计（工坊等级 + 菜系主打）
+ *
+ *  刻意用**加性**而不是乘性叠加：
+ *    乘性的话，工坊满级(+30%) × 主打全系(+18%) = ×1.53，
+ *    再叠招牌 Lv3(+20%) 就是 ×1.84 —— 单款几乎垄断整个菜单，
+ *    玩家精心搭配的菜单结构被一个数字抹平了。
+ *    加性叠加的上限是 30% + 18% + 20% = +68%，仍然明显，但不会归零其他款。
+ *  另注：权重只改**同菜单内各款的相对被选概率**，不改客流总量 ——
+ *    所以它不会抬高营收上限，只改变产品结构（做爆款 vs 走量）。 */
+function cuisineWeightMul(s, rid) {
+  const r = recipeById(rid);
+  if (!r || !r.cuisine) return 1;
+  const w = workshopById(r.cuisine);
+  let add = 0;
+  if (w) {
+    const lv = workshopLevel(s, r.cuisine);
+    add += (w.saleBonus && w.saleBonus[lv]) || 0;
+  }
+  /* V9 第三层：旗舰工坊（Lv.3）让高端款更好卖（原先是"没工坊就不能做"，
+     已被实测证明是错的设计，见 workshopTier3Bonus 注释）。 */
+  add += workshopTier3Bonus(s, rid);
+  /* 主打加成单独走 cuisineFocusWeight（客流倾斜），不混进这里的权重 ——
+     见该函数的注释：权重是相对量，专注单系时加成会直接归零。 */
+  return 1 + add;
+}
+
+/**
+ * 主打菜系的**客流倾斜**：该系整体吸引更多客人。
+ *
+ * ★ 为什么主打加成必须作用在【选品权重】而不是【菜单内相对权重】之外的地方：
+ *   相对权重有个致命性质 —— 菜单里全是同一菜系时，每款都乘同一个系数，
+ *   相对比例完全不变，加成直接**归零**。也就是"专注单一菜系"这条路线
+ *   反而拿不到好处，而"菜单多样化"才有 —— 与设计意图正好相反
+ *   （实测：专注 classic 净资产 ¥7921 / 破产 4/8，广度 ¥11028 / 破产 0/8）。
+ *
+ *   正确做法是让主打菜系在**选品池里占更大比重** —— 相当于这条产品线
+ *   在门口更显眼。注意它仍然是**概率分配**而非凭空多出客人：
+ *   客流总量由 trafficOf 决定，这里改的是「客人进门后选哪一杯」。
+ */
+function cuisineFocusWeight(s, rid) {
+  const r = recipeById(rid);
+  if (!r || !r.cuisine) return 1;
+  const f = cuisineFocusBonus(s, r.cuisine);
+  if (!f.bonus) return 1;
+  /* bonus 6% / 12% / 18% → 权重放大 1.6 / 2.2 / 2.8。
+     权重与占比的关系是 w/(Σw)，单款权重放大 k 倍 ≈ 该系占比放大 k 倍。
+     放大系数要有上限，否则主打一款会把其他菜系彻底挤出菜单。 */
+  return 1 + f.bonus * 10;
+}
+
+/** 备货页展示用：全部菜系的工坊状态与主打情况 */
+function cuisineViews(s) {
+  const out = [];
+  for (const c of CUISINES) {
+    const w = workshopById(c.id);
+    const lv = workshopLevel(s, c.id);
+    const focus = cuisineFocusBonus(s, c.id);
+    const all = recipesOfCuisine(c.id);
+    out.push({
+      id: c.id, name: c.name, emoji: c.emoji, color: c.color, desc: c.desc,
+      level: lv, maxLevel: w ? w.cost.length - 1 : 0,
+      cost: workshopCost(s, c.id),
+      saleBonus: w && w.saleBonus ? (w.saleBonus[lv] || 0) : 0,
+      nextBonus: w && w.saleBonus ? (w.saleBonus[lv + 1] || 0) : 0,
+      total: all.length,
+      unlocked: all.filter(r => (s.recipes || []).includes(r.id)).length,
+      focusCount: focus.count, focusBonus: focus.bonus, focusLabel: focus.label,
+    });
+  }
+  return out;
+}
+
 /* ---------------- 存档（3 槽位 + 导入导出 + 降级提示） ---------------- */
 let CUR_SLOT = 0;
 let STORAGE_OK = true;          // 隐私模式 / 配额满时为 false，供 UI 提示
@@ -2518,6 +2804,30 @@ function sanitizeState(s) {
     if (recipeById(rid)) sigRun[rid] = clamp(num(sigRunRaw[rid], 0), 0, 1000000);
   }
   s.sigRun = sigRun;
+  /* V9 制作工坊：等级按菜系白名单清洗，夹到 0~3。
+     ★ 存量兼容的关键：**按菜单实际内容反推该建哪些工坊**。
+       老存档里「满杯百香果」本来就在菜单上（它一直是可上架的免费/可研配方），
+       若读档后因为「没有鲜果工坊」而不能上架它 —— 玩家会发现
+       「我原本能卖的产品突然卖不了了」，这是**倒退**而不是兼容。
+       存量存档里已经上架的配方，其生产线在业务上必然已经存在，
+       所以清洗时给这些菜系补 Lv.1 是对现实语义的还原，不是白送。
+       字段完全缺失（最老的存档）→ 补开局赠送的那条线。 */
+  const wsRaw = obj(s.workshops);
+  const ws = {};
+  for (const cu of CUISINES) {
+    const lv = int(wsRaw[cu.id], 0);
+    if (lv > 0) ws[cu.id] = clamp(lv, 1, 3);
+  }
+  for (const rid of arr(s.menu)) {
+    const r = recipeById(rid);
+    if (r && r.cuisine && !ws[r.cuisine]) ws[r.cuisine] = 1;
+  }
+  if (!Object.keys(ws).length) {
+    for (const k in WORKSHOP_START) {
+      if (cuisineById(k)) ws[k] = clamp(int(WORKSHOP_START[k], 0), 1, 3);
+    }
+  }
+  s.workshops = ws;
   /* 经营维度（场地类型 / 城市 / 地图坐标）：
      老存档**完全没有**这三个字段，脏存档可能塞了字典外的 id 或越界坐标。
      一律在这里收敛：缺失 → 补默认，非法 → 退默认，绝不抛错
@@ -2955,8 +3265,8 @@ function maxCupsFromStock(s) {
   const per = 1 / s.menu.length;
   const need = {};
   for (const rid of s.menu) {
-    const r = recipeById(rid);
-    for (const k in r.req) need[k] = (need[k] || 0) + r.req[k] * per;
+    const req = reqOf(s, rid);
+    for (const k in req) need[k] = (need[k] || 0) + req[k] * per;
   }
   let n = Infinity;
   for (const k in need) n = Math.min(n, (s.inv[k] || 0) / need[k]);

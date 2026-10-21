@@ -585,6 +585,16 @@ function doAct(act, id, extra) {
     toast('🧪 新配方解锁！');
     return;
   }
+  /* V9 制作工坊：建造/升级一条产品线 */
+  if (act === 'workshop') {
+    var wr = buildWorkshop(s, id);
+    if (wr.ok) {
+      var wsn2 = workshopById(id);
+      beep('up', 760, 0.12);
+      toast('🏭 ' + wsn2.emoji + wsn2.name + ' Lv.' + wr.level + '！');
+    } else toast(wr.msg);
+    return;
+  }
   if (act === 'upgrade') {
     var ur = doUpgrade(s, id);
     if (ur.ok) { beep('up', 760, 0.12); toast('⬆️ ' + UPGRADES.filter(function (u) { return u.id === id; })[0].name + ' 升级！'); }

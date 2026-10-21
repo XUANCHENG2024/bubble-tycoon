@@ -517,12 +517,28 @@ UI.renderManage = function () {
     const sg = sigLevelOf(s, rid);
     const sgBadge = sg.lv > 0
       ? `<div class="rc-badge sig">${sg.tier.emoji} ${esc(sg.tier.name)}</div>` : '';
+    /* V9 菜系：菜单卡上标出菜系；顺带提示这条线的加成开没开 */
+    const cu = cuisineById(r.cuisine);
+    const cuTag = cu
+      ? `<span class="rc-tag cui">${cu.emoji}${esc(cu.name)}</span>` : '';
+    /* V9：工坊是加成不是门票 —— 两种状态都给正向提示。
+       已开线显示当前拿到的三层收益，未开线显示"开了能拿什么"。
+       ★ 降本要放在最前面：它是工坊的**主力收益**（绝对量、卖得越多越赚），
+         权重是相对量、收益封顶。只说"权重 +8%"会让玩家算不出划不划算。 */
+    const wsLv = r.cuisine ? workshopLevel(s, r.cuisine) : 0;
+    const wsW = r.cuisine ? workshopById(r.cuisine) : null;
+    const wsTip = wsW
+      ? (wsLv > 0
+        ? `<div class="rc-tip">🏭 ${esc(wsW.name)} Lv.${wsLv} · 成本 −${Math.round((wsW.costCut[wsLv] || 0) * 100)}% · 权重 +${Math.round((wsW.saleBonus[wsLv] || 0) * 100)}%${r.tier >= 3 && wsLv >= 3 ? ' · 高端款再 +18%' : ''}</div>`
+        : `<div class="rc-tip">🏭 未建线 · 建了可得成本 −${Math.round((wsW.costCut[1] || 0) * 100)}% / 研发 −${Math.round((wsW.researchCut || 0) * 100)}%</div>`)
+      : '';
     h += `<div class="rc ${on ? 'on' : ''}" data-act="toggle" data-id="${rid}">
       ${hit ? '<div class="rc-badge">🔥流行</div>' : ''}
       ${sgBadge}
       <div class="rc-h"><span class="rc-e">${r.emoji}</span><span>${r.name}</span></div>
       <div class="rc-m">售价 <b style="color:var(--amber)">¥${price}</b> · 成本 ¥${cost.toFixed(1)} · 毛利 ¥${(price - cost).toFixed(1)}</div>
-      <div class="rc-tags">${r.tags.map(t => `<span class="rc-tag ${t === s.trend ? 'hit' : ''}">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}</div>
+      <div class="rc-tags">${cuTag}${r.tags.map(t => `<span class="rc-tag ${t === s.trend ? 'hit' : ''}">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}</div>
+      ${wsTip}
       <div class="rc-price"><span style="font-size:10px;color:var(--txt3)">定价</span>
         <input type="range" min="50" max="200" value="${Math.round(ratio * 100)}" data-act="ratio" data-id="${rid}">
         <span class="pv">×${ratio.toFixed(2)}</span></div>
@@ -628,36 +644,63 @@ UI.renderLab = function () {
   let h = `<div class="card"><div class="card-h">🧪 配方实验室
     <span class="ch-sub">已解锁 ${s.recipes.length}/${RECIPES.length}</span></div>
     <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px;line-height:1.6">
-      研发消耗现金 + 原料。稀有配方能显著提高单杯毛利，隐藏款「星球特调」通吃所有流行趋势。
-    </div><div class="grid2">`;
-  for (const r of RECIPES) {
-    const owned = s.recipes.includes(r.id);
-    const cost = researchCost(s, r.id);
-    const need = r.research ? r.research.ing : null;
-    let ok = true, needHtml = '';
-    if (need) {
-      const parts = [];
-      for (const k in need) {
-        const has = Math.round(s.inv[k] || 0);
-        if (has < need[k]) ok = false;
-        parts.push(`${ingById(k).emoji}${need[k]}<span style="color:${has >= need[k] ? 'var(--green)' : 'var(--red)'}">(${has})</span>`);
-      }
-      needHtml = parts.join(' ');
-    }
-    const affordable = s.cash >= cost;
-    h += `<div class="rc ${owned ? 'on' : (ok && affordable ? '' : 'locked')}">
-      <div class="rc-h"><span class="rc-e">${r.emoji}</span><span>${r.name}</span></div>
-      <div class="rc-m">${r.desc}</div>
-      <div class="rc-m">人气 ${r.pop} · 建议售价 ¥${r.price} · 成本约 ¥${costOf(s, r.id).toFixed(1)}</div>
-      <div class="rc-tags">${r.tags.map(t => `<span class="rc-tag">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}</div>
-      ${owned
-        ? `<div style="margin-top:7px;font-size:12px;font-weight:800;color:var(--cyan)">✅ 已解锁</div>`
-        : `<div style="margin-top:7px;font-size:11px;color:var(--txt3)">需要 ${needHtml}</div>
-           <button class="btn btn-sm ${ok && affordable ? 'btn-primary' : 'btn-ghost'}" style="width:100%;margin-top:6px"
-             data-act="research" data-id="${r.id}" ${ok && affordable ? '' : 'disabled'}>研发 ${money(cost)}</button>`}
+      研发消耗现金 + 原料。稀有配方能显著提高单杯毛利，隐藏款「星球特调」通吃所有流行趋势。<br>
+      <b>每款配方属于一个菜系</b>。建好对应的<b>制作工坊</b>后，该系研发费打折、销量权重更高——
+      这是<b>可选加成</b>，不建也能研发上架，只是少一层收益。
     </div>`;
+
+  /* V9 菜系分组：按产品线展示配方，而不是一长条平铺。
+     每个菜系块头部写清工坊状态 —— 未开线时标注「未建 · 有加成」而不是锁死，
+     玩家一眼能看出「开这条产品线能多拿多少」。 */
+  for (const cu of CUISINES) {
+    const list = RECIPES.filter(r => r.cuisine === cu.id);
+    if (!list.length) continue;
+    const cv = cuisineViews(s).find(x => x.id === cu.id);
+    const hasWs = cv && cv.level > 0;
+    const wsName = workshopById(cu.id);
+    h += `<div class="cui-group${hasWs ? '' : ' unbuilt'}">
+      <div class="cui-head">
+        <span class="cui-e">${cu.emoji}</span>
+        <span class="cui-n">${esc(cu.name)}</span>
+        <span class="cui-d">${esc(cu.desc)}</span>
+        <span class="cui-ws${hasWs ? ' on' : ''}">${hasWs
+          ? `🏭 ${esc(wsName.name)} Lv.${cv.level}`
+          : `🏭 未建 · 可得研发 -${Math.round((wsName.researchCut || 0) * 100)}%`}</span>
+      </div>
+      <div class="cui-grid">`;
+    for (const r of list) {
+      const owned = s.recipes.includes(r.id);
+      const cost = researchCost(s, r.id);
+      const need = r.research ? r.research.ing : null;
+      let ok = true, needHtml = '';
+      if (need) {
+        const parts = [];
+        for (const k in need) {
+          const has = Math.round(s.inv[k] || 0);
+          if (has < need[k]) ok = false;
+          parts.push(`${ingById(k).emoji}${need[k]}<span style="color:${has >= need[k] ? 'var(--green)' : 'var(--red)'}">(${has})</span>`);
+        }
+        needHtml = parts.join(' ');
+      }
+      const affordable = s.cash >= cost;
+      /* 能不能研发 = 原料够 + 钱够。工坊**不在其中**（它只是加成，不是门票）。 */
+      const canR = canResearch(s, r.id);
+      h += `<div class="rc ${owned ? 'on' : (canR.ok ? '' : 'locked')}">
+        <div class="rc-h"><span class="rc-e">${r.emoji}</span><span>${r.name}</span></div>
+        <div class="rc-m">${r.desc}</div>
+        <div class="rc-m">人气 ${r.pop} · 建议售价 ¥${r.price} · 成本约 ¥${costOf(s, r.id).toFixed(1)}</div>
+        <div class="rc-tags">${r.tags.map(t => `<span class="rc-tag">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}</div>
+        ${owned
+          ? `<div style="margin-top:7px;font-size:12px;font-weight:800;color:var(--cyan)">✅ 已解锁</div>`
+          : `<div style="margin-top:7px;font-size:11px;color:var(--txt3)">需要 ${needHtml}</div>
+             <button class="btn btn-sm ${canR.ok ? 'btn-primary' : 'btn-ghost'}" style="width:100%;margin-top:6px"
+               data-act="research" data-id="${r.id}" ${canR.ok ? '' : 'disabled'}>研发 ${money(cost)}</button>
+             ${canR.ok ? '' : `<div class="rc-tip">${esc(canR.msg)}</div>`}`}
+      </div>`;
+    }
+    h += `</div></div>`;
   }
-  h += `</div></div>`;
+  h += `</div>`;
   $('panel-lab').innerHTML = sigHtml + h;
 };
 
@@ -758,6 +801,51 @@ UI.renderUp = function () {
       ${cost == null
         ? `<span style="font-size:12px;color:var(--green);font-weight:800">满级</span>`
         : `<button class="btn btn-sm ${s.cash >= cost ? 'btn-primary' : 'btn-ghost'}" data-act="upgrade" data-id="${u.id}" ${s.cash >= cost ? '' : 'disabled'}>${money(cost)}</button>`}
+    </div>`;
+  }
+  h += `</div>`;
+
+  /* V9 制作工坊：菜系的生产线。三层收益全是**加成**：
+     ① 该系配方每杯成本下降（主力，卖得越多越赚）
+     ② 研发费打折③ 该系产品更抢手（旗舰级再加高端款加成）
+     不做任何硬约束 —— 不建照样能研发上架。
+     这是本套系统的主入口，所以放在设备升级之后、分店之前 ——
+     它比设备更"重"（一条产品线 ¥260 起），玩家的中期决策多在它身上。 */
+  const cvs = cuisineViews(s);
+  h += `<div class="card"><div class="card-h">🏭 制作工坊
+    <span class="ch-sub">${cvs.filter(c => c.level > 0).length}/${cvs.length} 条产线</span></div>
+    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px;line-height:1.6">
+      工坊给该菜系<b>三层加成</b>：<b>每杯成本下降</b>（主力，卖得越多越省）、研发费打折、产品更抢手。<br>
+      <b>不建也能研发上架</b>——工坊是可选的经营深度，开了更赚，不是门票。
+      另外菜单上同系配方越多，还有额外的<b>主打加成</b>。
+    </div>`;
+  for (const cv of cvs) {
+    const ws = workshopById(cv.id);
+    let pips = '';
+    for (let i = 0; i < cv.maxLevel; i++) pips += `<span class="up-pip ${i < cv.level ? 'on' : ''}"></span>`;
+    /* ★ 收益说明以**降本**打头：它是主力层（绝对量、卖得越多越赚）。
+       只强调"销量权重"会让玩家算不出划不划算 —— 权重是相对量、
+       不抬客流总量，收益有天花板。 */
+    const nextTxt = cv.cost == null
+      ? `已满级 · 成本 −${Math.round((ws.costCut[cv.maxLevel] || 0) * 100)}% · 权重 +${Math.round(cv.saleBonus * 100)}%`
+      : `升到 Lv.${cv.level + 1}：成本 −${Math.round((ws.costCut[cv.level + 1] || 0) * 100)}%（现 −${Math.round((ws.costCut[cv.level] || 0) * 100)}%）· 权重 +${Math.round(cv.nextBonus * 100)}%`;
+    h += `<div class="up-row cui-up">
+      <div class="up-e">${cv.emoji}</div>
+      <div class="up-body">
+        <div class="up-n">${esc(ws.name)} <span style="font-size:11px;color:var(--txt3)">Lv.${cv.level}/${cv.maxLevel}</span></div>
+        <div class="up-d">${esc(cv.desc)} · ${cv.unlocked}/${cv.total} 款已研发</div>
+        <div class="up-d" style="color:var(--cyan)">${nextTxt}</div>
+        <div class="up-d" style="color:var(--txt3)">研发费 −${Math.round((ws.researchCut || 0) * 100)}%${cv.level >= 3 ? ' · 高端款权重 +18%' : ' · 旗舰级解锁高端款加成'}</div>
+        <div class="up-d" style="color:${cv.focusCount >= 2 ? 'var(--amber)' : 'var(--txt3)'}">
+          ${cv.focusCount >= 2
+            ? `🔥 主打${esc(cv.focusLabel)}：菜单上 ${cv.focusCount} 款，销量权重 +${Math.round(cv.focusBonus * 100)}%`
+            : `主打加成：菜单上同系满 2 款可触发（现 ${cv.focusCount} 款）`}
+        </div>
+        <div class="up-lv">${pips}</div>
+      </div>
+      ${cv.cost == null
+        ? `<span style="font-size:12px;color:var(--green);font-weight:800">满级</span>`
+        : `<button class="btn btn-sm ${s.cash >= cv.cost ? 'btn-primary' : 'btn-ghost'}" data-act="workshop" data-id="${cv.id}" ${s.cash >= cv.cost ? '' : 'disabled'}>${money(cv.cost)}</button>`}
     </div>`;
   }
   h += `</div>`;

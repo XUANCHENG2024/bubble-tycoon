@@ -664,10 +664,19 @@ function panelLab(ctx, x, y, w, s) {
     var sgv = sigLevelOf(s, r.id);
     GFX.card(ctx, x, y, w, 44);
     text(ctx, r.emoji + ' ' + r.name, x + 10, y + 8, { size: 12, weight: 700 });
-    text(ctx, tagNames(r.tags) + ' · 基础 ' + money(num(r.price, 0)), x + 10, y + 25,
-      { size: 10, color: T.txt3 });
+    /* V9 菜系 + 工坊状态：菜系是产品线，玩家需要一眼看出这条线能不能做 */
+    var cu2 = cuisineById(r.cuisine);
+    var sub2 = (cu2 ? cu2.emoji + cu2.name + ' · ' : '') + tagNames(r.tags) + ' · ' + money(num(r.price, 0));
+    text(ctx, sub2, x + 10, y + 25, { size: 9.5, color: T.txt3, maxW: w - 96 });
+    /* V9：工坊是可选深度，不是门槛 —— 提示这条线开了没开 */
+    if (r.cuisine) {
+      var wsl = workshopLevel(s, r.cuisine);
+      text(ctx, wsl > 0 ? ('🏭 Lv.' + wsl + ' · 权重+' + Math.round((workshopById(r.cuisine).saleBonus[wsl] || 0) * 100) + '%')
+        : '🏭 未开线 · 研发省' + Math.round((workshopById(r.cuisine).researchCut || 0) * 100) + '%',
+        x + 10, y + 36, { size: 9, color: wsl > 0 ? T.cyan : T.txt3 });
+    }
     if (sgv.lv > 0) {
-      text(ctx, sgv.tier.emoji + ' ' + sgv.tier.name, x + w - 84, y + 25,
+      text(ctx, sgv.tier.emoji + ' ' + sgv.tier.name, x + w - 84, y + 8,
         { size: 9.5, align: 'right', color: T.cyan, maxW: 74 });
     }
     GFX.button(ctx, x + w - 74, y + 10, 64, 24, on ? '✅ 在售' : '上架',
@@ -677,20 +686,44 @@ function panelLab(ctx, x, y, w, s) {
 
   GFX.card(ctx, x, y, w, 34);
   text(ctx, '🔬 可研发', x + 10, y + 9, { size: 12.5, weight: 800 });
-  y += 44;
-  for (var j = 0; j < RECIPES.length; j++) {
-    var rr = RECIPES[j];
-    if ((s.recipes || []).indexOf(rr.id) >= 0) continue;
-    var cr = canResearch(s, rr.id);
-    var cost = researchCost(s, rr.id);
-    GFX.card(ctx, x, y, w, 50);
-    text(ctx, rr.emoji + ' ' + rr.name, x + 10, y + 8, { size: 12, weight: 700 });
-    text(ctx, tagNames(rr.tags), x + 10, y + 26, { size: 10, color: T.txt3 });
-    GFX.button(ctx, x + w - 84, y + 12, 74, 26, '研发 ' + money(cost), {
-      kind: cr.ok ? 'amber' : 'ghost', act: 'research', id: rr.id,
-      disabled: !cr.ok, size: 10, r: 8,
+  text(ctx, '需先建对应工坊', x + w - 10, y + 10, { size: 9.5, align: 'right', color: T.txt3 });
+  y += 40;
+  /* V9 菜系分组：可研发配方按菜系分块，每块标出工坊状态。
+     Canvas 版不做嵌套卡片（视觉噪音大），用一行小标题分隔。 */
+  for (var ci = 0; ci < CUISINES.length; ci++) {
+    var cu = CUISINES[ci];
+    var cuList = RECIPES.filter(function (r) {
+      return r.cuisine === cu.id && (s.recipes || []).indexOf(r.id) < 0;
     });
-    y += 58;
+    if (!cuList.length) continue;
+    var cvs2 = cuisineViews(s).filter(function (v) { return v.id === cu.id; })[0];
+    var hasWs2 = cvs2 && cvs2.level > 0;
+    text(ctx, cu.emoji + ' ' + cu.name, x + 4, y + 8,
+      { size: 11, weight: 800, color: hasWs2 ? T.txt : T.txt3 });
+    /* 工坊未建线时显示可得加成，而不是"需建工坊"——
+       后者会被读成"没工坊就不能做"，但引擎里它只是可选加成。
+       Canvas 上没有 tooltip，副标题必须自己把话说全。 */
+    text(ctx, hasWs2 ? ('🏭 Lv.' + cvs2.level)
+      : ('🏭 未建 · 成本 -' + Math.round(((workshopById(cu.id) || {}).costCut || [0, 0])[1] * 100) + '%'),
+      x + w - 4, y + 8,
+      { size: 9, align: 'right', color: hasWs2 ? T.green : T.amber });
+    y += 20;
+    for (var j = 0; j < cuList.length; j++) {
+      var rr = cuList[j];
+      var cr = canResearch(s, rr.id);
+      var cost = researchCost(s, rr.id);
+      GFX.card(ctx, x, y, w, 50);
+      text(ctx, rr.emoji + ' ' + rr.name, x + 10, y + 8, { size: 12, weight: 700 });
+      text(ctx, cr.ok ? (tagNames(rr.tags) + ' · ' + money(cost))
+        : (cr.msg || '条件不足'), x + 10, y + 26,
+        { size: 9.5, color: cr.ok ? T.txt3 : T.amber, maxW: w - 100 });
+      GFX.button(ctx, x + w - 84, y + 12, 74, 26, '研发 ' + money(cost), {
+        kind: cr.ok ? 'amber' : 'ghost', act: 'research', id: rr.id,
+        disabled: !cr.ok, size: 10, r: 8,
+      });
+      y += 58;
+    }
+    y += 4;
   }
   return y + 10;
 }
@@ -760,6 +793,47 @@ function panelUp(ctx, x, y, w, s) {
      经营信息整块会被推出裁剪区（命中区直接不登记，等于这功能在小游戏端不存在）。
      它又是"店铺的静态属性"，本来就该排在花钱升级之前。 */
   y = panelVenue(ctx, x, y, w, s);
+
+  /* V9 制作工坊排在**店铺升级之前**（不是之后）：
+     Canvas 面板首屏只有约 600px，6 条升级项就占 348px —— 放在末尾时
+     工坊整块会被推出裁剪区，而 GFX.addHit 在裁剪区外**不登记命中区**，
+     结果是"卡片画不出来、按钮也点不到"，整个系统在小游戏端等于不存在。
+     这与经营维度面板曾经踩的坑是同一个（见panelVenue 的注释）。
+     语义上也合理：先决定开哪几条产品线，再谈买设备提速。 */
+  /* V9 制作工坊：菜系的生产线，三层收益全是加成（研发折扣 / 销量权重 /
+     高端款加成），不做硬约束。放在分店之前 —— 它比开分店更早成为中期决策。 */
+  var cvs2 = cuisineViews(s);
+  GFX.card(ctx, x, y, w, 34);
+  text(ctx, '🏭 制作工坊', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, cvs2.filter(function (c) { return c.level > 0; }).length + '/' + cvs2.length + ' 条产线',
+    x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3 });
+  y += 40;
+  text(ctx, '工坊 = 三层加成（成本下降为主力 / 研发更便宜 / 更抢手）；不建也能研发上架',
+    x + 4, y + 2, { size: 9.5, color: T.txt3, maxW: w - 8 });
+  y += 18;
+  for (var wi = 0; wi < cvs2.length; wi++) {
+    var cv2 = cvs2[wi];
+    var wsn = workshopById(cv2.id);
+    GFX.card(ctx, x, y, w, 58);
+    text(ctx, cv2.emoji + ' ' + wsn.name + ' Lv.' + cv2.level + '/' + cv2.maxLevel,
+      x + 10, y + 8, { size: 11, weight: 700, maxW: w - 90 });
+    text(ctx, cv2.unlocked + '/' + cv2.total + ' 款已研发', x + 10, y + 24,
+      { size: 9.5, color: T.txt3 });
+    var focusTxt2 = cv2.focusCount >= 2
+      ? ('🔥 主打' + cv2.focusLabel + ' +' + Math.round(cv2.focusBonus * 100) + '%')
+      : ('同系满2款触发主打 · 现' + cv2.focusCount + '款');
+    text(ctx, focusTxt2, x + 10, y + 40,
+      { size: 9, color: cv2.focusCount >= 2 ? T.amber : T.txt3, maxW: w - 100 });
+    if (cv2.cost == null) {
+      text(ctx, '已满级', x + w - 10, y + 22, { size: 10, align: 'right', color: T.green });
+    } else {
+      GFX.button(ctx, x + w - 76, y + 16, 66, 26, money(cv2.cost), {
+        kind: canAfford(s, cv2.cost) ? 'primary' : 'ghost', act: 'workshop', id: cv2.id,
+        disabled: !canAfford(s, cv2.cost), size: 10, r: 8,
+      });
+    }
+    y += 66;
+  }
 
   GFX.card(ctx, x, y, w, 34);
   text(ctx, '⬆️ 店铺升级', x + 10, y + 9, { size: 12.5, weight: 800 });

@@ -411,9 +411,24 @@ function doAct(act, el) {
 
     /* --- 研发 --- */
     case 'research': {
+      /* V9：先问「能不能研」再研 —— 无工坊时给出**具体原因**
+         （缺工坊 / 缺钱 / 缺原料），而不是笼统的"无法研发"。 */
+      const canR = canResearch(s, id);
+      if (!canR.ok) { UI.toast(canR.msg, 'err'); break; }
       const r = doResearch(s, id);
       if (r.ok) { UI.toast(`🧪 解锁 ${r.recipe.emoji} ${r.recipe.name}！`, 'gold'); UI.confetti(30); SFX.up(); }
       else UI.toast(r.msg, 'err');
+      break;
+    }
+
+    /* --- V9 制作工坊：建造/升级一条产品线 --- */
+    case 'workshop': {
+      const r = buildWorkshop(s, id);
+      if (r.ok) {
+        const w = workshopById(id);
+        UI.toast(`🏭 ${w.emoji} ${w.name} 升至 Lv.${r.level}（-${money(r.cost)}）`, 'gold');
+        SFX.up();
+      } else UI.toast(r.msg, 'err');
       break;
     }
 
