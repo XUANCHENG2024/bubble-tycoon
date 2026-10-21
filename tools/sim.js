@@ -14,11 +14,16 @@ ctx.globalThis = ctx;
 vm.createContext(ctx);
 const src = fs.readFileSync(path.join(root, 'js/data.js'), 'utf8') + '\n'
   + fs.readFileSync(path.join(root, 'js/engine.js'), 'utf8') + '\n'
-  + ';globalThis.__D = { CFG, ING, RECIPES, UPGRADES, TRAITS, EVENTS, ACHIEVEMENTS, DIFFICULTY, TAGS, SHOP_COSTS, num, SIGNATURE_TIERS };';
+  + ';globalThis.__D = { CFG, ING, RECIPES, UPGRADES, TRAITS, EVENTS, ACHIEVEMENTS, DIFFICULTY, TAGS, SHOP_COSTS, num, SIGNATURE_TIERS, CUISINES, CRAFT_WORKSHOPS };';
 vm.runInContext(src, ctx, { filename: 'bundle.js' });
 
 const E = ctx;
 Object.assign(E, E.__D);
+/* 共享的脚本 AI（与 diag-balance.js 同一份，避免两处漂移）。
+   注意它在 **vm context 的词法环境**里（不是 Node 模块作用域），
+   所以要用 runInContext 求值一次，把函数挂到 ctx 上再调用。 */
+vm.runInContext(fs.readFileSync(path.join(root, 'tools/ai-shared.js'), 'utf8'), ctx, { filename: 'ai-shared.js' });
+const playSharedAI = vm.runInContext('playSharedAI', ctx);
 
 /* 参数：node tools/sim.js [局数] [--bp=45] [--chain=N] [--cards=none|first|random] [-v]
  *   --bp=N     指定初始声望点（默认 0）。用来验证跨局成长会不会把难度带偏。
@@ -37,82 +42,9 @@ function argVal(name, dflt) {
    招牌是第二批唯一的跨局成长线 —— 连玩曲线必须把它算进去，
    否则测出来的「越玩越强 / 越玩越弱」是失真的。 */
 function playAI(diff, seedLabel, bp, sig) {
-  const s = E.newGame(diff, bp || 0, sig || null);
-  const log = [];
-  while (s.day <= E.CFG.DAYS) {
-    /* --- 菜单 & 定价（先定菜单，才知道要进什么货） --- */
-    s.menu = [];
-    for (const rid of s.recipes) {
-      if (s.menu.length >= E.menuSlots(s)) break;
-      s.menu.push(rid); s.ratios[rid] = 1.0;
-    }
-    /* --- 研发：现金充裕时解锁更高价配方 --- */
-    for (const r of E.RECIPES) {
-      if (s.recipes.includes(r.id)) continue;
-      if (E.canResearch(s, r.id).ok && s.cash > E.researchCost(s, r.id) * 2.6) E.doResearch(s, r.id);
-    }
-    /* --- 营销 --- */
-    s.marketing = s.cash > 2500 ? Math.min(1600, Math.floor(s.cash * 0.1)) : 0;
-    /* --- 采购：按预测客流备货（多杯订单按 1.6 倍折算），留 200 备用金 --- */
-    const need = E.trafficOf(s) * 1.25 * 1.6;
-    const per = Math.max(1, Math.round(need / Math.max(1, s.menu.length)));
-    for (const g of E.ING) {
-      let want = 0;
-      for (const rid of s.menu) want += (E.recipeById(rid).req[g.id] || 0) * per;
-      want = Math.ceil(want - (s.inv[g.id] || 0));
-      if (want > 0) E.buyIng(s, g.id, Math.min(want, Math.max(0, Math.floor((s.cash - 200) / s.prices[g.id]))));
-    }
-    /* --- 投资：产能不足先补产能，富余再扩张 --- */
-    const lost = s.lastReport ? s.lastReport.lost : 0;
-    const shortCapacity = lost >= 3;
-    let guard = 0;
-    while (guard++ < 14) {
-      let did = false;
-      if (shortCapacity) {
-        const sc = E.upgradeCost(s, 'speed');
-        if (sc != null && s.cash > sc * 1.6) { E.doUpgrade(s, 'speed'); did = true; }
-        else if (s.staff.length < 6 && s.candidates.length && s.cash > s.candidates[0].fee * 1.6) { E.hireStaff(s, 0); did = true; }
-        else { const tc = E.upgradeCost(s, 'training'); if (tc != null && s.cash > tc * 1.8) { E.doUpgrade(s, 'training'); did = true; } }
-      }
-      if (!did && s.cash > 1200) {
-        const sc2 = E.shopCost(s);
-        if (sc2 != null && s.cash > sc2 * 1.5) { E.openShopBranch(s); did = true; }
-      }
-      if (!did) for (const id of ['decor', 'menu', 'storage', 'auto']) {
-        const c = E.upgradeCost(s, id);
-        if (c != null && s.cash > c * 2.2) { E.doUpgrade(s, id); did = true; }
-      }
-      if (!did) break;
-    }
-
-    /* --- 营业 --- */
-    const r = E.openShop(s);
-    if (!r.ok) { log.push(`Day ${s.day} 无法开门: ${r.msg}`); break; }
-    /* 模拟玩家手速：约 2.5 次点击/秒（真实玩家可到 5+） */
-    let steps = 0;
-    while (s.phase === 'open' && steps++ < 5000) {
-      E.tick(s, 1 / 30);
-      if (s.sim && Math.random() < 2.5 / 30) {
-        const busy = s.sim.stations.map((st, i) => (st.order ? i : -1)).filter(i => i >= 0);
-        if (busy.length) E.rushStation(s, busy[Math.floor(Math.random() * busy.length)]);
-      }
-    }
-    const rep = s.report;
-    log.push({
-      day: rep.day, served: rep.served, lost: rep.lost, traffic: rep.traffic,
-      rev: Math.round(rep.revenue), net: Math.round(rep.net), rep: Math.round(rep.repAfter),
-      cash: Math.round(s.cash), worth: Math.round(E.netWorth(s)), staff: s.staff.length, shops: s.shops,
-    });
-    /* 打烊三选一：三种口径对照，验证「卡牌只改收益结构、不改收益总量」 */
-    if (CARDS !== 'none' && Array.isArray(s.cardOffer) && s.cardOffer.length) {
-      if (CARDS === 'random') E.applyCard(s, s.cardOffer[Math.floor(Math.random() * s.cardOffer.length)].id);
-      else E.applyCard(s, s.cardOffer[0].id);      /* first：永远拿第一张（最粗糙的策略） */
-    }
-    if (E.isBankrupt(s)) { log.push('💸 破产于 Day ' + s.day); break; }
-    E.nextDay(s);
-  }
-  /* 本局新增的招牌销量（V6）：连玩时累加进下一局的跨局基线 */
-  return { log, s, sig: s.sigRun || {} };
+  /* AI 逻辑在 tools/ai-shared.js（与 diag-balance.js 共用同一份）——
+     两处各写一份必然漂移，平衡结论会失真。 */
+  return playSharedAI(E, diff, bp, sig, { rng: Math.random, clickRate: 2.5, cards: CARDS });
 }
 
 const RUNS = Number(process.argv[2] || 3);
@@ -209,6 +141,9 @@ for (const d of ['easy', 'normal', 'hard']) {
     last.log.filter(x => typeof x === 'string').forEach(x => console.log(x));
   }
   const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+  let wsTot = 0, recTot = 0, n = 0;
+  for (const r of last.log) { if (r && r.ws) { n++; for (const k in r.ws) if (r.ws[k] > 0) wsTot++; recTot += r.recipes || 0; } }
   console.log(`净资产：${scores.join(' / ')}  平均 ${avg}  达标率 ${(avg / goal * 100).toFixed(0)}%`
+    + (n ? `  | 末局平均产线 ${(wsTot / n).toFixed(1)} 条 · 解锁配方 ${(recTot / n).toFixed(1)} 款` : '')
     + (failedRuns.length ? `  ⚠️ 破产局次 ${failedRuns.join(',')}` : ''));
 }

@@ -44,71 +44,30 @@ function run(mutator, runs) {
   vm.createContext(ctx);
   let src = fs.readFileSync(path.join(root, 'js/data.js'), 'utf8') + '\n'
     + fs.readFileSync(path.join(root, 'js/engine.js'), 'utf8')
-    + '\n;globalThis.__D = { CFG, DIFFICULTY, STAGE_DIFFS, SPECIAL_CUSTOMERS, RECIPES, ING };';
+    + '\n;globalThis.__D = { CFG, DIFFICULTY, STAGE_DIFFS, SPECIAL_CUSTOMERS, RECIPES, ING, CUISINES, CRAFT_WORKSHOPS, CUISINE_FOCUS };';
+  /* 共享的脚本 AI —— 与 tools/sim.js **同一份**。
+     之前这里写的是自己的副本，结果与 sim.js 漂移了（一边是"只看现金开线"、
+     一边是"为想研发的新品开线"），配对实测因此测的是「对着旧 AI 的新系统」，
+     得出的 −16pp 完全是假的。两处 AI 重复实现 = 必然漂移 = 结论不可信。
+     加载顺序：引擎 → ai-shared（含 AI_NO_WS 开关）→ mutator。 */
+  const sharedSrc = fs.readFileSync(path.join(root, 'tools/ai-shared.js'), 'utf8');
   if (mutator) src += '\n' + mutator;
-  vm.runInContext(src, ctx, { filename: 'bundle.js' });
+  vm.runInContext(src + '\n' + sharedSrc, ctx, { filename: 'bundle.js' });
   const E = ctx;
   Object.assign(E, E.__D);
+  const playSharedAI = vm.runInContext('playSharedAI', ctx);
   let curSeed = 0;
 
+  /* 局索引 → 随机种子：每一局用不同的序列（否则 30 局其实是同一局重复 30 次），
+     但**所有对照组用同一个索引就同一个种子** —— 这才是配对比较。 */
+  let runIndex = 0;
   function playAI(diff) {
-    const s = E.newGame(diff, 0);
-    const days = [];
-    while (s.day <= E.CFG.DAYS) {
-      s.menu = [];
-      for (const rid of s.recipes) {
-        if (s.menu.length >= E.menuSlots(s)) break;
-        s.menu.push(rid); s.ratios[rid] = 1.0;
-      }
-      for (const r of E.RECIPES) {
-        if (s.recipes.includes(r.id)) continue;
-        if (E.canResearch(s, r.id).ok && s.cash > E.researchCost(s, r.id) * 2.6) E.doResearch(s, r.id);
-      }
-      s.marketing = s.cash > 2500 ? Math.min(1600, Math.floor(s.cash * 0.1)) : 0;
-      const need = E.trafficOf(s) * 1.25 * 1.6;
-      const per = Math.max(1, Math.round(need / Math.max(1, s.menu.length)));
-      for (const g of E.ING) {
-        let want = 0;
-        for (const rid of s.menu) want += (E.recipeById(rid).req[g.id] || 0) * per;
-        want = Math.ceil(want - (s.inv[g.id] || 0));
-        if (want > 0) E.buyIng(s, g.id, Math.min(want, Math.max(0, Math.floor((s.cash - 200) / s.prices[g.id]))));
-      }
-      const lost = s.lastReport ? s.lastReport.lost : 0;
-      const shortCapacity = lost >= 3;
-      let guard = 0;
-      while (guard++ < 14) {
-        let did = false;
-        if (shortCapacity) {
-          const sc = E.upgradeCost(s, 'speed');
-          if (sc != null && s.cash > sc * 1.6) { E.doUpgrade(s, 'speed'); did = true; }
-          else if (s.staff.length < 6 && s.candidates.length && s.cash > s.candidates[0].fee * 1.6) { E.hireStaff(s, 0); did = true; }
-          else { const tc = E.upgradeCost(s, 'training'); if (tc != null && s.cash > tc * 1.8) { E.doUpgrade(s, 'training'); did = true; } }
-        }
-        if (!did && s.cash > 1200) {
-          const sc2 = E.shopCost(s);
-          if (sc2 != null && s.cash > sc2 * 1.5) { E.openShopBranch(s); did = true; }
-        }
-        if (!did) for (const id of ['decor', 'menu', 'storage', 'auto']) {
-          const c = E.upgradeCost(s, id);
-          if (c != null && s.cash > c * 2.2) { E.doUpgrade(s, id); did = true; }
-        }
-        if (!did) break;
-      }
-      const r = E.openShop(s);
-      if (!r.ok) break;
-      let steps = 0;
-      while (s.phase === 'open' && steps++ < 5000) {
-        E.tick(s, 1 / 30);
-        if (s.sim && Math.random() < 2.5 / 30) {
-          const busy = s.sim.stations.map((st, i) => (st.order ? i : -1)).filter(i => i >= 0);
-          if (busy.length) E.rushStation(s, busy[Math.floor(Math.random() * busy.length)]);
-        }
-      }
-      days.push({ stageCash: s.stats.stageCash || 0, rep: s.report.repAfter, lost: s.report.lost });
-      if (E.isBankrupt(s)) break;
-      E.nextDay(s);
-    }
-    return { s, days };
+    rngState = 1000 + runIndex * 7919;
+    runIndex++;
+    /* 共享 AI 返回 { log, s, sig }；本工具原本用 days 变量，改用 log。 */
+    const r = playSharedAI(E, diff, 0, null, { rng: rnd, clickRate: 2.5 });
+    r.days = r.log;
+    return r;
   }
 
   const out = {};
@@ -143,9 +102,30 @@ const FIXED_SUB = `
     return r;
   };
 `;
+/* V9 关掉工坊与菜系的对照：工坊造价是硬成本（¥1200 起），
+   会挤压研发与经营 —— 它的影响必须单独量出来，不能混在别的新系统里。 */
+/* 「V9 全关」= 收益归零 + 菜单主打加成 0 + **AI 完全不开线**（AI_NO_WS）。
+   ⚠️ 两个曾经的错，都会让差值失真：
+     ① 只把造价设 0 → AI 会「免费」开 5 条线，基线不是"没有这个系统"的状态；
+     ② 让 AI 照常开线 → 那是"有系统但玩家用不好"，不是"没有系统"。
+   正确做法：基线组让 AI 不开线（AI_NO_WS），造价保持不变
+   （这样 AI 的决策逻辑在两组里完全一致，只差"系统给不给收益"）。 */
+const WORKSHOP_OFF = 'STAGE_DIFFS.forEach(d=>{d.cashMul=0;}); SPECIAL_CUSTOMERS.length=0;';
+/* ★ 每一组只动**一个**变量 —— 这是配对比较的前提。
+     之前的 case 定义是第二批遗留的（"仅关卡奖励"/"仅特殊顾客"），
+     我把 V9 塞进 "仅 V9 工坊与菜系" 那格时，顺手把 V7 特殊顾客也关了
+     （`SPECIAL_CUSTOMERS.length=0`）—— 而基线组里 V7 是开着的。
+     于是测的是「V7+V9 一起关」vs「全开」，差值混进了 V7 的贡献，
+     得出的 −12pp 是假的。 */
+/* ⚠️ 这个工具是给**第二批（V5-V8）**写的：它的基线是「第二批判定全关」，
+   测的是关卡奖励 / 特殊顾客 / 章节关卡对达标率的影响。
+   测 V9（菜系与工坊）请用 tools/diag-invest.js ——
+   它的 case 定义是围绕 V9 的，把 V9 塞进这里的 case 会得到**语义错位**的结论
+   （这正是之前反复测出 −12pp 假象的原因：case 名与实际变量对不上）。
+   两边现在共用 tools/ai-shared.js 的同一份 AI，行为一致。 */
 const CASES = [
-  ['基线（新系统全关）', 'STAGE_DIFFS.forEach(d=>{d.cashMul=0;}); SPECIAL_CUSTOMERS.length=0;'],
-  ['仅每日固定 +14 元', 'STAGE_DIFFS.forEach(d=>{d.cashMul=0;}); SPECIAL_CUSTOMERS.length=0;' + FIXED_SUB],
+  ['基线（第二批判定全关）', WORKSHOP_OFF],
+  ['基线 + 每日固定 +14 元（噪声底）', WORKSHOP_OFF + FIXED_SUB],
   ['仅关卡奖励', 'SPECIAL_CUSTOMERS.length=0;'],
   ['仅特殊顾客', 'STAGE_DIFFS.forEach(d=>{d.cashMul=0;});'],
   ['全开（当前）', null],

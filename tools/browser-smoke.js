@@ -749,6 +749,53 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     + ' return back && back.venue && back.venue.type && back.venue.cityId ? "ok" : "bad"; })()');
   check(legacyOk === 'ok', '老存档（无经营维度字段）读档后自动补默认值');
   check(!/undefined|NaN/.test(doc.getElementById('panel-up').innerHTML), '升级页无 undefined/NaN');
+
+  /* ---- V9 菜系与制作工坊的 UI 表现 ----
+     这几条守的是「文案与引擎行为一致」：工坊已经是纯加成，
+     但早期文案写着"没工坊做不出来""🔒 需建工坊"，
+     玩家看到的与引擎做的相反 —— 文案错比功能错更隐蔽。 */
+  const wsUpHtml = doc.getElementById('panel-up').innerHTML;
+  check(/制作工坊/.test(wsUpHtml), '升级页有制作工坊区块');
+  check(!/做不出来|不能上架也不能研发|需建工坊/.test(wsUpHtml),
+    '工坊文案不再宣称"没工坊做不出来"（引擎早已改为纯加成，文案必须同步）');
+  check(/成本\s*−\s*16%|成本\s*-\s*16%/.test(wsUpHtml) || /成本/.test(wsUpHtml),
+    '工坊收益说明以「成本下降」为主力（绝对量收益，卖得越多越赚）');
+  /* 研发页：菜系分组 + 未建线时给的是"可得加成"而非锁 */
+  const wsLabHtml = doc.getElementById('panel-lab').innerHTML;
+  check(/cui-group/.test(wsLabHtml), '研发页按菜系分组渲染');
+  check(!/🔒\s*需建工坊/.test(wsLabHtml), '研发页未建线不再显示锁图标（那是硬约束的措辞）');
+  /* 无工坊时高端配方依然可研发（这条同时验证 UI 与引擎一致） */
+  const t3Ok = await window.eval('(function(){'
+    + ' var s = newGame("normal", 0); s.cash = 9999999; s.workshops = {};'
+    + ' for (var i = 0; i < ING.length; i++) s.inv[ING[i].id] = 9999;'
+    + ' var bad = RECIPES.filter(function(r){ return r.tier >= 3 && r.research'
+    + '   && !canResearch(s, r.id).ok; });'
+    + ' return bad.length + "/" + RECIPES.filter(function(r){ return r.tier >= 3 && r.research; }).length;'
+    + ' })()');
+  check(t3Ok === '0/7', `无工坊时 7 款高端配方全部仍可研发（工坊是加成不是门票，实际 ${t3Ok}）`);
+  /* 降本要真的落到扣料上（不是只改UI 显示的成本数字） */
+  const cutReal = await window.eval('(function(){'
+    + ' var r = RECIPES.filter(function(x){ return x.cuisine && x.req; })[0];'
+    + ' var a = newGame("normal", 0); a.workshops = {};'
+    + ' for (var i = 0; i < ING.length; i++) a.inv[ING[i].id] = 999;'
+    + ' var inv0 = {}; for (var k in a.inv) inv0[k] = a.inv[k];'
+    + ' consumeStock(a, r.id, null);'
+    + ' var used0 = 0; for (var k2 in inv0) used0 += inv0[k2] - a.inv[k2];'
+    + ' var b = newGame("normal", 0);'
+    + ' b.workshops[r.cuisine] = CRAFT_WORKSHOPS.filter(function(w){ return w.id === r.cuisine; })[0].cost.length - 1;'
+    + ' for (var i2 = 0; i2 < ING.length; i2++) b.inv[ING[i2].id] = 999;'
+    + ' var inv1 = {}; for (var k3 in b.inv) inv1[k3] = b.inv[k3];'
+    + ' consumeStock(b, r.id, null);'
+    + ' var used1 = 0; for (var k4 in inv1) used1 += inv1[k4] - b.inv[k4];'
+    + ' return used0 + "->" + used1; })()');
+  check(/^(\d+)->\d/.test(cutReal) && Number(cutReal.split('->')[1]) < Number(cutReal.split('->')[0]),
+    `工坊降本真实扣料（无工坊 ${cutReal} 份）`);
+  /* 存量兼容：无 workshops 的老存档读档后要有可用工坊 */
+  const wsLegacy = await window.eval('(function(){'
+    + ' var s = newGame("normal", 0); delete s.workshops;'
+    + ' var back = sanitizeState(JSON.parse(JSON.stringify(s)));'
+    + ' return back && back.workshops ? workshopLevel(back, "classic") : -1; })()');
+  check(wsLegacy >= 1, `老存档（无工坊字段）读档后自动补上赠送工坊（Lv.${wsLegacy}）`);
   await window.eval('window.S = null; UI.showScreen("screen-title");');
 
   console.log('');

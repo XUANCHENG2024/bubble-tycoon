@@ -74,6 +74,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + '\n;globalThis.__D={CFG,ING,RECIPES,UPGRADES,TRAITS,EVENTS,ACHIEVEMENTS,DIFFICULTY,SHOP_COSTS,WEATHERS,NEWS,UI,'
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
+  + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
   + 'goalOf,startEndless,togglePause,slotInfo,hasAnySave,getSlot,setSlot,exportSave,importSave,'
   + 'MILESTONE_EVERY,MILESTONE_RATIO,milestoneOf,endlessPressure,prestigeGain,prestigeStartCash,claimAchStars,'
@@ -1217,6 +1218,203 @@ console.log('=============== K. 经营维度 ===============');
     const bv = E.venueView(E.sanitizeState(bad));
     expect('K5d', !!bv.typeName && !!bv.cityName && bv.districtId === null,
       '脏存档经清洗后，展示模型仍有可显示的名称（UI 不会出现 undefined）');
+  }
+}
+
+/* ============================================================
+ *  L 组：菜系与制作工坊（V9）
+ *
+ *  核心价值：把这一轮踩过的坑**变成会失败的断言**，而不是注释里的教训。
+ *  凡是"实测证明是错的"设计，都在这里留下一条守卫 ——
+ *  将来谁再想把工坊改回硬约束/低收益，探针会立刻拦下。
+ * ============================================================ */
+console.log('=============== L. 菜系与制作工坊 ===============');
+{
+  /* ---- L0 数据自洽 ---- */
+  {
+    const csIds = new Set(E.CUISINES.map(c => c.id));
+    const wsIds = new Set(E.CRAFT_WORKSHOPS.map(w => w.id));
+    expect('L0a', E.CRAFT_WORKSHOPS.length === E.CUISINES.length
+      && E.CRAFT_WORKSHOPS.every(w => csIds.has(w.id)),
+      `每个菜系都有一条制作工坊（${E.CRAFT_WORKSHOPS.length} 条）`);
+    /* 每条工坊的收益数组长度必须与造价阶梯一致 ——
+       不一致会让「是否满级」和「Lv.N 收益」都读错，是静默的数值错位。 */
+    const bad = E.CRAFT_WORKSHOPS.filter(w => !w.saleBonus || !w.costCut
+      || w.saleBonus.length !== w.cost.length || w.costCut.length !== w.cost.length);
+    expect('L0b', bad.length === 0,
+      bad.length ? `收益数组长度与造价阶梯不一致：${bad.map(w => w.id).join(',')}`
+        : '每条工坊的 saleBonus / costCut 长度都与造价阶梯一致');
+    /* 每款配方必须归属一个真实菜系（否则既拿不到工坊收益，也进不了研发分组） */
+    const orphan = E.RECIPES.filter(r => !r.cuisine || !csIds.has(r.cuisine));
+    expect('L0c', orphan.length === 0,
+      orphan.length ? `${orphan.length} 款配方没有有效菜系归属` : `${E.RECIPES.length} 款配方全部归属有效菜系`);
+    /* 每个菜系至少要有一款配方，否则工坊开了也没东西可做 */
+    const empty = E.CUISINES.filter(c => !E.RECIPES.some(r => r.cuisine === c.id));
+    expect('L0d', empty.length === 0,
+      empty.length ? `${empty.map(c => c.name).join(',')} 没有任何配方` : '每个菜系都有配方');
+    /* 售价要盖得住降本后的成本，否则满级工坊反而是亏的 */
+    const s0 = E.newGame('normal', 0);
+    const thin = [];
+    for (const w of E.CRAFT_WORKSHOPS) {
+      s0.workshops[w.id] = w.cost.length - 1;
+      for (const r of E.RECIPES.filter(x => x.cuisine === w.id)) {
+        if (E.priceOf(s0, r.id) <= E.costOf(s0, r.id) * 1.5) thin.push(r.name);
+      }
+    }
+    expect('L0e', thin.length === 0,
+      thin.length ? `满级降本后毛利过薄：${thin.join(',')}` : '满级工坊下每款配方毛利仍健康');
+  }
+
+  /* ---- L1 工坊是「加成」而不是「门票」——
+     这一条守的是这一轮最贵的教训：曾把高端款设成"没工坊不能做"，
+     结果 6 款 tier3 配方解锁率 19/20 → 0/20，整张配方表被锁死。 ---- */
+  {
+    /* 无工坊时也要能研发，所以现金/库存都要给足——
+       否则测的是"钱不够"，把真正的约束（工坊门槛）盖住了。 */
+    const s = E.newGame('normal', 0);
+    s.cash = 9999999;
+    for (const g of E.ING) s.inv[g.id] = 9999;
+    s.workshops = {};
+    const t3 = E.RECIPES.filter(r => r.tier >= 3 && r.research);
+    const blocked = t3.filter(r => !E.canResearch(s, r.id).ok);
+    expect('L1a', blocked.length === 0,
+      blocked.length
+        ? `无工坊时这些高端款不能研发（${blocked.map(r => r.name).join(',')}）—— 工坊成了门票`
+        : `无工坊时 ${t3.length} 款高端配方仍可研发（工坊只是加成）`);
+    /* 同理：无工坊时配方依然能上架 */
+    const s2 = E.newGame('normal', 0);
+    s2.workshops = {};
+    const notList = E.RECIPES.filter(r => !E.canListRecipe(s2, r.id).ok);
+    expect('L1b', notList.length === 0,
+      notList.length ? `${notList.length} 款配方在无工坊时无法上架` : '无工坊时所有配方仍可上架');
+    /* 满级工坊的第三层收益应该是**加成**，且只对高端款生效。
+       等级上限不能写死3，要跟造价阶梯走 —— 工坊等级数是可调的。 */
+    const s3 = E.newGame('normal', 0);
+    const hi = E.RECIPES.find(r => r.tier >= 3 && r.cuisine);
+    const lo = E.RECIPES.find(r => r.tier < 3 && r.cuisine !== hi.cuisine);
+    s3.workshops[hi.cuisine] = E.CRAFT_WORKSHOPS.find(w => w.id === hi.cuisine).cost.length - 1;
+    expect('L1c', E.workshopTier3Bonus(s3, hi.id) > 0,
+      `旗舰工坊让高端款更抢手（+${Math.round(E.workshopTier3Bonus(s3, hi.id) * 100)}%）`);
+    expect('L1d', E.workshopTier3Bonus(s3, lo.id) === 0,
+      '旗舰加成不外溢到非高端款（否则等于白送一档权重）');
+  }
+
+  /* ---- L2 降本必须真的落到"少扣料"上 ----
+     踩过的坑：只把 costOf 调低、cogs 仍走原值 —— 菜单毛利数字变好看了，
+     结算时库存照扣钱照花，降本成了纸面收益。 ---- */
+  {
+    /* 必须在**满级**工坊下测，且库存要备足：
+       否则测到的是"库存不足扣成 0"，看起来像是降本生效了。 */
+    const rid = E.RECIPES.find(r => r.cuisine && r.req);
+    const maxLv = E.CRAFT_WORKSHOPS.find(w => w.id === rid.cuisine).cost.length - 1;
+
+    const noWs = E.newGame('normal', 0);
+    noWs.workshops = {};
+    for (const g of E.ING) noWs.inv[g.id] = 999;
+    const costNoWs = E.costOf(noWs, rid.id);
+    const inv0 = Object.assign({}, noWs.inv);
+    E.consumeStock(noWs, rid.id, null);
+    const usedNoWs = Object.keys(inv0).reduce((a, k) => a + inv0[k] - noWs.inv[k], 0);
+
+    const s = E.newGame('normal', 0);
+    s.workshops[rid.cuisine] = maxLv;
+    for (const g of E.ING) s.inv[g.id] = 999;
+    const costWs = E.costOf(s, rid.id);
+    const inv1 = Object.assign({}, s.inv);
+    const res = E.consumeStock(s, rid.id, null);
+    const usedWs = Object.keys(inv1).reduce((a, k) => a + inv1[k] - s.inv[k], 0);
+    const reqTotal = Object.values(rid.req).reduce((a, b) => a + b, 0);
+
+    expect('L2a', costWs < costNoWs && res < costNoWs + 0.01,
+      `满级降本后单杯成本更低（无工坊 ¥${costNoWs.toFixed(2)} → 满级 ¥${costWs.toFixed(2)}）`);
+    /* 扣的料必须比无工坊时少，否则降本没落到真实扣料上 */
+    expect('L2b', usedWs < usedNoWs,
+      `降本真实扣料（无工坊扣 ${usedNoWs} 份 → 满级扣 ${usedWs} 份，配方需 ${reqTotal} 份）`);
+    /* 备货口径必须与扣料一致，否则会"买一样的料、扣得更少"→ 库存积压 */
+    const reqWs = E.reqOf(s, rid.id);
+    const reqTotalWs = Object.values(reqWs).reduce((a, b) => a + b, 0);
+    expect('L2c', Math.abs(reqTotalWs - usedWs) < 1e-6,
+      `reqOf（备货/库存校验口径）与 consumeStock 同源（reqOf ${reqTotalWs} 份 vs 实扣 ${usedWs} 份）`);
+  }
+
+  /* ---- L3 造价不能高到开不起第一条线（hard 开局现金只有 ¥520）---- */
+  {
+    const hardCash = E.DIFFICULTY.hard.cash;
+    const cheapest = Math.min(...E.CRAFT_WORKSHOPS.map(w => w.cost[1]));
+    expect('L3a', cheapest <= hardCash * 0.7,
+      `最便宜工坊 ¥${cheapest} ≤ hard 开局现金 ¥${hardCash} 的 70%（掏得出来）`);
+    /* 造价必须随等级递增，否则升级没有决策感 */
+    const mono = E.CRAFT_WORKSHOPS.every(w =>
+      w.cost.every((v, i) => i === 0 || v > w.cost[i - 1]));
+    expect('L3b', mono, '每条工坊的造价逐级递增');
+    /* 收益也必须递增，否则升了没意义 */
+    const gainMono = E.CRAFT_WORKSHOPS.every(w =>
+      w.costCut.every((v, i) => i === 0 || v > w.costCut[i - 1])
+      && w.saleBonus.every((v, i) => i === 0 || v > w.saleBonus[i - 1]));
+    expect('L3c', gainMono, '每条工坊的降本 / 权重收益逐级递增');
+    /* 满级工坊的收益不能弱于 Lv1，否则升满级没意义 */
+    const maxOk = E.CRAFT_WORKSHOPS.every(w =>
+      w.costCut[w.costCut.length - 1] > w.costCut[1]
+      && w.saleBonus[w.saleBonus.length - 1] > w.saleBonus[1]);
+    expect('L3d', maxOk, '满级工坊收益严格优于 Lv.1（有升满的动力）');
+  }
+
+  /* ---- L4 存量兼容：老存档没有这些字段时必须能跑 ---- */
+  {
+    /* ① 老存档完全没有 venue / workshops */
+    const legacy = E.newGame('normal', 0);
+    delete legacy.workshops;
+    const s1 = E.sanitizeState(JSON.parse(JSON.stringify(legacy)));
+    expect('L4a', s1 && s1.workshops && E.workshopLevel(s1, 'classic') >= 1,
+      '老存档无 workshops 时补回赠送工坊（不会开局就卡死）');
+    /* ② 菜单里有某系配方却没有该系工坊 → 按菜单反推补上
+       （这一条是存量兼容的关键：老玩家早就解锁了 fruit 配方，
+         若不补工坊，那条线的降本/权重收益永远拿不到） */
+    const s2 = E.newGame('normal', 0);
+    s2.workshops = { classic: 1 };
+    s2.recipes = ['boba', 'passion', 'coco'];        /*含 fruit / coffee */
+    s2.menu = ['boba', 'passion', 'coco'];
+    const s3 = E.sanitizeState(JSON.parse(JSON.stringify(s2)));
+    const revived = ['fruit', 'coffee'].filter(c => E.workshopLevel(s3, c) >= 1);
+    expect('L4b', revived.length === 2,
+      `老存档菜单里的菜系自动补工坊（补上：${revived.join(',') || '无'}）`);
+    /* ③ 脏等级：负数 / 超上限 / 非数字 */
+    const s4 = E.newGame('normal', 0);
+    s4.workshops = { fruit: -5, coffee: 99, matcha: 'x' };
+    const s5 = E.sanitizeState(JSON.parse(JSON.stringify(s4)));
+    const clean = E.CRAFT_WORKSHOPS.every(w => {
+      const lv = E.workshopLevel(s5, w.id);
+      return Number.isInteger(lv) && lv >= 0 && lv <= w.cost.length - 1;
+    });
+    expect('L4c', clean, '脏工坊等级（负数/超上限/非数字）被清洗到合法区间');
+    /* ④ 幂等：清洗两次结果一致（否则每次读档都会漂移）。
+       比**键序无关**的规范化形式 —— 清洗会按 CUISINES 顺序重建对象，
+       第二次清洗的键序与第一次可能不同，但内容必须完全一样。
+       直接比 JSON.stringify 会因为键序不同而误报。 */
+    const norm = o => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]));
+    const once = norm(E.sanitizeState(JSON.parse(JSON.stringify(s4))).workshops);
+    const twice = norm(E.sanitizeState(E.sanitizeState(JSON.parse(JSON.stringify(s4)))).workshops);
+    expect('L4d', once === twice, `工坊清洗是幂等的（${once}）`);
+    /* ⑤ 存档版本号不能变（升版本会让所有老存档走降级提示/被判损坏） */
+    const fresh = E.newGame('normal', 0);
+    expect('L4e', fresh && fresh.v === 2, `新存档版本号仍是 v2（实际 v${fresh && fresh.v}）`);
+  }
+
+  /* ---- L5 展示模型：菜系分组视图要给 UI 足够的决策信息 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.recipes = ['boba', 'passion', 'coco'];
+    s.menu = ['boba', 'passion'];
+    const views = E.cuisineViews(s);
+    expect('L5a', views.length === E.CUISINES.length && views.every(v => !!v.name),
+      '每个菜系都有展示视图（含名称）');
+    const fruit = views.find(v => v.id === 'fruit');
+    expect('L5b', fruit && fruit.total > 0 && fruit.unlocked >= 0
+      && fruit.cost > 0 && fruit.maxLevel > 0,
+      '视图带出「总配方数 / 已解锁 / 当前造价 / 满级数」，玩家能判断值不值得开');
+    /* 主打加成要能算出来（深度流 vs 广度流的取舍线） */
+    expect('L5c', typeof E.cuisineFocusBonus(s, 'fruit').bonus === 'number',
+      '菜系主打加成可计算（深度/广度两条取舍线都成立）');
   }
 }
 

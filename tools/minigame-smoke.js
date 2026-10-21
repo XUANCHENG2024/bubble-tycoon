@@ -17,11 +17,17 @@ function bad(m) { failed++; console.log(`  ✘ ${++step}. ${m}`); }
 function check(c, m) { c ? ok(m) : bad(m); }
 
 /* 假 2D 上下文：让绘制代码走真实分支 */
+/* Canvas 上没有 DOM 也没有 tooltip，**文字就是唯一的界面**。
+   所以要验证「文案是否还宣称硬约束」，只能捕获真正 fillText 画出去的字。
+   每帧结束（frames 里）清空，避免把上一帧的字混进断言。 */
+const drawnTexts = [];
+
 function fakeCtx() {
   return new Proxy({}, {
     get(t, p) {
       if (p === 'createLinearGradient' || p === 'createRadialGradient') return () => ({ addColorStop() { } });
       if (p === 'measureText') return (s) => ({ width: String(s).length * 6.5 });
+      if (p === 'fillText') return (s) => { if (s != null) drawnTexts.push(String(s)); };
       return () => { };
     },
     set() { return true; },
@@ -1182,6 +1188,85 @@ if (opHit) {
     + ' var vv = venueView(back);'
     + ' return vv.typeName + "/" + vv.cityName + "/" + (vv.hasGeo ? "geo" : "nogeo"); })()');
   check(/社区\/北京市\/nogeo/.test(legacy), `N26 老存档补默认值且坐标留空（${legacy}）`);
+}
+
+/* ============================================================
+ *  O 组：V9 菜系与制作工坊（Canvas 端）
+ *
+ *  Canvas 与 H5 是两套渲染后端，断言必须各写一遍 ——
+ *  只测 H5 的话，"Canvas 上还写着'需建工坊'的硬约束措辞"这类问题不会被发现。
+ * ============================================================ */
+console.log('=============== O. 菜系与制作工坊（Canvas） ===============');
+{
+  const env = makeEnv(390, 844);
+  env.frames(2);
+  env.tap('start'); env.frames(2);
+  env.tap('tutskip'); env.frames(1);
+
+  /* 切到升级页，工坊区块要能渲染出来。
+     ★ 断言必须走 frameHits（GFX.addHit 登记的命中区）而不是 UI 内部状态：
+       addHit在裁剪区外不登记，所以"卡片画出来了"和"玩家点得到"是两件事。 */
+  env.inCtx('__MINIGAME.VIEW.tab = "up"');
+  env.frames(2);
+  /*读 G.hits（跨帧累积的命中区），不是 frameHits（仅当帧）——
+     panelUp 在同一帧里先画经营维度再画工坊，frameHits 只反映最后一次绘制。 */
+  const wsOnScreen = (env.G.hits || []).filter(h => h.act === 'workshop').length;
+  check(wsOnScreen >= 1, `Canvas 升级页渲染出 ${wsOnScreen} 个工坊按钮`);
+
+  /* ★ 文案不能宣称硬约束（Canvas 没有 tooltip，副标题是唯一说明，
+     所以必须抓真正画出去的文字来断言，而不是去读某个变量） */
+  drawnTexts.length = 0;                 /* 只看这一帧画了什么 */
+  env.frames(1);
+  const wsText = drawnTexts.join(' ');
+  check(wsText.length > 0, `Canvas 升级页绘制了 ${drawnTexts.length} 段文字`);
+  check(!/做不出来|不能上架也不能研发|需建工坊/.test(wsText),
+    'Canvas 工坊文案不再宣称"没工坊做不出来"');
+  check(!/🔒\s*需建工坊/.test(wsText), 'Canvas 未建线不再显示锁图标措辞');
+  check(/成本/.test(wsText) && /加成/.test(wsText),
+    'Canvas 工坊副标题说明了「成本下降」是主力收益');
+
+  /* 引擎行为（两版共享，测一次即可）：
+     工坊是加成不是门票 —— 无工坊时高端配方仍可研发 */
+  const t3 = env.inCtx('(function(){'
+    + ' var s = __MINIGAME.S; s.cash = 9999999; s.workshops = {};'
+    + ' for (var i = 0; i < ING.length; i++) s.inv[ING[i].id] = 9999;'
+    + ' var all = RECIPES.filter(function(r){ return r.tier >= 3 && r.research; });'
+    + ' var bad = all.filter(function(r){ return !canResearch(s, r.id).ok; });'
+    + ' return bad.length + "/" + all.length; })()');
+  check(t3 === '0/7', `无工坊时 7 款高端配方仍可研发（实际 ${t3}）`);
+
+  /* 降本要真实扣料（不是只改显示的成本） */
+  const cut = env.inCtx('(function(){'
+    + ' var r = RECIPES.filter(function(x){ return x.cuisine && x.req; })[0];'
+    + ' function used(ws){'
+    + '   var s = __MINIGAME.S; s.workshops = ws;'
+    + '   for (var i = 0; i < ING.length; i++) s.inv[ING[i].id] = 999;'
+    + '   var before = {}; for (var k in s.inv) before[k] = s.inv[k];'
+    + '   consumeStock(s, r.id, null);'
+    + '   var n = 0; for (var k2 in before) n += before[k2] - s.inv[k2];'
+    + '   return n; }'
+    + ' var a = used({});'
+    + ' var ws = {}; ws[r.cuisine] = CRAFT_WORKSHOPS.filter(function(w){ return w.id === r.cuisine; })[0].cost.length - 1;'
+    + ' var b = used(ws);'
+    + ' return a + "->" + b; })()');
+  check(/^(\d+(\.\d+)?)->(\d+(\.\d+)?)$/.test(cut) && Number(cut.split('->')[1]) < Number(cut.split('->')[0]),
+    `工坊降本真实扣料（无工坊 ${cut} 份）`);
+
+  /* 旗舰工坊的高端款加成必须真的生效 —— 这条曾因字段改名而静默失效 */
+  const t3Bonus = env.inCtx('(function(){'
+    + ' var r = RECIPES.filter(function(x){ return x.tier >= 3 && x.cuisine; })[0];'
+    + ' var s = __MINIGAME.S; s.workshops = {};'
+    + ' var w = CRAFT_WORKSHOPS.filter(function(x){ return x.id === r.cuisine; })[0];'
+    + ' s.workshops[r.cuisine] = w.cost.length - 1;'
+    + ' return workshopTier3Bonus(s, r.id); })()');
+  check(Number(t3Bonus) > 0, `旗舰工坊的高端款加成生效（+${Math.round(Number(t3Bonus) * 100)}%）`);
+
+  /* 存量兼容：无 workshops 字段的老存档 */
+  const wsLegacy = env.inCtx('(function(){'
+    + ' var s = __MINIGAME.S; delete s.workshops;'
+    + ' var back = sanitizeState(JSON.parse(JSON.stringify(s)));'
+    + ' return back && back.workshops ? workshopLevel(back, "classic") : -1; })()');
+  check(wsLegacy >= 1, `老存档（无工坊字段）读档后补上赠送工坊（Lv.${wsLegacy}）`);
 }
 
 console.log('');
