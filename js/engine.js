@@ -112,7 +112,9 @@ function pushHistory(s, row) {
 
 function storageCap(s) { return CFG.BASE_STORAGE + s.up.storage * 180; }
 function menuSlots(s) { return 2 + s.up.menu; }
-function stationCount(s) { return 1 + s.staff.length + (s.shops - 1); }
+/** 出杯位数量 = 老板 1 个 + 员工数（V11 起员工按分店归属，
+ *  不再额外给每家分店白送一个工位 —— 详见 openShop 的 stations 构建）。 */
+function stationCount(s) { return 1 + s.staff.length; }
 function queueCap(s) { return CFG.BASE_QUEUE + s.up.decor; }
 function patienceOf(s) { return CFG.BASE_PATIENCE + s.up.decor * 0.7; }
 
@@ -237,13 +239,30 @@ function netWorth(s) {
 function offlinePerMin(s) { return offlineRate(s.up.auto); }
 
 /** 今日预测客流（人） */
+/** 实际在营业的分店数（≥1 名员工的分店）。
+ *  只有员工在岗的分店才产生客流与产出 —— 空转的店只付租金，
+ *  这正是「开了分店要立刻配人手」的压力来源。 */
+function activeBranchCount(s) {
+  let n = 1;                /* 总店永远在营业 */
+  for (let b = 2; b <= pos(s.shops, 1); b++) {
+    if (staffOfBranch(s, b).length > 0) n++;
+  }
+  return n;
+}
 function trafficOf(s) {
   const d = diffOf(s);
   let t = 4 + s.rep * 0.36;
   t *= 1 + 0.15 * s.up.decor;
   t *= marketingMul(s.marketing);
   t *= s.weather.traffic;
-  t *= 1 + 0.6 * (s.shops - 1);
+  /* ★ V11：客流加成按**实际在营业的分店**数算，不是按"开了几家"。
+     改造前是 `1 + 0.6 * (s.shops - 1)` —— 白送 60% 客流，
+     哪怕那家分店一个人都没有。配合"分店工位靠取模轮转员工"，
+     玩家能只付 3 份店租就把客流拉满，性价比畸高。
+     现在分店不再白送工位（员工必须真的在那家店），
+     客流必须同步：**开了没人 = 空店 = 没有额外客流**。
+     这也让店长与招人真正变成"让分店活起来"的必要投入。 */
+  t *= 1 + 0.6 * (activeBranchCount(s) - 1);
   /* 这里曾经有一项 `1 + 0.02 * s.bpBonus`：声望点直接乘在客流上，线性且无上限。
      问题是产能（出杯位 / 服务速度）每局都从零起步，只有需求端在涨 ——
      多来的客人接不住 → 排队超时流失 → 扣口碑 → 口碑又反过来压客流，成负反馈。
@@ -296,7 +315,43 @@ function marketingMul(m) {
   return 1 + Math.log(1 + m / 300) * 0.85;
 }
 
-/** 员工效率系数 */
+/**
+ * 店长对**自己那家分店**的运营加成。
+ *
+ * ★ 为什么加成只作用于一家店（而不是全局）：
+ *   全局加成会让「招店长」退化成「花钱买一个总加成」——
+ *   玩家会无脑把所有资源砸在同一处，分店之间的经营差异被抹平。
+ *   限定到单店之后，"先开哪家店、配什么店长"才是真决策。
+ *
+ * ★ 数值刻意压得比"再开一家分店"（+60% 客流）低一档：
+ *   金牌店长的全额加成约等于 +12% 客流 +8% 效率。
+ *   若店长能顶掉开分店的收益，玩家就会停止扩张、分店系统被架空。
+ *
+ * @param {number} branch 工位所属分店
+ * @returns {{speed: number, sat: number, rep: number, ops: number}}
+ *   speed 服务速度倍率 | sat 满意度权重 | rep 口碑权重 | ops 客流倍率
+ */
+function managerBonus(s, branch) {
+  const m = managerOfBranch(s, branch);
+  if (!m) return { speed: 1, sat: 1, rep: 1, ops: 1 };
+  const r = managerRank(m.lv).mult;
+  const tr = managerTrait(m).id;
+  /* 基础加成随等级线性、按 mult 微调。
+     ★ Lv.1 保底给一点点（≈2%），而不是精确的 0 ——
+       UI 上写「客流 +0%」会让玩家觉得这店长白招，
+       而"招了就有点用"和"完全没区别"在体验上是两件事，
+       何况Lv.1 店长的日薪本来就低。 */
+  const q = clamp((num(m.skill, 1) - 0.85) * 0.6, 0, 0.35);   /* 能力值微调 */
+  const lvBonus = 0.04 + (r - 1) * 0.5 + q;/* 基础 4% + 等级 + 能力 */
+  return {
+    speed: 1 + lvBonus * 0.20 + (tr === 'ops' ? 0.02 : 0),
+    sat: 1 + lvBonus * 0.30 + (tr === 'qc' ? 0.50 : 0),
+    rep: 1 + lvBonus * 0.25 + (tr === 'hosp' ? 0.40 : 0),
+    ops: 1 + lvBonus * 0.28 + (tr === 'ops' ? 0.08 : 0),
+  };
+}
+
+/** 店员效率系数 */
 function staffMult(s, st) {
   if (!st) return 1;
   let m = st.skill;
@@ -312,6 +367,18 @@ function serviceTimeOf(s, worker, sim) {
   if (sim && sim.rushUntil > sim.t) t *= 0.55;
   t /= cardMul(s, 'speed');       /* 🃏 策略卡：极速出杯更快、自助点单机更慢 */
   return Math.max(CFG.MIN_SERVICE, t);
+}
+
+/** 工位上的服务耗时（含店长运营加成）。
+ *  ★ 单独一个函数而不是给 serviceTimeOf 加参数：
+ *    serviceTimeOf 在很多地方被调（包括不涉及具体工位的预估），
+ *    加一个可选参数就会出现"有的调用忘了传"—— 那种 bug 是概率性的，
+ *    很难查。工位是明确的、有 branchIdx 的对象，在这里取最稳。 */
+function stationTime(s, st, sim) {
+  const base = serviceTimeOf(s, st.worker, sim);
+  if (!st || !(st.branchIdx >= 2)) return base;      /* 总店不受店长影响 */
+  const mb = managerBonus(s, st.branchIdx);
+  return Math.max(CFG.MIN_SERVICE, base / mb.speed);
 }
 
 /* ---------------- 新游戏 ---------------- */
@@ -346,6 +413,8 @@ function newGame(diffKey, bpBonus, sigCarry) {
     up: { speed: 0, decor: 0, menu: 0, storage: 0, training: 0, auto: 0 },
     shops: 1, shopSpend: 0, invested: 0,
     staff: [], candidates: [], nextStaffId: 1,
+    /* V11 店长系统：已招店长 / 各分店候选池 / 店长 id 计数器 */
+    managers: [], mgrCand: {}, nextMgrId: 1,
     weather: WEATHERS[1], trend: 'milky', nextTrend: 'fruity', trendKnown: false,
     news: null, newsFx: null, marketing: 0, dayMarketing: 0, eventTrafficMul: 1,
     doneEvents: [],
@@ -353,7 +422,15 @@ function newGame(diffKey, bpBonus, sigCarry) {
     debtDays: 0, lastReport: null, prevReport: null, lastMarketing: 0, msHit: [],
     bpBonus: bpBonus || 0,
     startBonus: startBonus,
-    stats: { totalCups: 0, totalRevenue: 0, totalProfit: 0, bestDayProfit: 0, totalLost: 0, totalServed: 0, clicks: 0, days: 0 },
+    stats: { totalCups: 0, totalRevenue: 0, totalProfit: 0, bestDayProfit: 0, totalLost: 0, totalServed: 0, clicks: 0, days: 0, lastDayCups: 0 },
+    /* V10 城市经营痕迹：
+       citiesVisited —— 已经营过的城市 id（去重）。由 setVenueCity 追加。
+       stayDays     —— 在**当前城市**连续经营的天数，换城市归零。
+         用途是成就「不打烊的城市」（单局 30 天不换城）。
+         ★ 必须真实维护，不能靠成就 check 里现算：
+           check 是纯函数、无副作用，算"今天是不是第几天"需要跨天状态，
+           放在 check 里就等于每次判定都重算一遍历史，最容易出错。 */
+    citiesVisited: [], stayDays: 0,
     flags: {}, ach: {}, log: [], cards: [], cardOffer: null,
     tut: { active: false, step: 0, done: false },
     history: [], endless: false, milestone: 0, daily: false,
@@ -374,6 +451,8 @@ function newGame(diffKey, bpBonus, sigCarry) {
        坐标不预置 —— 默认给一个坐标等于替玩家编造经营地，应如实留空。 */
     venue: { type: VENUE_DEFAULT, provId: CITY_DEFAULT.slice(0, 2), cityId: CITY_DEFAULT },
   };
+  /* V10：开局就算去过默认城市（否则「跨城游商」要白换两次城才计数）。 */
+  s.citiesVisited = [CITY_DEFAULT];
   for (const g of ING) { s.prices[g.id] = g.base; s.prevPrices[g.id] = g.base; s.avgCost[g.id] = g.base; }
   rollWeather(s); rollTrend(s); rollNews(s);
   refreshCandidates(s, true);
@@ -533,7 +612,14 @@ function buyIng(s, id, qty, markup) {
 function autoFill(s) {
   let spent = 0, bought = 0;
   const target = Math.min(storageCap(s), 999);
+  /* ★ V10：只补**当前城市买得到**的原料。
+     遍历全部 ING 会把现金浪费在 20+ 种城市专属料上（北京买不到藤椒油），
+     表现为「一键补货毫无反应」—— 玩家看到的是按钮坏了。
+     更糟的是它挤占了通用料的采购额度：want 是按剩余仓位算的，
+     买不到的料虽然花不出去，但会占掉本轮可买的份额。 */
+  const cid = currentCityId(s);
   for (const g of ING) {
+    if (!ingAvailableAt(g.id, cid)) continue;
     const want = Math.max(0, Math.min(target - invUsed(s) - bought, Math.floor(s.cash * 0.35 / Math.max(0.1, s.prices[g.id]))));
     if (want > 0 && s.cash > 120) {
       const r = buyIng(s, g.id, Math.min(want, 40));
@@ -605,6 +691,135 @@ function toggleMenu(s, rid) {
 }
 function setRatio(s, rid, r) { s.ratios[rid] = clamp(num(r, 1), 0.5, 2.0); }
 
+/* ---------------- V10：城市绑定与研发树 ---------------- */
+
+/** 当前经营城市 id（老存档可能没有 venue，退回默认城市） */
+function currentCityId(s) {
+  const c = s.venue && s.venue.cityId;
+  return cityById(c) ? c : CITY_DEFAULT;
+}
+
+/**
+ * 该配方在当前城市**是否可用**（可上架 / 可被菜单引用）。
+ *
+ * ★ 口径：**已解锁但不在本店城市 = 保留但不可用**。
+ *   不删除 s.recipes 里的条目 —— 那是玩家的研发投入，
+ *   换个城市回来还能用（研发是跨城市资产）。
+ *   这一点是刻意的：若解锁即绑定、换城即失效，
+ *   玩家在第 5 天换城市会发现自己前面全白研了，
+ *   那是惩罚而不是取舍。
+ *
+ * @param {boolean} unlockedOnly 只关心"能不能上架"（要求已解锁）
+ */
+function recipeAvailableAt(s, rid, unlockedOnly) {
+  const r = recipeById(rid);
+  if (!r) return false;
+  if (unlockedOnly && !(s.recipes || []).includes(rid)) return false;
+  /* city 为空 = 全国通用 */
+  if (!r.city) return true;
+  return r.city === currentCityId(s);
+}
+
+/** 当前城市可用的配方清单（已解锁 + 在本店城市） */
+function availableRecipes(s) {
+  return (s.recipes || []).filter(rid => recipeAvailableAt(s, rid, true));
+}
+
+/** 当前城市可用的菜系 id 列表：通用 5 系 + 本店城市的特色系 */
+function availableCuisineIds(s) {
+  const cid = currentCityId(s);
+  const out = [];
+  for (const c of CUISINES) {
+    if (!c.city || c.city === cid) out.push(c.id);
+  }
+  return out;
+}
+
+/**
+ * 研发树前置判定：该节点的 prereq 是否都已满足。
+ * 前置节点对应的配方在 s.recipes 里即视为满足
+ * （成就奖励的配方也算 —— 玩家拿到就是拿到，不该被树卡住）。
+ */
+function treePrereqOk(s, node) {
+  const pre = (node && node.prereq) || [];
+  for (const pid of pre) {
+    const pn = treeNodeById(pid);
+    /* 前置节点不存在 → 视为不满足（数据写错时要能被发现，而不是静默放行） */
+    if (!pn) return { ok: false, msg: '前置数据缺失', missing: [pid] };
+    if (!(s.recipes || []).includes(pn.recipe)) {
+      const pr = recipeById(pn.recipe);
+      return { ok: false, msg: `需先研发「${pr ? pr.name : pn.recipe}」`, missing: [pn.recipe] };
+    }
+  }
+  return { ok: true, msg: '' };
+}
+
+/**
+ * 研发树的展示模型（给 UI 用）。
+ * 按「通用 / 各城市」分组，节点带状态：
+ *   done    已解锁
+ *   open    可研（在本城 + 前置满足）
+ *   locked  前置未满足
+ *   away    配方属于别的城市（不在本店，需换城）
+ *
+ * @param {string} cityFilter 空 = 显示全部（研发页默认按当前城市过滤，此处给完整树）
+ */
+function researchTree(s, cityFilter) {
+  const cid = cityFilter === undefined ? currentCityId(s) : (cityFilter || '');
+  const groups = [];
+  const push = g => {
+    const found = groups.find(x => x.city === g.city);
+    if (found) return found;
+    const city = g.city ? cityById(g.city) : null;
+    const created = {
+      city: g.city || '',
+      cityName: city ? city.name : '通用配方',
+      isHere: !g.city || g.city === cid,
+      nodes: [],
+    };
+    groups.push(created);
+    return created;
+  };
+  for (const n of RESEARCH_TREE) {
+    const r = recipeById(n.recipe);
+    if (!r) continue;
+    const node = {
+      id: n.id, recipe: n.recipe, stage: n.stage,
+      prereq: n.prereq || [], city: n.city || '',
+      name: r.name, emoji: r.emoji, cuisine: r.cuisine, price: r.price,
+      cost: researchCost(s, n.recipe),
+      done: (s.recipes || []).includes(n.recipe),
+    };
+    if (node.done) node.status = 'done';
+    else if (n.city && n.city !== cid) node.status = 'away';
+    else {
+      const p = treePrereqOk(s, n);
+      node.status = p.ok ? 'open' : 'locked';
+      node.lockMsg = p.ok ? '' : p.msg;
+    }
+    push({ city: n.city || '' }).nodes.push(node);
+  }
+  /* 成就专属食谱单列一组：它们不在树上，要让玩家看见"还有别的东西" */
+  const achGroup = {
+    city: '', cityName: '成就奖励（不可研发）', isHere: true, nodes: [],
+  };
+  for (const r of ACH_RECIPES) {
+    achGroup.nodes.push({
+      id: 'ach_' + r.id, recipe: r.id, stage: 99, prereq: [], city: r.city || '',
+      name: r.name, emoji: r.emoji, cuisine: r.cuisine, price: r.price,
+      cost: null, done: (s.recipes || []).includes(r.id),
+      status: (s.recipes || []).includes(r.id) ? 'done' : 'ach',
+    });
+  }
+  groups.push(achGroup);
+  groups.sort((a, b) => {
+    if (!a.city) return -1;
+    if (!b.city) return 1;
+    return a.cityName < b.cityName ? -1 : 1;
+  });
+  return groups;
+}
+
 /* ---------------- 研发 ---------------- */
 function researchCost(s, rid) {
   const r = recipeById(rid);
@@ -617,7 +832,20 @@ function researchCost(s, rid) {
 function canResearch(s, rid) {
   const r = recipeById(rid);
   if (!r || s.recipes.includes(rid) || !r.research) return { ok: false, msg: '无法研发' };
-  /* ★ 这里**刻意不对 tier3 配方加工坊门槛**。
+  /* ★ V10：城市绑定 —— 只能在配方所属城市研发。
+     这是**地域边界**而不是「花钱门槛」，玩家能在研发页按城市分组直接看懂，
+     与 V9 实测中被证伪的那种"看不见的锁"性质不同（见 canListRecipe 注释）。 */
+  if (r.city && r.city !== currentCityId(s)) {
+    const c = cityById(r.city);
+    return { ok: false, msg: `只能在${c ? c.name : '该城市'}研发` };
+  }
+  /* ★ V10：研发树前置。同阶段可并行，跨阶段按prereq 推进。 */
+  const node = nodeByRecipe(rid);
+  if (node) {
+    const p = treePrereqOk(s, node);
+    if (!p.ok) return { ok: false, msg: p.msg };
+  }
+  /* ★ V9 这里**刻意不对 tier3 配方加工坊门槛**。
      曾经加过（先要 Lv.3、后降到 Lv.2），两次都被配对实测证伪 ——
      因为它犯了和「上架硬约束」同一个错误：把新系统变成"能不能玩"的前置。
      逐款诊断（tools/diag-invest.js）给出的证据很直接：
@@ -632,6 +860,12 @@ function canResearch(s, rid) {
      与 canListRecipe 保持一致：能不能做是既有玩法，做得好不好才是 V9。 */
   if (s.cash < researchCost(s, rid)) return { ok: false, msg: '现金不足' };
   for (const k in r.research.ing) {
+    /* 城市专属原料在本城才有货 —— 否则会出现"要花椒但成都才有"的死锁 */
+    if (!ingAvailableAt(k, currentCityId(s))) {
+      const g = ingById(k);
+      const oc = cityById(g && g.origin);
+      return { ok: false, msg: `需在${oc ? oc.name : '原料产地'}才能买到${g ? g.name : k}` };
+    }
     if ((s.inv[k] || 0) < r.research.ing[k]) return { ok: false, msg: ingById(k).name + '不足' };
   }
   return { ok: true };
@@ -683,25 +917,316 @@ function openShopBranch(s) {
   if (c == null) return { ok: false, msg: '已达分店上限' };
   if (s.cash < c) return { ok: false, msg: '现金不足' };
   s.cash -= c; s.shopSpend += c; s.shops++;
-  pushLog(s, `🏪 第 ${s.shops} 家分店开业！`);
-  return { ok: true, cost: c };
+  /* V11 新开分店 → 立刻刷新该分店的店长候选。
+     ★ 必须在这里刷而不是等每日随机：玩家的因果链是
+       「开分店 → 招店长」，如果开完店要等几天才看到候选人，
+       因果就断了，玩家会以为"开了分店没奖励"。
+       而且候选位是**按分店槽位**存的（mgrCand[branch]），
+       新槽位天然是空的，不刷就是个永久空位。 */
+  refreshManagerCandidates(s, s.shops, true);
+  pushLog(s, `🏪 第 ${s.shops} 家分店开业！可招募一名店长`);
+  return { ok: true, cost: c, branch: s.shops };
+}
+
+/* ============================================================
+ *  V11 店长系统（引擎层）
+ *
+ *  数据结构（存档字段）：
+ *    s.managers[]    已招募店长 { id, name, emoji, lv, skill, trait, wage, branch, days }
+ *    s.mgrCand{}     各分店的候选店长 { [branch]: [候选, ...] }
+ *
+ *  ★ 分店索引约定：branch 从 1 开始。
+ *    branch = 1 是**总店**（玩家自己经营，不设店长）；
+ *    branch >= 2 才是真正的分店，每家对应一名店长。
+ *    于是"每新开设一家分店即可招募一名店长"=
+ *    `managerCount + 1 === s.shops`，
+ *    不会出现"开了 1 家店却有 2 个空槽"这种错位。
+ * ============================================================ */
+
+/** 已招募店长数 */
+function managerCount(s) {
+  return Array.isArray(s.managers) ? s.managers.length : 0;
+}
+/** 还能招几名店长 = 分店数 − 已招数（总店不占名额） */
+function managerSlotsLeft(s) {
+  return Math.max(0, pos(s.shops, 1) - 1 - managerCount(s));
+}
+/** 某家分店的店长（branch 1 = 总店恒为 null） */
+function managerOfBranch(s, branch) {
+  if (!(branch >= 2)) return null;
+  for (const m of (s.managers || [])) if (m.branch === branch) return m;
+  return null;
+}
+function managerById(s, id) {
+  for (const m of (s.managers || [])) if (m.id === id) return m;
+  return null;
+}
+/** 店长特性（带兜底：脏存档可能塞了字典外的 trait id） */
+function managerTrait(mgr) {
+  const t = MANAGER_TRAITS.find(x => x.id === (mgr && mgr.trait));
+  return t || MANAGER_TRAITS[MANAGER_TRAITS.length - 1];
+}
+/** 店长等级对应的能力倍率 */
+function managerRank(lv) {
+  return MANAGER_RANKS.find(x => x.lv === lv) || MANAGER_RANKS[0];
+}
+/** 招募费用：按已招店长数递增，再乘难度系数 */
+function managerCost(s) {
+  const i = managerCount(s);
+  const base = MANAGER_COSTS[Math.min(i, MANAGER_COSTS.length - 1)];
+  return Math.round(base * diffOf(s).costMult);
+}
+/**
+ * 每家分店的员工编制上限。
+ * ★ **总店不受此限** —— 总店沿用 CFG.STAFF_MAX（原设计的 20 人就是给总店的）。
+ *   若总店也限6 人，玩家在开第二家店之前就只能雇6 个人，
+ *   而 hire / 出杯位 / 存档往返等一大票既有逻辑（与探针 H1 组）都以
+ *   "总店能招满20 人"为前提 —— 一起被废掉。
+ *   分店限编的意义在于**让店长有存在价值**（店长管的是分店的人手），
+ *   而不是给主经营场所加一道天花板。
+ */
+function branchStaffCap(s, branch) {
+  const br = Math.max(1, num(branch, 1));
+  if (br === 1) return CFG.STAFF_MAX;      /* 总店：不额外限制 */
+  const mg = managerOfBranch(s, br);
+  let cap = BRANCH_STAFF_CAP;
+  if (mg && managerTrait(mg).id === 'multi') cap += 1;
+  return cap;
+}
+/** 某分店已有员工数 */
+function staffOfBranch(s, branch) {
+  return (s.staff || []).filter(st => st.branch === branch);
+}
+/** 随机生成一个店长候选人 */
+function makeManagerCandidate(s, branch) {
+  /* 能力值跟"资历"挂钩：等级越高skill 越强，
+     但**方差更大** —— 金牌店里既有天才也有平庸，
+     这样"招到谁"才有惊喜，而不是纯期望值决策。 */
+  const lv = weightedPick(MANAGER_RANKS, r => [34, 30, 20, 12, 4][r.lv - 1]).lv;
+  const skill = Math.round((0.92 + (lv - 1) * 0.07) * rnd(0.92, 1.08) * 100) / 100;
+  const trait = RNG.next() < 0.68
+    ? pick(MANAGER_TRAITS.filter(t => t.id !== 'none')).id
+    : 'none';
+  /* 日薪随等级与能力上涨。店长比店员贵得多（他们管人），
+     但**不能贵到离谱** —— 店长不直接干活，
+     工资过高会让「招店长」变成纯负担而无人问津。 */
+  const wage = Math.round((120 + lv * 55 + skill * 60) * (trait === 'none' ? 1 : 1.06));
+  return {
+    name: pick(MANAGER_NAMES), emoji: pick(CUSTOMER_FACES),
+    lv, skill, trait, wage, branch,
+  };
+}
+
+/** 刷新某家分店的店长候选（force = 强制刷新，否则按概率） */
+function refreshManagerCandidates(s, branch, force) {
+  if (!(branch >= 2)) return [];
+  /* 已经有店长了就别刷 —— 否则玩家招完会发现"还能再招一个"，
+     那是名额计算错了。 */
+  if (managerOfBranch(s, branch)) {
+    delete s.mgrCand[branch];
+    return [];
+  }
+  if (!s.mgrCand) s.mgrCand = {};
+  /* ★ 已有候选时，非强制刷新直接跳过（保留玩家正在比较的那批人）。
+     若每次都刷，玩家会发现自己盯了半天的候选人被系统悄悄换掉了——
+     决策成本凭空增加，而且没有任何提示。 */
+  if (!force && s.mgrCand[branch] && s.mgrCand[branch].length) return s.mgrCand[branch];
+  const n = rndInt(2, 3);
+  s.mgrCand[branch] = [];
+  for (let i = 0; i < n; i++) s.mgrCand[branch].push(makeManagerCandidate(s, branch));
+  return s.mgrCand[branch];
+}
+
+/** 每日刷新：给还没有店长的分店小概率出新候选。
+     否则玩家开完分店如果没招，之后就永远只有那 2~3 个候选，
+     招不中就一直招不中，通道会"卡死"。 */
+function dailyManagerRefresh(s) {
+  for (let b = 2; b <= pos(s.shops, 1); b++) {
+    if (managerOfBranch(s, b)) continue;
+    refreshManagerCandidates(s, b, false);
+  }
+}
+
+/** 手动刷新候选人的费用（店长专属）。
+ *
+ * ★ 为什么要收费：不收费的话玩家可以无限刷，
+ *   而候选人是随机的 —— 刷到第 30 次必定出金牌店长。
+ *   那样"招募决策"就退化成"点刷新直到出金色"，
+ *   费用递增正是为了让"再刷一次"成为一个真实的权衡
+ *   （花 ¥800 换一次抽卡，还是就用手上的 Lv.2）。
+ *
+ * 费用随该槽位刷新次数递增，封顶为招募费的一半 ——
+ * 封顶的意义是"再刷也不如直接招人"，避免出现无上限的沉没成本。 */
+function managerRerollCost(s, branch) {
+  const key = 'reroll_' + branch;
+  const times = num(s.flags[key], 0);
+  const base = Math.round(managerCost(s) * Math.min(0.5, 0.12 + times * 0.06));
+  return Math.max(180, base);
+}
+
+/** 招募店长（idx = 该分店候选列表下标） */
+function hireManager(s, branch, idx) {
+  if (!(branch >= 2)) return { ok: false, msg: '总店由你亲自经营，不需要店长' };
+  if (managerOfBranch(s, branch)) return { ok: false, msg: '该分店已有店长' };
+  if (managerSlotsLeft(s) <= 0) return { ok: false, msg: '没有空余名额（每新开一家分店才能招一名店长）' };
+  const list = (s.mgrCand && s.mgrCand[branch]) || [];
+  const c = list[idx];
+  if (!c) return { ok: false, msg: '候选人不存在' };
+  const fee = managerCost(s);
+  if (s.cash < fee) return { ok: false, msg: `现金不足（需 ${money(fee)}）` };
+  s.cash -= fee; s.invested += fee;
+  const m = {
+    id: s.nextMgrId++, name: c.name, emoji: c.emoji,
+    lv: c.lv, skill: c.skill, trait: c.trait, wage: c.wage,
+    branch, days: 0,       /* 在任天数，供「长期任职」类成就/加成用 */
+  };
+  s.managers.push(m);
+  list.splice(idx, 1);
+  delete s.mgrCand[branch];
+  pushLog(s, `🎩 招募店长 ${m.emoji} ${m.name}（${managerRank(m.lv).name}）入驻第 ${branch} 分店`);
+  bumpQuest(s, 'hire', 1);
+  return { ok: true, manager: m, fee };
+}
+
+/** 卸任店长（结算 3 倍日薪当补偿） */
+function fireManager(s, id) {
+  const m = managerById(s, id);
+  if (!m) return { ok: false, msg: '店长不存在' };
+  const sev = Math.round(m.wage * 3);
+  if (s.cash < sev) return { ok: false, msg: `现金不足以支付补偿（${money(sev)}）` };
+  s.cash -= sev;
+  s.managers.splice(s.managers.indexOf(m), 1);
+  /* ★ 卸任**不会遣散**该店的员工 —— 他们本来就是总公司的员工，
+     店长只是管理者而非所有者。把人一起清掉是双重惩罚，
+     玩家会因此永远不敢卸任（等于被绑架）。 */
+  pushLog(s, `🎩 店长 ${m.emoji} ${m.name} 卸任（补偿 ${money(sev)}）`);
+  refreshManagerCandidates(s, m.branch, true);
+  return { ok: true, sev };
+}
+
+/** 跨分店调动：店长换一家店管（员工随他一起搬） */
+function moveManager(s, id, toBranch) {
+  const m = managerById(s, id);
+  if (!m) return { ok: false, msg: '店长不存在' };
+  if (!(toBranch >= 2 && toBranch <= pos(s.shops, 1))) {
+    return { ok: false, msg: '目标分店不存在' };
+  }
+  if (m.branch === toBranch) return { ok: false, msg: '已经在该分店' };
+  if (managerOfBranch(s, toBranch)) return { ok: false, msg: '目标分店已有店长' };
+  const from = m.branch;
+  const staff = staffOfBranch(s, from);
+  /* 顺序要紧：先改 m.branch，再算目标店编制 ——
+     多店管理(+1) 的上限是跟着**店长本人**走的，
+     先搬人后改 branch 会用旧店的编制上限算出错误结果。 */
+  m.branch = toBranch;
+  const cap = branchStaffCap(s, toBranch);
+  let moved = 0, left = 0;
+  for (const st of staff) {
+    if (moved >= cap) { left++; continue; }
+    st.branch = toBranch; moved++;
+  }
+  pushLog(s, `🔀 店长 ${m.emoji} ${m.name} 调往第 ${toBranch} 分店（带走 ${moved} 名员工${left ? `，${left} 名留下` : ''}）`);
+  refreshManagerCandidates(s, from, true);
+  return { ok: true, from, to: toBranch, moved, left };
+}
+
+/** 店长每日自动补员。
+ *
+ * ★ 为什么店长「自己招人」是有意义的机制，而不是纯装饰：
+ *   玩家不可能天天盯着每家分店的编制。店长每天在编制有空、
+ *   店里现金允许时自己补 1 人，玩家的操作从"逐店盯人"变成"决定要不要放权"。
+ *   这也构成一条真实的取舍：**工资是每天都要付的** ——
+ *   放权自动补员 = 省心但涨工资；自己盯着招 = 省钱但费神。
+ *
+ * 规则（刻意保守，避免店长变成"免费劳动力引擎"）：
+ *   · 每天最多补 1 人（不是补满编制）
+ *   · 要求该店现金（按当日毛估）足够付对方的 3 天工资
+ *   · 全公司员工总上限 CFG.STAFF_MAX 依然是硬顶
+ *
+ * @returns {{hired: object[], skipped: number}} hired 是今天招进来的人
+ */
+function managerDaily(s) {
+  const hired = [];
+  let skipped = 0;
+  for (const m of (s.managers || [])) {
+    m.days = num(m.days, 0) + 1;
+    if (staffOfBranch(s, m.branch).length >= branchStaffCap(s, m.branch)) { skipped++; continue; }
+    if (s.staff.length >= CFG.STAFF_MAX) { skipped++; continue; }
+    /* 店里现金的粗略代理：把总现金按分店数分，
+       够付 3 天工资才招 —— 店长不能花光总部的钱。 */
+    const shopCash = s.cash / Math.max(1, pos(s.shops, 1));
+    const avgWage = s.staff.length
+      ? s.staff.reduce((a, b) => a + num(b.wage, 0), 0) / s.staff.length
+      : 70;
+    if (shopCash < avgWage * 3) { skipped++; continue; }
+    /* 优先用候选人池：店长"物色"也是从候选人里挑，
+       玩家在总店看到的候选人池是共享的（同一批人，不可能分身）。 */
+    if (!s.candidates || !s.candidates.length) { refreshCandidates(s, true); }
+    const idx = s.candidates.length - 1;
+    const r = hireStaff(s, idx, m.branch);
+    if (r.ok) hired.push(r.staff);
+    else skipped++;
+  }
+  return { hired, skipped };
 }
 
 /* ---------------- 员工 ---------------- */
-function hireStaff(s, idx) {
+/**
+ * 雇佣员工到指定分店。
+ * @param {number} branch 目标分店（1 = 总店）。省略则回落到玩家手动招聘：
+ *   **手动招聘默认进总店** —— 玩家手动招人时通常在想"给我自己店里加个工"，
+ *   若默认进某家分店会让人莫名其妙。
+ *   店长自动补员走的是同一条路径（branch 明确指定），
+ *   两条路径**共用编制名额**，不存在"店长招的和玩家招的不算在一起"的漏洞。
+ */
+function hireStaff(s, idx, branch) {
   const c = s.candidates[idx];
   if (!c) return { ok: false, msg: '候选人不存在' };
   /* 上限守卫：以前这里不查人数，员工可以一直加到存档清洗器截断为止，
      读档时多出来的会无声消失（连遣散费都不退）。 */
   if (s.staff.length >= CFG.STAFF_MAX) return { ok: false, msg: `员工已达上限 ${CFG.STAFF_MAX} 人` };
-  if (s.cash < c.fee) return { ok: false, msg: '现金不足' };
-  s.cash -= c.fee; s.invested += c.fee;
-  const st = { id: s.nextStaffId++, name: c.name, emoji: c.emoji, skill: c.skill, trait: c.trait, wage: c.wage, stamina: 100 };
+  /* V11 每店编制上限：店长招人与玩家招人共用这一条。
+     ★ 必须在扣钱之前拦 —— 否则店长把人招进来才发现超编，
+       员工已经进了 staff 又立刻被赶走，钱白花。 */
+  const br = branch == null ? 1 : num(branch, 1);
+  const cap = branchStaffCap(s, br);
+  if (staffOfBranch(s, br).length >= cap) {
+    const mg = managerOfBranch(s, br);
+    return {
+      ok: false,
+      msg: mg
+        ? `第 ${br} 分店编制已满（${cap} 人，店长 ${mg.name} 管不了更多）`
+        : `第 ${br} 分店编制已满（${cap} 人）`,
+    };
+  }
+  /* 费用要在**扣钱之前**算完，因为店长的议价会改变最终价 ——
+     若先扣原价再退差额，中途现金可能已经扣成负数又弹回来，
+     账目会留下一个说不清的中间态。这里改成先算后扣。 */
+  const mg = managerOfBranch(s, br);
+  let fee = c.fee;
+  if (mg) {
+    if (managerTrait(mg).id === 'trainer') fee = Math.round(fee * 0.85);
+    fee = Math.round(fee * (1 - clamp((num(mg.skill, 1) - 0.9) * 0.08, 0, 0.14)));
+  }
+  if (s.cash < fee) return { ok: false, msg: '现金不足' };
+  s.cash -= fee; s.invested += fee;
+  /* ★ 员工费用随所属分店的店长能力浮动：
+     店长 trainer 特性（带教能手）→ 该店招人便宜 15%；
+     能力值越高，渠道议价能力越强（最多再降 14%）。
+     这让"招好店长"和"招便宜人"之间有真实取舍：
+     能力强的店长运营加成高，但人力成本也更高。 */
+  const st = {
+    id: s.nextStaffId++, name: c.name, emoji: c.emoji,
+    skill: c.skill, trait: c.trait, wage: c.wage, stamina: 100,
+    branch: br, hiredBy: mg ? 'mgr' : 'player',
+  };
   s.staff.push(st);
   s.candidates.splice(idx, 1);
   bumpQuest(s, 'hire', 1);
-  pushLog(s, `👤 雇佣了 ${st.emoji} ${st.name}`);
-  return { ok: true, staff: st };
+  pushLog(s, mg
+    ? `👤 店长 ${mg.name} 招入 ${st.emoji} ${st.name}（第 ${br} 分店）`
+    : `👤 雇佣了 ${st.emoji} ${st.name}`);
+  return { ok: true, staff: st, fee };
 }
 function fireStaff(s, id) {
   const i = s.staff.findIndex(x => x.id === id);
@@ -740,15 +1265,19 @@ function openShop(s) {
   s.cash -= s.marketing;
   const dur = CFG.DAY_DURATION;
   const stations = [];
-  stations.push({ idx: 0, worker: null, order: null, isBoss: true });
-  for (let i = 0; i < s.staff.length; i++) stations.push({ idx: i + 1, worker: s.staff[i], order: null, isBoss: false });
-  /* 分店工位复用现有员工；没有员工时 Math.max(1,0) 保证不出现 %0（NaN 的另一来源） */
-  const pool = Math.max(1, s.staff.length);
-  for (let i = 1; i < s.shops; i++) {
+  stations.push({ idx: 0, worker: null, order: null, isBoss: true, branchIdx: 1 });
+  /* V11：工位按**分店**组织，不再用 `s.staff[(i-1) % pool]` 取模轮转。
+     ★ 改造前的问题是"3 家店 2 个员工时，同一个人同时在 3 家店上班"——
+       那不是经营，是数学游戏。玩家看不到这件事，但分店成本照收，
+       相当于为一份工资买了 N 家店的产能。
+     ★ 每家分店的工位数 = 该店员工数（店长不在工位上，他们管人）。
+       没有员工的分店工位数 0 —— 那家店今天真的做不了单，
+       这是玩家该看到的反馈（"我开了分店却没人，只能干看着"）。 */
+  for (let i = 0; i < s.staff.length; i++) {
+    const br = Math.max(1, num(s.staff[i].branch, 1));
     stations.push({
       idx: stations.length,
-      worker: s.staff[(i - 1) % pool] || null,
-      order: null, isBoss: false, branch: true,
+      worker: s.staff[i], order: null, isBoss: false, branchIdx: br,
     });
   }
 
@@ -891,7 +1420,11 @@ function completeOrder(s, st) {
   sim.revenue += income;
   sim.orders++;
   sim.cups += cups;
-  sim.repGain += CFG.SERVE_REP * (type ? type.repMul : 1) * cups;
+  /* V11：分店工位额外享受店长的口碑/满意度加成。
+     总店（branchIdx = 1）不受影响 —— 加成必须限定在店长管的店里，
+     否则「招店长」就变成全局加成，玩家无脑堆一家店即可。 */
+  const stMb = (st && st.branchIdx >= 2) ? managerBonus(s, st.branchIdx) : null;
+  sim.repGain += CFG.SERVE_REP * (type ? type.repMul : 1) * cups * (stMb ? stMb.rep : 1);
   /* V6 招牌配方：累计卖出杯数（跨局继承的成长线） */
   addSigCups(s, o.rid, cups);
   if (trendHit) sim.trendCups += cups;
@@ -1040,7 +1573,7 @@ function tick(s, dt) {
   for (const st of sim.stations) {
     if (st.worker && st.worker.stamina <= 0) continue;
     if (st.order) {
-      const tt = serviceTimeOf(s, st.worker, sim) * (1 + ((st.order.cups || 1) - 1) * 0.35);
+      const tt = stationTime(s, st, sim) * (1 + ((st.order.cups || 1) - 1) * 0.35);
       st.order.progress += dt / tt;
       if (st.order.progress >= 1) completeOrder(s, st);
     }
@@ -1075,9 +1608,16 @@ function endDay(s) {
      玩家靠时间堆就能过。每上一个里程碑，工资与租金同步上浮，
      逼着他继续提人效 —— 这才是「越来越难」。 */
   const ep = endlessPressure(s);
-  const wages = Math.round(s.staff.reduce((a, b) => a + b.wage, 0) * ep * cardMul(s, 'wage'));
+  /* V11 店长日薪并入工资总额 —— 店长是雇员，不能白拿。
+     ★ 计入 wages 而不是另开一个科目：日报上玩家看的是"人工成本"，
+       拆成两项会让"招了几个店长"在账目上不可见，
+       而看不见的成本就是会被忽略的成本。 */
+  const mgrWage = (s.managers || []).reduce((a, b) => a + num(b.wage, 0), 0);
+  const wages = Math.round((s.staff.reduce((a, b) => a + b.wage, 0) + mgrWage) * ep * cardMul(s, 'wage'));
   let rentRaw = (CFG.RENT_PER_SHOP * s.shops + CFG.SHOP_UPKEEP * (s.shops - 1)) * d.rentMult * ep * cardMul(s, 'rent');
   for (const st of s.staff) if (st.trait === 'wise') rentRaw *= 0.92;
+  /* 店长 lean 特性（精打细算）→ 该店租金 -12%，按店长数逐个施加 */
+  for (const m of (s.managers || [])) if (managerTrait(m).id === 'lean') rentRaw *= 0.88;
   const rent = Math.round(rentRaw);
   const net = sim.revenue - sim.cogs - wages - rent - (s.dayMarketing || 0);
   s.cash -= wages + rent;
@@ -1109,6 +1649,10 @@ function endDay(s) {
   s.stats.totalLost += sim.lost;
   s.stats.totalServed += (sim.orders || 0);
   s.stats.days++;
+  /* V10：单日杯数（成就「月落之时」判定用）。
+     ★ 在**日结算**时写，而不是出杯时累加 —— 出杯时写会被中途结束的
+        营业流程（openShop 提前 return）截断，出现"打了烊却没记录"的偏差。 */
+  s.stats.lastDayCups = num(sim.cups, 0);
   /* 零流失日。门槛是 24 杯而不是 12：第 1 天客流只有 10~16 杯、
      单个工位稍微盯一下就能零流失，实测有 53% 的第二天都能白拿这 ¥600，
      而它一项就占了新档首日成就现金的四成以上（首日成就现金平均 ¥773，
@@ -1271,6 +1815,11 @@ function nextDay(s) {
   refreshMarket(s);
   for (const st of s.staff) st.stamina = clamp(st.stamina + 34, 0, 100);
   refreshCandidates(s, false);
+  /* V11 店长日常：新候选补货 + 每日自动补员。
+     放在 refreshCandidates 之后 —— 店长招人要用候选人池，
+     池子必须先刷新过，否则店长会永远招不到人（候选人被招空后不补）。 */
+  dailyManagerRefresh(s);
+  managerDaily(s);
   rollQuests(s);
   rollContract(s);   /* 合同每天换一个：备货阶段就要知道"今天要凑什么" */
   if (RNG.next() < 0.42 && !s.pendingEvent) {
@@ -1344,11 +1893,52 @@ function checkAchievements(s) {
     if (ok) {
       s.ach[a.id] = true;
       if (a.reward.cash) s.cash += a.reward.cash;
+      /* ★ V10：成就可奖励**稀有食谱**（ACH_RECIPES）。
+         这些食谱不在研发树上、只能这样拿。
+         重复/已解锁的处理见 grantAchRecipe。 */
+      if (a.reward.recipe) grantAchRecipe(s, a.reward.recipe);
       got.push(a);
       pushLog(s, `🏅 成就达成：${a.emoji} ${a.name}`);
     }
   }
   return got;
+}
+
+/**
+ * 发放成就奖励食谱。
+ *
+ * ★ 重复获得 / 已解锁的处理（本函数的全部难点）：
+ *   成就是**一次性**的（s.ach[a.id] 一旦为true 就不再判定），
+ *   但奖励食谱仍需要明确的幂等语义，否则会踩到这几种情况：
+ *     ① 已解锁该食谱 → 不能再 push 进 s.recipes（会重复扣槽位、
+ *        菜单卡出现两行一样的、成就"配方全收集"计数虚高）
+ *     ② 导入的老存档里已经含有该食谱 → 同上
+ *     ③ 同一个成就被多路径触发（理论上不该发生，但 get纯函数化更安全）
+ *   处理：**已解锁则跳过发放，并把现金奖励照常发**——
+ *   不因为"配方重复"而吞掉成就的现金部分（那是玩家应得的另一份奖励）。
+ *   额外提示玩家"已拥有"，避免玩家以为自己白拿了一个新菜。
+ *
+ * @returns {{ok: boolean, dup: boolean, name?: string}}
+ */
+function grantAchRecipe(s, rid) {
+  const r = achRecipeById(rid);
+  if (!r) return { ok: false, dup: false };
+  if (!s.recipes) s.recipes = [];
+  if (s.recipes.includes(rid)) {
+    pushLog(s, `📜 成就奖励「${r.name}」你已拥有，奖励现金照常发放`);
+    return { ok: true, dup: true, name: r.name };
+  }
+  s.recipes.push(rid);
+  s.flags['achRecipe'] = (s.flags['achRecipe'] || 0) + 1;
+  bumpQuest(s, 'research', 1);
+  pushLog(s, `📜 成就奖励食谱：${r.emoji} ${r.name}`);
+  /* 立刻可用性检查：若当前不在它的城市，要明确告诉玩家"去某城才能上架"，
+     否则玩家拿到菜却发现上不了架会以为是 bug。 */
+  if (!recipeAvailableAt(s, rid, true)) {
+    const c = cityById(r.city);
+    pushLog(s, `　　（需前往${c ? c.name : '指定城市'}才能上架）`);
+  }
+  return { ok: true, dup: false, name: r.name };
 }
 
 /** 成就的 ★ 入账（现金在 checkAchievements 里已经给了，这里只管跨局声望）。
@@ -2123,13 +2713,89 @@ function setVenueCity(s, cityId, districtId) {
     if (did.slice(0, 4) !== c.id.slice(0, 4)) return { ok: false, msg: '区级与所选城市不匹配' };
   }
   if (!s.venue) s.venue = {};
+  /* 换城市前先记下旧菜单 —— 切换后要把「本店用不上」的款移出菜单 */
+  const prevCity = currentCityId(s);
+  /* 城市痕迹：已访问列表去重追加 + 连住天数（换城归零）。
+     这两项供成就「跨城游商」「不打烊的城市」判定，
+     必须在**切 cityId 之前**算，否则 prevCity 会已是新城市。
+     ★ 新城市也要记 —— 只记旧城市的话，新城市要等"再换一次"才被计入，
+       成就「经营过 3 个城市」会凭空少算一个。 */
+  if (!Array.isArray(s.citiesVisited)) s.citiesVisited = [];
+  if (s.citiesVisited.indexOf(prevCity) < 0) s.citiesVisited.push(prevCity);
+  if (s.citiesVisited.indexOf(c.id) < 0) s.citiesVisited.push(c.id);
+  s.stayDays = (prevCity === c.id) ? (num(s.stayDays, 0) + 1) : 1;
   s.venue.provId = c.prov;
   s.venue.cityId = c.id;
   if (did == null) delete s.venue.districtId;
   else s.venue.districtId = did;
   /* 换城市后旧坐标必然对不上新城区，直接清掉而不是留着自相矛盾 */
   if (s.venue.lng != null) clearGeo(s);
-  return { ok: true, provId: c.prov, cityId: c.id, districtId: did };
+  const kept = refreshCityMenu(s, prevCity);
+  return {
+    ok: true, provId: c.prov, cityId: c.id, districtId: did,
+    cityName: c.name, dropped: kept.dropped, kept: kept.kept,
+    cityCuisines: cuisinesOfCity(c.id).map(x => x.id),
+    cityIngs: ingsOfCity(c.id).map(x => x.id),
+  };
+}
+
+/**
+ * 城市切换后的**数据刷新**（需求 2 的核心）。
+ *
+ * 要刷新四样东西，少一样就会出"看起来能点但点了没反应"的坑：
+ *   ① 菜单：移出本店城市用不上的配方（但保留在 s.recipes 里）
+ *   ② 库存：城市专属原料在别城买不到、也用不上，清掉避免占资金
+ *   ③ 城市菜系工坊：不在本城的产线等级**保留**（换个城市回来还能用），
+ *      但要确保不会出现"有等级却没配方可用"的空产线状态
+ *   ④ ratios：被移出菜单的定价保留，重新上架时不用重设
+ *
+ * @param {string} prevCity 切换前的城市 id
+ * @returns {{kept: string[], dropped: string[]}} kept/dropped 是菜单 id 列表
+ */
+function refreshCityMenu(s, prevCity) {
+  s.menu = arr(s.menu);
+  const dropped = [];
+  const kept = [];
+  for (const rid of s.menu) {
+    if (recipeAvailableAt(s, rid, true)) kept.push(rid);
+    else dropped.push(rid);
+  }
+  s.menu = kept;
+  /* 菜单不能空：至少补一款本店城市能做的（否则当天开不了门） */
+  if (!s.menu.length) {
+    const pool = availableRecipes(s);
+    const prefer = pool.find(rid => {
+      const r = recipeById(rid);
+      return r && !r.city;                 /* 优先通用菜 */
+    }) || pool[0];
+    if (prefer) {
+      s.menu.push(prefer);
+      if (s.ratios[prefer] == null) s.ratios[prefer] = 1.0;
+      if (dropped.indexOf(prefer) < 0) dropped.push(prefer);
+    }
+  }
+  /* 城市专属原料在别城是死库存：清掉，把资金还给玩家。
+     ★ 必须清 —— 否则玩家在成都囤的藤椒油带到北京，
+       占着 inventory 的资金上限却永远用不掉。 */
+  const cid = currentCityId(s);
+  const freed = {};
+  for (const g of ING) {
+    if (g.origin && g.origin !== cid && (s.inv[g.id] || 0) > 0) {
+      freed[g.name] = s.inv[g.id];
+      s.inv[g.id] = 0;
+    }
+  }
+  if (dropped.length) {
+    pushLog(s, `📍 换城市：${dropped.length} 款本地菜已下架（配方保留，回来还能卖）`);
+  }
+  if (Object.keys(freed).length) {
+    pushLog(s, `📦 清空异地原料：${Object.keys(freed).join('、')}`);
+  }
+  if (prevCity && prevCity !== cid) {
+    const cn = cityById(cid);
+    pushLog(s, `📍 已切换经营城市：${cn ? cn.name : cid}`);
+  }
+  return { kept: kept.slice(), dropped: dropped.slice() };
 }
 
 /** 经营维度的展示模型（给 UI 用，含名称与是否已选点） */
@@ -2333,6 +2999,14 @@ function workshopTier3Bonus(s, rid) {
 function canListRecipe(s, rid) {
   const r = recipeById(rid);
   if (!r) return { ok: false, msg: '没有这个配方' };
+  /* ★ V10 城市绑定：解锁了但不在本店城市 → 不能上架。
+     必须在**引擎入口**拦住（不能只靠 UI 置灰），
+     否则改存档或直接调 toggleMenu 就能上架本地买不到原料的菜，
+     而备货逻辑买不到那些原料 —— 表现为"点开不了门"的死局。 */
+  if (!recipeAvailableAt(s, rid, true)) {
+    const c = cityById(r.city);
+    return { ok: false, msg: `该配方只在${c ? c.name : '指定城市'}可用` };
+  }
   return { ok: true };
 }
 
@@ -2700,6 +3374,10 @@ function sanitizeState(s) {
   const traitIds = TRAITS.map(t => t.id);
   /* 用 CFG.STAFF_MAX 而不是写死 12：以前这里截到 12、而运行时能雇到更多，
      于是「雇满 → 存档 → 读档」会凭空少掉几个员工，遣散费也不会退。 */
+  /* ★ V11：branch = 员工所属分店（1 = 总店）。
+     老存档完全没有这个字段 —— 全部归到总店（branch=1），
+     这是**业务语义上正确的还原**：V11 之前根本没有分店编制，
+     所有员工本来就是在总店干活。 */
   s.staff = arr(s.staff).slice(0, CFG.STAFF_MAX).map((st, i) => ({
     id: int(st && st.id, i + 1),
     name: str(st && st.name, 12) || '员工',
@@ -2708,6 +3386,10 @@ function sanitizeState(s) {
     trait: traitIds.indexOf(st && st.trait) >= 0 ? st.trait : null,
     wage: posCap(st && st.wage, 60),
     stamina: clamp(num(st && st.stamina, 100), 0, 100),
+    /* 分店号夹到 1..shops：脏存档塞个 999 会让员工"属于一家不存在的店"，
+       那家店没有店长也永远不会开张，员工就变成了不可见的僵尸。 */
+    branch: clamp(int(st && st.branch, 1), 1, Math.max(1, pos(s.shops, 1))),
+    hiredBy: (st && st.hiredBy === 'mgr') ? 'mgr' : 'player',
   }));
   s.candidates = arr(s.candidates).slice(0, 6).map(c => ({
     name: str(c && c.name, 12) || '候选人',
@@ -2717,6 +3399,66 @@ function sanitizeState(s) {
     wage: pos(c && c.wage, 60),
     fee: pos(c && c.fee, 260),
   }));
+
+  /* ---------- V11 店长 ---------- */
+  const shopN = Math.max(1, pos(s.shops, 1));
+  const mgrTraitIds = MANAGER_TRAITS.map(t => t.id);
+  const mgrLvIds = MANAGER_RANKS.map(r => r.lv);
+  /* 分店号必须在 2..shopN（1 是总店，不设店长）。
+     两条硬约束：
+       ① branch >= 2：脏存档把店长挂在总店头上，会凭空多出一个可用名额
+       ② 同一家分店不能有两个店长 —— 否则 hireManager 的「该分店已有店长」
+          守卫与 managerOfBranch 的线性查找会不一致，
+          表现为"招了第二个店长，但加成一店算一次、工资付两次" */
+  const seenBranch = new Set();
+  const mgrs = [];
+  for (const m of arr(s.managers)) {
+    let br = int(m && m.branch, 2);
+    if (!(br >= 2) || br > shopN) br = -1;      /* 无效分店号→ 丢弃该店长 */
+    if (br < 0 || seenBranch.has(br)) continue;   /* 重复占用同一分店 → 丢弃 */
+    seenBranch.add(br);
+    mgrs.push({
+      id: int(m && m.id, mgrs.length + 1),
+      name: str(m && m.name, 12) || '店长',
+      emoji: str(m && m.emoji, 8) || '🧑‍💼',
+      lv: mgrLvIds.indexOf(int(m && m.lv, 1)) >= 0 ? int(m.lv, 1) : 1,
+      skill: clamp(num(m && m.skill, 1), 0.3, 3),
+      trait: mgrTraitIds.indexOf(m && m.trait) >= 0 ? m.trait : 'none',
+      wage: posCap(m && m.wage, 120),
+      branch: br,
+      days: clamp(int(m && m.days, 0), 0, 9999),
+    });
+  }
+  s.managers = mgrs;
+  /* ★ 名额硬顶：店长数**不可能**超过分店数。
+     不裁剪的话，脏存档塞 20 个店长进来，
+     玩家白得 20 份加成而分店只有 3 家（白嫖是最难查的平衡漏洞）。 */
+  if (s.managers.length > shopN - 1) s.managers = s.managers.slice(0, Math.max(0, shopN - 1));
+  /* id 计数器必须大于所有现存店长的 id，否则新招的店长会和旧的撞 id */
+  let maxMgrId = 0;
+  for (const m of s.managers) if (m.id > maxMgrId) maxMgrId = m.id;
+  s.nextMgrId = clamp(Math.max(int(s.nextMgrId, 1), maxMgrId + 1), 1, NUM_CAP);
+  /* 候选池：只有「尚未开店且确实存在」的分店槽位才保留候选。
+     已开分店的候选池清掉 —— 那些槽位已经有店长了。 */
+  const cand0 = obj(s.mgrCand), mgrCand = {};
+  for (const k in cand0) {
+    const br = int(k, 0);
+    if (!(br >= 2 && br <= shopN)) continue;
+    if (seenBranch.has(br)) continue;
+    const list = arr(cand0[k]).slice(0, 4).map(c => ({
+      name: str(c && c.name, 12) || '候选人',
+      emoji: str(c && c.emoji, 8) || '🧑‍💼',
+      lv: mgrLvIds.indexOf(int(c && c.lv, 1)) >= 0 ? int(c.lv, 1) : 1,
+      skill: clamp(num(c && c.skill, 1), 0.3, 3),
+      trait: mgrTraitIds.indexOf(c && c.trait) >= 0 ? c.trait : 'none',
+      wage: posCap(c && c.wage, 120),
+      branch: br,
+    }));
+    if (list.length) mgrCand[br] = list;
+  }
+  s.mgrCand = mgrCand;
+  /* 员工分店号也要与「是否有店长」对齐吗？不需要 ——
+     没有店长的分店也能有员工（玩家手动招的），这是允许的状态。 */
 
   /* 竞争对手 */
   if (!s.rival || typeof s.rival !== 'object') initRival(s);
@@ -2744,6 +3486,9 @@ function sanitizeState(s) {
     totalProfit: numCap(st0.totalProfit, 0), bestDayProfit: numCap(st0.bestDayProfit, 0),
     totalLost: posCap(st0.totalLost, 0), totalServed: posCap(st0.totalServed, 0),
     clicks: posCap(st0.clicks, 0), days: posCap(st0.days, 0),
+    /* V10 单日杯数（成就判定用）—— 老存档没有这个字段，补 0。
+       不补的话 `undefined >= 120` 是 false，成就永远不达成（静默失效）。 */
+    lastDayCups: posCap(st0.lastDayCups, 0),
     questCash: posCap(st0.questCash, 0),
     /* V5 关卡奖励累计（E3 对账探针要读这个科目） */
     stageCash: posCap(st0.stageCash, 0),
@@ -2834,6 +3579,28 @@ function sanitizeState(s) {
      —— 存档是玩家自己的进度，一个不认识的场地类型不该让他打不开游戏。
      详见 sanitizeVenue 的注释（含"为什么不为它升版本号"）。 */
   s.venue = sanitizeVenue(s.venue);
+
+  /* V10 城市经营痕迹清洗。
+     ★ 必须放在 sanitizeVenue **之后** —— citiesVisited 里要补当前城市，
+       而当前城市只有在 venue 收敛之后才是可信的 id。
+       顺序反了的话，脏 venue + 脏 citiesVisited 会互相污染。 */
+  {
+    const cv = [];
+    for (const id of arr(s.citiesVisited)) {
+      const cid = String(id);
+      if (cityById(cid) && cv.indexOf(cid) < 0) cv.push(cid);
+    }
+    const curCity = s.venue.cityId || CITY_DEFAULT;
+    if (cv.indexOf(curCity) < 0) cv.push(curCity);
+    s.citiesVisited = cv;
+    s.stayDays = clamp(int(s.stayDays, 0), 0, 999);
+  }
+  /* V10：菜单必须与城市对齐。
+     场景：玩家在城市 A 解锁了城市菜并上架，然后**导出存档**、
+     在另一个城市 A 的存档里读档 —— 菜单里留着A 城专属的菜。
+     若不刷新，当天的备货会去买买不到的原料，表现为"菜单里有的菜却做不出来"。
+     幂等：refreshCityMenu 只做过滤与补位，跑两次结果相同。 */
+  refreshCityMenu(s, s.venue.cityId);
 
   s.quests = arr(s.quests)
     .filter(it => it && questById(it.id))

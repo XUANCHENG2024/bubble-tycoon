@@ -441,8 +441,36 @@ function doAct(act, el) {
     }
     case 'shop': {
       const r = openShopBranch(s);
-      if (r.ok) { UI.toast(`🏪 第 ${s.shops} 家分店开业！`, 'gold'); UI.confetti(40); SFX.up(); }
+      if (r.ok) {
+        /* V11：开分店后店长名额 +1，把这件事说清楚，
+           否则玩家不知道"开了店为什么能招人了"。 */
+        UI.toast(`🏪 第 ${r.branch} 家分店开业！可招募一名店长`, 'gold');
+        UI.confetti(40); SFX.up();
+      } else UI.toast(r.msg, 'err');
+      break;
+    }
+    /* ---------- V11 店长 ---------- */
+    case 'mhire': {
+      const r = hireManager(s, +br || 2, +id || 0);
+      if (r.ok) {
+        const m = r.manager;
+        UI.toast(`🎩 ${m.name}（Lv.${m.lv} ${managerRank(m.lv).name}）入职第 ${m.branch} 分店`, 'ok');
+        SFX.up();
+      } else UI.toast(r.msg, 'err');
+      break;
+    }
+    case 'mfire': {
+      const r = fireManager(s, +id);
+      if (r.ok) { UI.toast('🎩 店长已卸任，该店员工留在原编制', 'ok'); SFX.click(); }
       else UI.toast(r.msg, 'err');
+      break;
+    }
+    case 'mmove': {
+      const r = moveManager(s, +id, +el.dataset.to);
+      if (r.ok) {
+        UI.toast(`🔀 店长调往第 ${r.to} 分店（带走 ${r.moved} 名员工${r.left ? `，${r.left} 名留下` : ''}）`, 'ok');
+        SFX.click();
+      } else UI.toast(r.msg, 'err');
       break;
     }
     case 'prestige': {
@@ -682,7 +710,19 @@ document.addEventListener('change', e => {
     if (!list.length) { UI.toast('该省暂无可选城市', 'err'); return; }
     const r = setVenueCity(s, list[0].id);
     if (!r.ok) UI.toast(r.msg, 'err');
-    else { UI.toast(`已切换到 ${list[0].name}`, 'ok'); SFX.click(); }
+    else {
+      /* 与 vcity 保持一致的口径：切换城市会影响菜单与可研菜系，必须说清楚 */
+      const parts = [`已切换到${r.cityName || list[0].name}`];
+      if (r.dropped && r.dropped.length) parts.push(`${r.dropped.length} 款本地菜下架`);
+      if (r.cityCuisines && r.cityCuisines.length) {
+        parts.push(`当地特色：${r.cityCuisines.map(id => {
+          const c = cuisineById(id);
+          return c ? c.name : id;
+        }).join('、')}`);
+      }
+      UI.toast(parts.join(' · '), 'ok');
+      SFX.click();
+    }
     pump();
   } else if (act === 'vcity') {
     const v = s.venue || {};
@@ -691,7 +731,27 @@ document.addEventListener('change', e => {
       ? setVenueCity(s, v.cityId, val || '')
       : setVenueCity(s, val);
     if (!r.ok) UI.toast(r.msg, 'err');
-    else { UI.toast(kind === 'dist' ? '已更新区级' : '已更新经营城市', 'ok'); SFX.click(); }
+    else if (kind === 'dist') { UI.toast('已更新区级', 'ok'); SFX.click(); }
+    else {
+      /* ★ V10：切换城市有**实质影响**，必须告诉玩家结果 ——
+         哪些本地菜下架了、当地有什么特色菜系、专属原料能不能买。
+         只弹一句"已切换"的话，玩家会以为菜单卡消失了是 bug。 */
+      const parts = [`已切换到${r.cityName || '新城市'}`];
+      if (r.dropped && r.dropped.length) {
+        parts.push(`${r.dropped.length} 款本地菜下架（配方已保留，换回来还能卖）`);
+      }
+      if (r.cityCuisines && r.cityCuisines.length) {
+        parts.push(`当地特色：${r.cityCuisines.map(id => {
+          const c = cuisineById(id);
+          return c ? c.name : id;
+        }).join('、')}`);
+      }
+      if (r.cityIngs && r.cityIngs.length) {
+        parts.push(`专属原料：${r.cityIngs.length} 种`);
+      }
+      UI.toast(parts.join(' · '), 'ok');
+      SFX.click();
+    }
     pump();
   }
 });

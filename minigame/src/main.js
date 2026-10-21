@@ -603,8 +603,50 @@ function doAct(act, id, extra) {
   }
   if (act === 'shop') {
     var os = openShopBranch(s);
-    if (os.ok) { beep('up', 780, 0.14); toast('🏪 第 ' + s.shops + ' 家分店开张！'); }
-    else toast(os.msg);
+    if (os.ok) {
+      /* V11：开分店 = 店长名额 +1，要把因果说清楚 */
+      beep('up', 780, 0.14);
+      toast('🏪 第 ' + os.branch + ' 家分店开张！可招募一名店长');
+    } else toast(os.msg);
+    return;
+  }
+  /* ---------- V11 店长 ---------- */
+  if (act === 'mhire') {
+    var mh = hireManager(s, +id || 2, +extra || 0);
+    if (mh.ok) {
+      beep('up', 760, 0.12);
+      toast('🎩 ' + mh.manager.name + '（Lv.' + mh.manager.lv + ' ' + managerRank(mh.manager.lv).name
+        + '）入职第 ' + mh.manager.branch + ' 分店');
+    } else toast(mh.msg);
+    return;
+  }
+  if (act === 'mfire') {
+    var mf = fireManager(s, +id);
+    if (mf.ok) { beep('tap'); toast('🎩 店长已卸任，该店员工留在原编制'); }
+    else toast(mf.msg);
+    return;
+  }
+  if (act === 'mmove') {
+    var mv = moveManager(s, +id, +extra);
+    if (mv.ok) {
+      beep('tap');
+      toast('🔀 店长调往第 ' + mv.to + ' 分店（带走 ' + mv.moved + ' 名员工' + (mv.left ? '，' + mv.left + ' 名留下' : '') + '）');
+    } else toast(mv.msg);
+    return;
+  }
+  if (act === 'mcand') {
+    /* 手动刷新店长候选：付费的。免费刷新会让玩家无限刷出一个金牌店长，
+       那就不是决策了。费用随刷新次数递增。 */
+    var br = +id || 2;
+    if (managerOfBranch(s, br)) { toast('该分店已有店长'); return; }
+    var rc = managerRerollCost(s, br);
+    if (s.cash < rc) { toast('现金不足（刷新费 ' + money(rc) + '）'); return; }
+    s.cash -= rc; s.invested += rc;
+    /* 记录刷新次数：下次刷新更贵，防止无限刷 */
+    s.flags['reroll_' + br] = (s.flags['reroll_' + br] || 0) + 1;
+    refreshManagerCandidates(s, br, true);
+    beep('tap');
+    toast('🔄 已刷新第 ' + br + ' 分店的候选人（-' + money(rc) + '）');
     return;
   }
   if (act === 'hire') {

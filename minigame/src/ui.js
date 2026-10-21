@@ -313,6 +313,110 @@ function drawPanelArea(ctx, L, s) {
 /* ============================================================
  *  面板 1：经营
  * ========================================================== */
+
+/** 店长与分店编制面板（V11·Canvas 端）
+ *  与 H5 端 managerPanelHtml 对等。Canvas 上没有 tooltip，
+ *  所以**所有关键信息必须画在界面上**：
+ *  店长能力值、特性、加成百分比、编制数、候选人的日薪与等级。
+ */
+function panelManagers(ctx, x, y, w, s) {
+  var shops = Math.max(1, num(s.shops, 1));
+  var left = managerSlotsLeft(s);
+  var hasMgr = managerCount(s) > 0 || shops > 1;
+
+  GFX.card(ctx, x, y, w, 30);
+  text(ctx, '🎩 店长与分店编制', x + 10, y + 8, { size: 11.5, weight: 800, color: T.txt });
+  text(ctx, managerCount(s) + '/' + (shops - 1) + ' 名店长' + (left > 0 ? ' · 还可招 ' + left + ' 名' : ''),
+    x + w - 10, y + 9, { size: 9.5, align: 'right', color: T.txt3 });
+  y += 38;
+
+  if (shops <= 1) {
+    text(ctx, '只有总店（你亲自经营）。开设第一家分店后即可招募店长。',
+      x + 6, y + 2, { size: 10, color: T.txt3, maxW: w - 12 });
+    return y + 22;
+  }
+
+  var fee = managerCost(s);
+  for (var b = 2; b <= shops; b++) {
+    var mg = managerOfBranch(s, b);
+    var staffN = staffOfBranch(s, b).length;
+    var cap = branchStaffCap(s, b);
+    var ch = mg ? 76 : 0;
+    var cands = (s.mgrCand && s.mgrCand[b]) || [];
+    if (!mg && cands.length) ch += 26 + cands.length * 52;
+    if (!mg && !cands.length) ch += 22;
+
+    GFX.card(ctx, x, y, w, ch + 26);
+    /* 分店标题行 */
+    text(ctx, '🏪 第' + b + ' 分店', x + 10, y + 8, { size: 11, weight: 800, color: T.txt });
+    text(ctx, '编制 ' + staffN + '/' + cap, x + 96, y + 9, { size: 9.5, color: T.cyan });
+    text(ctx, mg ? ('店长 ' + mg.emoji + ' ' + mg.name) : '无店长',
+      x + w - 10, y + 9, { size: 9.5, align: 'right', color: mg ? T.amber : T.txt3 });
+    y += 26;
+
+    if (mg) {
+      var tr = managerTrait(mg);
+      var mb = managerBonus(s, b);
+      text(ctx, mg.emoji + ' ' + mg.name + '  Lv.' + mg.lv + ' ' + managerRank(mg.lv).name,
+        x + 10, y + 4, { size: 11, weight: 700, color: T.txt });
+      text(ctx, '日薪' + money(mg.wage) + ' · 能力' + Number(mg.skill).toFixed(2),
+        x + w - 10, y + 5, { size: 9.5, align: 'right', color: T.txt2 });
+      text(ctx, tr.emoji + ' ' + tr.name + ' · ' + tr.desc,
+        x + 10, y + 20, { size: 9, color: T.txt3, maxW: w - 20 });
+      text(ctx, '该店加成：客流+' + Math.round((mb.ops - 1) * 100) + '% · 速度+'
+        + Math.round((mb.speed - 1) * 100) + '% · 口碑+' + Math.round((mb.rep - 1) * 100) + '%',
+        x + 10, y + 34, { size: 9, color: T.cyan, maxW: w - 20 });
+      /* 卸任 / 调动按钮 */
+      var bw2 = 84, bh2 = 22, by = y + 48;
+      /* 调动目标：其他没店长的分店 */
+      var moveTo = 0;
+      for (var d = 2; d <= shops; d++) {
+        if (d !== b && !managerOfBranch(s, d)) { moveTo = d; break; }
+      }
+      if (moveTo) {
+        GFX.button(ctx, x + 10, by, bw2, bh2, '调到第' + moveTo + '店',
+          { kind: 'ghost', act: 'mmove', id: mg.id, extra: moveTo, size: 9, r: 7 });
+      }
+      GFX.button(ctx, x + w - 10 - bw2, by, bw2, bh2, '卸任',
+        { kind: 'ghost', act: 'mfire', id: mg.id, size: 9, r: 7 });
+      y += 74;
+    } else if (cands.length) {
+      for (var i = 0; i < cands.length; i++) {
+        var c = cands[i];
+        var ctr = managerTrait(c);
+        text(ctx, c.emoji + ' ' + c.name + '  Lv.' + c.lv + ' ' + managerRank(c.lv).name,
+          x + 10, y + 4, { size: 10.5, weight: 700, color: T.txt });
+        text(ctx, '日薪' + money(c.wage),
+          x + w - 10, y + 5, { size: 9.5, align: 'right', color: T.txt2 });
+        text(ctx, ctr.emoji + ' ' + ctr.name + ' · 能力' + Number(c.skill).toFixed(2),
+          x + 10, y + 18, { size: 9, color: T.txt3, maxW: w - 120 });
+        GFX.button(ctx, x + 10, y + 30, w - 20, 20,
+          s.cash >= fee ? ('招募 · ' + money(fee)) : ('现金不足（' + money(fee) + '）'),
+          { kind: s.cash >= fee ? 'primary' : 'ghost', act: 'mhire', id: b, extra: i,
+            disabled: s.cash < fee, size: 9.5, r: 7 });
+        y += 52;
+      }
+      /* 付费刷新：免费刷会让玩家无限刷出金牌店长 */
+      var rc = managerRerollCost(s, b);
+      GFX.button(ctx, x + 10, y, 118, 20, '🔄 刷新（' + money(rc) + '）',
+        { kind: 'ghost', act: 'mcand', id: b, disabled: s.cash < rc, size: 9, r: 7 });
+      y += 26;
+    } else {
+      text(ctx, '暂无候选人（次日刷新）', x + 6, y + 2, { size: 10, color: T.txt3 });
+      y += 22;
+    }
+  }
+
+  /* 总店编制也要画出来 —— 店长只管分店，玩家容易忘总店也要人 */
+  GFX.card(ctx, x, y, w, 26);
+  text(ctx, '🏠 总店', x + 10, y + 7, { size: 10.5, weight: 800, color: T.txt });
+  text(ctx, '编制 ' + staffOfBranch(s, 1).length + '/' + branchStaffCap(s, 1),
+    x + 72, y + 8, { size: 9.5, color: T.cyan });
+  text(ctx, '你亲自经营', x + w - 10, y + 8, { size: 9.5, align: 'right', color: T.txt3 });
+  return y + 34;
+}
+
+
 function panelManage(ctx, x, y, w, s) {
   /* V5 章节关卡：中期目标（跨 5 天推进）。
      位置放在**合同之前**而不是之后：备货页是纵向滚动的，但下方的采购/菜单
@@ -458,8 +562,23 @@ function panelManage(ctx, x, y, w, s) {
   text(ctx, '现金 ' + money(num(s.cash)), x + w - 10, y + 9,
     { size: 11, align: 'right', color: T.amber });
   var ry = y + 30;
+  /* ★ V10：只列**当前城市买得到**的原料（与 H5 端同一口径）。
+     全部 29 种列出来的话，北京的玩家会看到 20+ 行「藤椒油 ¥3.5」点下去没反应。
+     Canvas 上没有 tooltip，缺货的按钮是纯粹的误导。 */
+  var mktCity = currentCityId(s);
+  var localIngs = ingsOfCity(mktCity);
+  var localIds = {};
+  for (var li = 0; li < localIngs.length; li++) localIds[localIngs[li].id] = 1;
+  if (localIngs.length) {
+    var names = [];
+    for (var ln = 0; ln < localIngs.length; ln++) names.push(localIngs[ln].emoji + localIngs[ln].name);
+    text(ctx, '🗺️ 本地特产：' + names.join('、'), x + 8, ry + 4,
+      { size: 9.5, color: T.amber, maxW: w - 16 });
+    ry += 22;
+  }
   for (var i = 0; i < ING.length; i++) {
     var g = ING[i];
+    if (!ingAvailableAt(g.id, mktCity)) continue;      /* 当地买不到，不显示 */
     var p = s.prices[g.id] || g.base;
     var prev = s.prevPrices[g.id] || g.base;
     var up = p > prev + 0.01, down = p < prev - 0.01;
@@ -578,6 +697,10 @@ function panelManage(ctx, x, y, w, s) {
 
   /* 店长日志：H5 有这张卡，小游戏原本不显示 —— pushLog 一直在写、一直进存档，却没人读。 */
   var logs = (s.log || []).slice(-4);
+  /* ---------- V11 店长与分店编制 ----------
+     放在日志之前：人事信息比流水账重要，日志是最后才看的。 */
+  y = panelManagers(ctx, x, y, w, s);
+
   if (logs.length) {
     GFX.card(ctx, x, y, w, 30 + logs.length * 18);
     text(ctx, '📔 店长日志', x + 10, y + 8, { size: 11.5, weight: 800, color: T.txt3 });
@@ -630,6 +753,16 @@ function panelLab(ctx, x, y, w, s) {
     text(ctx, '还没有任何配方卖出过 —— 先上架一款吧', x + 10, y + 6,
       { size: 10, color: T.txt3, maxW: w - 20 });
     y += 24;
+  } else if (shown.length > 4) {
+    /* ★ 招牌进度 > 4 条时**折叠成一行摘要**。
+       这是为研发页腾出首屏：招牌卡原本按 2 列铺开，
+       5 条就吃掉 150px+，把研发树的按钮全推到裁剪区外 ——
+       实测出现过「阶段文字画出来了但0 个研发按钮可点」。
+       招牌是长期目标，研发是当次决策，后者更急。 */
+    text(ctx, shown.map(function (g) {
+      return g.emoji + g.name + ' ' + g.cups + '/' + g.need;
+    }).join('　'), x + 10, y + 4, { size: 9, color: T.txt3, maxW: w - 20 });
+    y += 20;
   } else {
     for (var sg = 0; sg < shown.length; sg += 2) {
       for (var cc = 0; cc < 2 && sg + cc < shown.length; cc++) {
@@ -684,48 +817,166 @@ function panelLab(ctx, x, y, w, s) {
     y += 52;
   }
 
+  /* ---------- 城市条：V10 要求「界面明确标示当前城市及其可用菜系」 ----------
+     H5 端有 cityBarHtml()，Canvas 端原本没有 —— 属功能不对等。
+     Canvas 没有 tooltip，所以城市名 / 可用菜系数 / 专属原料都得画出来。 */
+  y = cityBar(ctx, x, y, w, s);
+
+  /* ---------- 研发树（V10）：按城市分组 + 阶段 + 前置 ----------
+     原实现按 CUISINES 平铺，既没有"阶段"，也没有"这是哪座城的菜"。 */
+  var tree = researchTree(s);
+  /* ★ 分组排序：**本店城市 → 通用 → 异地**。
+     原顺序是 cityName 字母序，玩家一打开研发页先看到三四个
+     「需切换城市才能研发」的分组（且它们的按钮全在裁剪区外），
+     真正能研的通用配方反而被挤到首屏之外。
+     排序不是美观问题 —— 它决定玩家第一眼看到的是"能做的事"还是"做不了的事"。*/
+  /* ★ 排序：**有可研节点的组排最前**，其次本店城市、通用、异地。
+     起因是一个很难察觉的现象：GFX.button 对 `disabled` 的按钮
+     **不登记命中区**（见 gfx.js），而可研节点只有 2 个左右，
+     若它们所在分组排在第 5 位，玩家打开研发页会看到
+     「满屏按钮、一个都点不动」—— 因为看得见的多数是禁用的。
+     所以「能不能点」必须优先于「字母序好不好看」。 */
+  var hasOpen = function (g) {
+    for (var i = 0; i < g.nodes.length; i++) if (g.nodes[i].status === 'open') return 1;
+    return 0;
+  };
+  tree = tree.slice().sort(function (a, b) {
+    var oa = hasOpen(a), ob = hasOpen(b);
+    if (oa !== ob) return ob - oa;
+    var ka = a.city ? (a.city === currentCityId(s) ? 0 : 2) : 1;
+    var kb = b.city ? (b.city === currentCityId(s) ? 0 : 2) : 1;
+    if (ka !== kb) return ka - kb;
+    return a.cityName < b.cityName ? -1 : 1;
+  });
+  var doneN = 0;
+  for (var tn = 0; tn < RESEARCH_TREE.length; tn++) {
+    if ((s.recipes || []).indexOf(RESEARCH_TREE[tn].recipe) >= 0) doneN++;
+  }
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '🔬 可研发', x + 10, y + 9, { size: 12.5, weight: 800 });
-  text(ctx, '需先建对应工坊', x + w - 10, y + 10, { size: 9.5, align: 'right', color: T.txt3 });
+  text(ctx, '🔬 研发树', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, doneN + '/' + RESEARCH_TREE.length + ' 节点', x + w - 10, y + 10,
+    { size: 10, align: 'right', color: T.cyan });
   y += 40;
-  /* V9 菜系分组：可研发配方按菜系分块，每块标出工坊状态。
-     Canvas 版不做嵌套卡片（视觉噪音大），用一行小标题分隔。 */
-  for (var ci = 0; ci < CUISINES.length; ci++) {
-    var cu = CUISINES[ci];
-    var cuList = RECIPES.filter(function (r) {
-      return r.cuisine === cu.id && (s.recipes || []).indexOf(r.id) < 0;
-    });
-    if (!cuList.length) continue;
-    var cvs2 = cuisineViews(s).filter(function (v) { return v.id === cu.id; })[0];
-    var hasWs2 = cvs2 && cvs2.level > 0;
-    text(ctx, cu.emoji + ' ' + cu.name, x + 4, y + 8,
-      { size: 11, weight: 800, color: hasWs2 ? T.txt : T.txt3 });
-    /* 工坊未建线时显示可得加成，而不是"需建工坊"——
-       后者会被读成"没工坊就不能做"，但引擎里它只是可选加成。
-       Canvas 上没有 tooltip，副标题必须自己把话说全。 */
-    text(ctx, hasWs2 ? ('🏭 Lv.' + cvs2.level)
-      : ('🏭 未建 · 成本 -' + Math.round(((workshopById(cu.id) || {}).costCut || [0, 0])[1] * 100) + '%'),
+
+  for (var gi = 0; gi < tree.length; gi++) {
+    var g = tree[gi];
+    var isAch = g.cityName.indexOf('成就') >= 0;
+    /* 组标题 */
+    text(ctx, (isAch ? '🏅' : (!g.city ? '🌐' : (g.isHere ? '📍' : '🗺️'))) + ' ' + g.cityName,
+      x + 4, y + 8, { size: 11, weight: 800, color: g.isHere || isAch || !g.city ? T.txt : T.txt3 });
+    text(ctx, isAch ? '只能通过成就获得'
+      : (!g.city ? '全国都能做 · 5 条基础菜系'
+        : (g.isHere ? (g.nodes.length + ' 道本地菜') : '需切换经营城市才能研发')),
       x + w - 4, y + 8,
-      { size: 9, align: 'right', color: hasWs2 ? T.green : T.amber });
+      { size: 9, align: 'right', color: g.isHere || isAch || !g.city ? T.txt3 : T.amber });
     y += 20;
-    for (var j = 0; j < cuList.length; j++) {
-      var rr = cuList[j];
-      var cr = canResearch(s, rr.id);
-      var cost = researchCost(s, rr.id);
-      GFX.card(ctx, x, y, w, 50);
-      text(ctx, rr.emoji + ' ' + rr.name, x + 10, y + 8, { size: 12, weight: 700 });
-      text(ctx, cr.ok ? (tagNames(rr.tags) + ' · ' + money(cost))
-        : (cr.msg || '条件不足'), x + 10, y + 26,
-        { size: 9.5, color: cr.ok ? T.txt3 : T.amber, maxW: w - 100 });
-      GFX.button(ctx, x + w - 84, y + 12, 74, 26, '研发 ' + money(cost), {
-        kind: cr.ok ? 'amber' : 'ghost', act: 'research', id: rr.id,
-        disabled: !cr.ok, size: 10, r: 8,
-      });
-      y += 58;
+
+    /* 按阶段分组 */
+    var byStage = {};
+    for (var bi = 0; bi < g.nodes.length; bi++) {
+      var stg = g.nodes[bi].stage;
+      if (!byStage[stg]) byStage[stg] = [];
+      byStage[stg].push(g.nodes[bi]);
+    }
+    var keys = Object.keys(byStage).map(Number).sort(function (a, b) { return a - b; });
+    for (var ki = 0; ki < keys.length; ki++) {
+      var st = keys[ki];
+      var nodes = byStage[st];
+      if (st === 99) {
+        text(ctx, '📜 成就专属 · 不在研发树中', x + 8, y + 4,
+          { size: 9, color: T.amber, maxW: w - 16 });
+        y += 18;
+      } else if (st > 0) {
+        /* 阶段标题带前置提示 —— Canvas 没有 tooltip，
+           「需先做X」这句必须画出来，否则玩家不知道为什么点不动 */
+        var pre = [];
+        for (var pi = 0; pi < nodes.length; pi++) {
+          var pr = nodes[pi].prereq || [];
+          for (var pj = 0; pj < pr.length; pj++) {
+            var pn = treeNodeById(pr[pj]);
+            var pnr = pn && recipeById(pn.recipe);
+            if (pnr && pre.indexOf(pnr.name) < 0) pre.push(pnr.name);
+          }
+        }
+        text(ctx, '第 ' + st + ' 阶段' + (pre.length ? ' · 需先做「' + pre.join('、') + '」' : ''),
+          x + 8, y + 4, { size: 9, color: T.cyan, maxW: w - 16 });
+        y += 18;
+      }
+      for (var ni = 0; ni < nodes.length; ni++) {
+        var nd = nodes[ni];
+        var nr = recipeById(nd.recipe);
+        if (!nr) continue;
+        var canR = (nd.status === 'open') ? { ok: true } : { ok: false, msg: '' };
+        var why = '';
+        if (nd.status === 'away') {
+          var oc = cityById(nr.city);
+          why = '需切换到' + ((oc && oc.name) || '该城市') + '才能研发';
+        } else if (nd.status === 'locked') {
+          why = nd.lockMsg || '前置未满足';
+        } else if (nd.status === 'ach') {
+          why = '成就专属 · 不可研发';
+        } else if (!canR.ok && nd.status === 'open') {
+          canR = canResearch(s, nd.recipe);
+          why = canR.msg || '';
+        }
+        GFX.card(ctx, x, y, w, 50);
+        text(ctx, nr.emoji + ' ' + nr.name, x + 10, y + 8, { size: 12, weight: 700 });
+        text(ctx, nr.city ? (nr.city === currentCityId(s) ? '📍本地' : '🗺️' + ((cityById(nr.city) || {}).name || ''))
+          : (tagNames(nr.tags)),
+        x + 10, y + 26, { size: 9.5, color: T.txt3, maxW: w - 100 });
+        if (why) {
+          text(ctx, why, x + 10, y + 26, { size: 9.5, color: T.amber, maxW: w - 100 });
+        }
+        GFX.button(ctx, x + w - 84, y + 12, 74, 26,
+          nd.status === 'ach' ? '成就获得' : ('研发 ' + money(nd.cost)),
+        {
+          kind: canR.ok ? 'amber' : 'ghost', act: 'research', id: nd.recipe,
+          disabled: !canR.ok, size: 10, r: 8,
+        });
+        y += 58;
+      }
     }
     y += 4;
   }
   return y + 10;
+}
+
+/** 城市条（V10·Canvas 端）：当前城市 + 可用菜系数 + 本地特色 + 专属原料。
+ *  与 H5 端 cityBarHtml 对等。
+ */
+function cityBar(ctx, x, y, w, s) {
+  var cid = currentCityId(s);
+  var city = cityById(cid);
+  var local = cuisinesOfCity(cid);
+  var localIngs = ingsOfCity(cid);
+  var avail = availableCuisineIds(s).length;
+  var v = s.venue || {};
+  var prov = provinceById(v.provId);
+
+  /* ★ 高度要克制（38~56px）。
+     Canvas 首屏只有约 600px，而招牌配方卡已经占了 ~150px、
+     城市条再高一点，研发树的按钮就全被推出裁剪区 ——
+     GFX.addHit 在裁剪区外**不登记命中区**，于是
+     「文字画出来了但一个按钮点不到」，实测就出现过 0 个研发按钮。
+     所以城市信息压到两行内，必要时把原料名截断而不是换行。 */
+  var h = 38;
+  GFX.card(ctx, x, y, w, h);
+  text(ctx, '📍', x + 10, y + 9, { size: 13 });
+  text(ctx, (city ? city.name : cid) + (prov ? '·' + prov.name : ''),
+    x + 28, y + 8, { size: 11.5, weight: 800, color: T.txt });
+  /* ★ 文案与 H5 端 cityBarHtml 保持一致（「本店可用菜系 N 个」）。
+     两版措辞不统一会让玩家怀疑是两个不同的功能。*/
+  text(ctx, '本店可用菜系 ' + avail + ' 个' + (local.length ? ' · 本地特色 ' + local.length + ' 系' : ' · 本地暂无特色'),
+    x + w - 10, y + 9, { size: 9, align: 'right', color: T.cyan });
+  if (localIngs.length) {
+    h = 56;
+    var names = [];
+    for (var i = 0; i < localIngs.length; i++) names.push(localIngs[i].emoji + localIngs[i].name);
+    GFX.card(ctx, x, y, w, h);
+    text(ctx, '🗺️ ' + names.join('、'), x + 10, y + 40,
+      { size: 9, color: T.amber, maxW: w - 20 });
+  }
+  return y + h + 6;
 }
 
 /* ============================================================
@@ -992,7 +1243,7 @@ function panelAch(ctx, x, y, w, s) {
   text(ctx, got + '/' + ACHIEVEMENTS.length, x + w - 10, y + 10,
     { size: 11, align: 'right', color: T.amber });
   y += 44;
-  text(ctx, '本局达成给现金；跨局首次达成额外给 ★（32 条共 150 ★）',
+  text(ctx, '本局达成给现金；跨局首次达成额外给 ★（' + achStarText() + '）',
     x + 10, y - 6, { size: 9.5, color: T.txt3, maxW: w - 20 });
 
   var cols = 3, cw = (w - 8 * (cols - 1)) / cols;

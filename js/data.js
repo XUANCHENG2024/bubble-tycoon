@@ -38,7 +38,15 @@ const CFG = {
   /* 品牌声望点 → 开局创业基金：基金 = RATE * √bp，封顶 CAP。
      用 √ 而不是线性，是为了让后期收益递减 —— 声望点曾经直接乘客流
      （线性且无上限），结果「需求涨、供给不涨」，参见 trafficOf 的注释。 */
-  BP_START_RATE: 45,
+  /* V10 重新标定：成就 ★ 总量从 150 涨到 239（新增 12 条城市/成就食谱成就）。
+     资金曲线是 ⌊rate×√★⌋，封顶不变（900）——
+     ★总量涨了但**满星时的开局资金不变**，否则老玩家与新玩家的差距会失控。
+     rate 由 45 降到 30：原来的 45 在 239★ 时给 45×15.5≈¥700，
+     对照 150★ 时的 45×12.2≈¥550，涨幅+27%；
+     30 在 239★ 时给 30×15.5≈¥465，150★ 时 30×12.2≈¥366，涨幅 +27% 但绝对值更低，
+     中位玩家（★100~150）的开局资金从 ¥450~550 降到 ¥300~366，
+     与新增的 42 款城市菜带来的额外开销相称（城市菜造价高于通用菜）。 */
+  BP_START_RATE: 30,
   BP_START_CAP: 900,
   /* 打烊三选一：每 CARD_EVERY 天抽一次，最多持有 CARD_MAX 张（抽完就停） */
   CARD_EVERY: 3,
@@ -59,13 +67,57 @@ const CFG = {
   RANK_SCORE_MAX: 2147483647,
 };
 
-/* ---------- 原料 ---------- */
+/* ---------- 原料 ----------
+ *
+ * ★ `origin`（城市专属原料的产地）—— 为什么加在**同一张表**而不是另开一张：
+ *   原料参与了太多链路：采购价、库存、扣料、备货、进货建议、成本核算。
+ *   另开一张"城市原料"表的话，每条链路都得写"先查主表再查城市表"的分支，
+ *   漏一处就是"能做但买不到"或"扣料时读错价"这类静默 bug。
+ *   放在同一张表，`origin` 只是**多一个筛选维度**，主流程一行都不用改。
+ *
+ *   origin = 城市 id（6 位）时：该原料**只在对应城市有货**（见 engine 的 ingAvailableAt）。
+ *   origin 为空 = 全国都能买的基础原料。
+ *
+ *   base 是**基准成本**；城市原料的波动vol 更大（冷链/时效性），
+ *   这也是"去外地开���"要承担的成本 —— 换个城市能吃到便宜原料，
+ *   但卖的也是另一种菜，不是白赚。 */
 const ING = [
   { id: 'tea',   name: '茶叶', emoji: '🍃', base: 1.0, vol: 0.16, color: '#7BD389' },
   { id: 'milk',  name: '牛奶', emoji: '🥛', base: 1.5, vol: 0.20, color: '#9FD8FF' },
   { id: 'sugar', name: '糖浆', emoji: '🍯', base: 0.5, vol: 0.24, color: '#FFD97D' },
   { id: 'pearl', name: '珍珠', emoji: '🫧', base: 1.6, vol: 0.30, color: '#C7A6FF' },
   { id: 'fruit', name: '鲜果', emoji: '🍓', base: 2.4, vol: 0.34, color: '#FF8FB1' },
+
+  /* ---- 城市专属原料（只在产地城市有货）----
+     成本比通用原料高一档：这既避免"全国随便买"削弱城市特色，
+     也让"去成都才能做竹叶青"成为真实的取舍，而不是换个城市白赚。 */
+  { id: 'tea_gj',  name: '陈皮普洱', emoji: '🍂', base: 3.2, vol: 0.30, color: '#C98A5B', origin: '440100' },
+  { id: 'pomelo',  name: '新会陈皮', emoji: '🍊', base: 3.6, vol: 0.32, color: '#FFB26B', origin: '440700' },
+  { id: 'inkfruit',name: '油柑果',   emoji: '🫒', base: 3.4, vol: 0.34, color: '#A8D26B', origin: '440300' },
+  { id: 'osman',   name: '桂花糖',   emoji: '🌼', base: 2.6, vol: 0.22, color: '#FFD97D', origin: '320500' },
+  { id: 'osman_tea', name: '本地窨茶', emoji: '🌿', base: 3.0, vol: 0.26, color: '#7BD389', origin: '320500' },
+  { id: 'spicy',   name: '藤椒油',   emoji: '🌶️', base: 2.9, vol: 0.28, color: '#FF6B6B', origin: '510100' },
+  { id: 'sichuan', name: '郫县豆瓣', emoji: '🫘', base: 3.4, vol: 0.30, color: '#C75B4B', origin: '510100' },
+  { id: 'beeswax', name: '蜂王浆',   emoji: '🍯', base: 4.2, vol: 0.28, color: '#FFB26B', origin: '420100' },
+  { id: 'rice',    name: '江米',     emoji: '🌾', base: 2.2, vol: 0.20, color: '#E8D9A0', origin: '420100' },
+  { id: 'hami',    name: '哈密瓜',   emoji: '🍈', base: 3.0, vol: 0.36, color: '#9BD36B', origin: '650100' },
+  { id: 'goji',    name: '宁夏枸杞', emoji: '🫐', base: 3.3, vol: 0.24, color: '#FF6B6B', origin: '640100' },
+  { id: 'bayberry',name: '杨梅',emoji: '🫐', base: 3.8, vol: 0.42, color: '#E85D8A', origin: '330100' },
+  { id: 'snowplum',name: '青梅',     emoji: '🫒', base: 3.1, vol: 0.38, color: '#B5D96B', origin: '330100' },
+  { id: 'xianyang',name: '关中枣',   emoji: '🌰', base: 2.8, vol: 0.26, color: '#C98A5B', origin: '610100' },
+  { id: 'chestnut',name: '商洛板栗', emoji: '🌰', base: 3.0, vol: 0.28, color: '#D9A566', origin: '610100' },
+  { id: 'chillies',name: '剁椒',     emoji: '🌶️', base: 2.8, vol: 0.32, color: '#FF6B6B', origin: '430100' },
+  { id: 'shrimp',  name: '河虾',     emoji: '🦐', base: 4.6, vol: 0.40, color: '#FF9F9F', origin: '430100' },
+  { id: 'saffron', name: '藏红花',   emoji: '🌷', base: 5.2, vol: 0.30, color: '#FF8FB1', origin: '540100' },
+  { id: 'butter',  name: '酥油',     emoji: '🧈', base: 3.7, vol: 0.26, color: '#FFE9A8', origin: '540100' },
+  { id: 'mangosteen', name: '树熟果', emoji: '🍈', base: 4.0, vol: 0.38, color: '#B87FD9', origin: '460200' },
+  { id: 'coconut',  name: '文昌椰',  emoji: '🥥', base: 3.3, vol: 0.34, color: '#C7A6FF', origin: '460200' },
+  { id: 'urjujube', name: '和田红枣', emoji: '🌰', base: 2.9, vol: 0.22, color: '#C75B4B', origin: '650100' },
+  { id: 'sglutinous', name: '太湖糯米', emoji: '🌾', base: 2.6, vol: 0.24, color: '#E8D9A0', origin: '320500' },
+  { id: 'njrice', name: '南京米仁', emoji: '🍚', base: 2.5, vol: 0.22, color: '#F0E6C8', origin: '320100' },
+  { id: 'sichuanpep', name: '汉源花椒', emoji: '🌰', base: 5.6, vol: 0.34, color: '#FF8F5B', origin: '510100' },
+  { id: 'nanjing', name: '金陵金桂', emoji: '🌸', base: 3.5, vol: 0.28, color: '#FFD97D', origin: '320100' },
+  { id: 'chenpi_cd', name: '川陈皮',  emoji: '🍂', base: 3.9, vol: 0.32, color: '#C98A5B', origin: '510100' },
 ];
 
 /* ---------- 口味标签 ---------- */
@@ -107,6 +159,34 @@ const CUISINES = [
   { id: 'coffee',  name: '咖啡系',     emoji: '☕', color: '#FFB26B', desc: '打工人刚需，客单价高' },
   { id: 'matcha',  name: '抹茶系',     emoji: '🍵', color: '#7BD389', desc: '毛利最高，但小众' },
   { id: 'dessert', name: '甜品系',     emoji: '🍮', color: '#FFD97D', desc: '靠糖与珍珠取胜，成本敏感' },
+
+  /* ---- 城市特色菜系（V10）----
+     ★ `city` 非空 = 该菜系**只在对应城市存在**：
+       在别的城市研发页看不到它、也做不出它的菜。
+     ★ 为什么不塞进上面 5 个通用系（而是各成一个新系）：
+       城市特色菜的**卖点是地域身份**，不是口味标签。
+       若并入通用系（比如成都的藤椒菜算"鲜果茶系"），
+       玩家在任何城市都能做，"来成都开���"这件事就没有意义了。
+       独立成系还带来另一个好处：工坊是"每系一条产线"，
+       城市系同样能开自己的产线，降本/权重加成一样成立。
+     ★ 数量克制在 14 座重点城市 —— 现有 CITIES 有 272 座，
+       若每城都配一套，数据量与实际游玩频次严重不匹配
+       （一局 30 天，玩家最多去过一两个城市）。
+       其余城市走通用系 + 当地原料的通用组合，不做独有系。 */
+  { id: 'gz_canton',  name: '广府凉茶系', emoji: '🍵', color: '#8FD9B6', city: '440100', desc: '广州 · 清润为先，药材与糖水底子' },
+  { id: 'xs_chenpi',  name: '新会陈皮系', emoji: '🍊', color: '#FFB26B', city: '440700', desc: '江门 · 陈皮入茶，理气助消化' },
+  { id: 'sz_yingcha', name: '潮汕工夫系', emoji: '🫖', color: '#C98A5B', city: '440300', desc: '深圳 · 油柑与单丛，冷萃耐泡' },
+  { id: 'su_osman',   name: '苏式桂花系', emoji: '🌼', color: '#FFD97D', city: '320500', desc: '苏州 · 窨茶与桂花糖，香气内敛' },
+  { id: 'nj_luyu',    name: '金陵茶饮系', emoji: '🌸', color: '#FFB6C1', city: '320100', desc: '南京 · 桂花鸭血风味的本地茶底' },
+  { id: 'hz_bayberry',name: '杭帮果茶系', emoji: '🫐', color: '#E85D8A', city: '330100', desc: '杭州 · 杨梅与青梅，时令性极强' },
+  { id: 'cd_rattan',  name: '巴蜀麻辣系', emoji: '🌶️', color: '#FF6B6B', city: '510100', desc: '成都 · 藤椒与豆瓣，重口但复购高' },
+  { id: 'wh_honeymilk', name: '江汉蜜乳系', emoji: '🍯', color: '#FFCF6B', city: '420100', desc: '武汉 · 蜂王浆与江米，温润挂喉' },
+  { id: 'cs_chili',   name: '湘味辛香系', emoji: '🌶️', color: '#FF8F5B', city: '430100', desc: '长沙 · 剁椒与河虾，香得直接' },
+  { id: 'xa_guokui',  name: '关中枣茶系', emoji: '🌰', color: '#C98A5B', city: '610100', desc: '西安 · 关中枣与板栗，秋冬进补' },
+  { id: 'ur_melon',   name: '西域蜜瓜系', emoji: '🍈', color: '#9BD36B', city: '650100', desc: '乌鲁木齐 · 哈密瓜与枸杞，甜度爆表' },
+  { id: 'lz_saffron', name: '高原酥油系', emoji: '🧈', color: '#FFE9A8', city: '540100', desc: '拉萨 · 藏红花与酥油，御寒暖身' },
+  { id: 'sanya_tropic', name: '椰林热带系', emoji: '🥥', color: '#C7A6FF', city: '460200', desc: '三亚 · 椰与树熟果，清凉度假风' },
+  { id: 'yc_goji',    name: '宁夏杞饮系', emoji: '🫐', color: '#FF6B6B', city: '640100', desc: '银川 · 枸杞与清真奶，养生路线' },
 ];
 
 /**
@@ -193,6 +273,30 @@ const CRAFT_WORKSHOPS = [
   { id: 'coffee',  name: '咖啡工坊',     emoji: '☕', cost: [0, 380, 1250, 2700], costCut: [0, 0.16, 0.27, 0.34], saleBonus: [0, 0.08, 0.20, 0.34], researchCut: 0.30, tier3Bonus: 0.18 },
   { id: 'matcha',  name: '抹茶工坊',     emoji: '🍵', cost: [0, 360, 1200, 2600], costCut: [0, 0.16, 0.27, 0.34], saleBonus: [0, 0.08, 0.20, 0.34], researchCut: 0.30, tier3Bonus: 0.18 },
   { id: 'dessert', name: '甜品工坊',     emoji: '🍮', cost: [0, 320, 1050, 2300], costCut: [0, 0.16, 0.27, 0.34], saleBonus: [0, 0.08, 0.20, 0.34], researchCut: 0.30, tier3Bonus: 0.18 },
+
+  /* ---- 城市特色系工坊（V10）----
+     ★ 造价统一比通用系**贵一档**（1 级 ¥420 vs ¥260~380）：
+       城市菜的原料更贵、波动更大（冰鲜/时效），
+       产线理应更贵 —— 这也让"要不要为了城市味多花一笔"成为真取舍。
+     ★ 降本幅度**更高**（Lv.1 就 −18%）：城市系的原料成本占比大，
+       自有产线的省料收益理应更显著，否则盖不住更高的造价。
+     ★ researchCut 只有 20%（低于通用系 30%）：
+       城市配方本身材料就贵，研发费再打 3 折会让"研发城市菜"变成纯优选，
+       反而抹掉了"换城市要重新投入"的成本感。 */
+  { id: 'gz_canton',    name: '广府凉茶工坊',   emoji: '🍵', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'xs_chenpi',    name: '新会陈皮工坊',   emoji: '🍊', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'sz_yingcha',   name: '潮汕工夫工坊',   emoji: '🫖', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'su_osman',     name: '苏式桂花工坊',   emoji: '🌼', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'nj_luyu',      name: '金陵茶饮工坊',   emoji: '🌸', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'hz_bayberry',  name: '杭帮果茶工坊',   emoji: '🫐', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'cd_rattan',    name: '巴蜀麻辣工坊',   emoji: '🌶️', cost: [0, 440, 1300, 2700], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'wh_honeymilk', name: '江汉蜜乳工坊',   emoji: '🍯', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'cs_chili',     name: '湘味辛香工坊',   emoji: '🌶️', cost: [0, 440, 1300, 2700], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'xa_guokui',    name: '关中枣茶工坊',   emoji: '🌰', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'ur_melon',     name: '西域蜜瓜工坊',   emoji: '🍈', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'lz_saffron',   name: '高原酥油工坊',   emoji: '🧈', cost: [0, 440, 1300, 2700], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'sanya_tropic', name: '椰林热带工坊',   emoji: '🥥', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
+  { id: 'yc_goji',      name: '宁夏杞饮工坊',   emoji: '🫐', cost: [0, 420, 1250, 2600], costCut: [0, 0.18, 0.29, 0.36], saleBonus: [0, 0.10, 0.22, 0.36], researchCut: 0.20, tier3Bonus: 0.20 },
 ];
 
 /**
@@ -289,6 +393,350 @@ const RECIPES = [
     req: { milk: 3, sugar: 2, pearl: 1 }, price: 30, tier: 3,
     research: { cash: 900, ing: { milk: 22, sugar: 14, pearl: 10 } },
     desc: '甜品系第二款：奶冻加珍珠，与黑糖鹿丸共用甜品客群。' },
+
+/* ============================================================
+ *  V10：城市特色食谱（追加进 RECIPES）
+ *
+ *  ★ `city` 非空 = 该食谱**只在所属城市可用**：
+ *    在别的城市，研发页不显示它、也做不出它（见 engine.recipeAvailableAt）。
+ *  ★ 定价明显高于通用菜（¥24~38 vs ¥19~32）：
+ *    城市原料更贵（冰鲜 / 时效 / 冷链），若定价持平，
+ *    「去外地开厂」就成了纯优选 —— 地域取舍必须真的有代价。
+ *  ★ tier 直接复用为**研发阶段**（1~3），与 RESEARCH_TREE.stage 一致，
+ *    避免两处数字各说各话。
+ * ============================================================ */
+  { id: 'gz_lishui', name: '癍痧凉茶', emoji: '🌿', tags: ['tea', 'fresh'], pop: 92, cuisine: 'gz_canton',
+    req: { tea_gj: 2, sugar: 2 }, price: 29, tier: 1, city: '440100',
+    research: { cash: 540, ing: { tea_gj: 10, sugar: 10 } },
+    desc: '广府系入门：本地陈皮配茶叶，清润不燥。' },
+  { id: 'gz_shuangjiang', name: '双皮奶盏', emoji: '🥛', tags: ['milky', 'sweet'], pop: 98, cuisine: 'gz_canton',
+    req: { milk: 3, sugar: 2, tea_gj: 1 }, price: 30, tier: 2, city: '440100',
+    research: { cash: 860, ing: { milk: 15, sugar: 10, tea_gj: 5 } },
+    desc: '广府系第二款：奶皮配陈皮茶底，甜口路线。' },
+  { id: 'gz_qinggua', name: '广府五花茶', emoji: '🍵', tags: ['tea', 'fresh'], pop: 104, cuisine: 'gz_canton',
+    req: { tea_gj: 1, sugar: 2 }, price: 33, tier: 3, city: '440100',
+    research: { cash: 1120, ing: { tea_gj: 10, sugar: 5 } },
+    desc: '广府系第三款：陈皮与本地茶叶同煮，去油解腻。' },
+  { id: 'xs_chenpitea', name: '新会陈皮茶', emoji: '🍊', tags: ['tea', 'rich'], pop: 96, cuisine: 'xs_chenpi',
+    req: { pomelo: 2, tea: 2 }, price: 30, tier: 1, city: '440700',
+    research: { cash: 540, ing: { pomelo: 10, tea: 10 } },
+    desc: '新会系入门：三年陈皮单泡，香气厚。' },
+  { id: 'xs_xianru', name: '柑香鲜乳', emoji: '🥛', tags: ['milky', 'fruity'], pop: 102, cuisine: 'xs_chenpi',
+    req: { milk: 3, pomelo: 2, sugar: 1 }, price: 32, tier: 2, city: '440700',
+    research: { cash: 860, ing: { milk: 15, pomelo: 10, sugar: 5 } },
+    desc: '新会系第二款：柑皮配厚乳，暖胃路线。' },
+  { id: 'xs_laobian', name: '陈皮绿豆沙', emoji: '🍮', tags: ['sweet', 'fresh'], pop: 108, cuisine: 'xs_chenpi',
+    req: { pomelo: 1, sugar: 3 }, price: 34, tier: 3, city: '440700',
+    research: { cash: 1120, ing: { pomelo: 5, sugar: 15 } },
+    desc: '新会系第三款：广式糖水底，去暑招牌。' },
+  { id: 'sz_dancong', name: '凤凰单丛', emoji: '🫖', tags: ['tea', 'fresh'], pop: 100, cuisine: 'sz_yingcha',
+    req: { tea: 3, inkfruit: 1 }, price: 30, tier: 1, city: '440300',
+    research: { cash: 540, ing: { tea: 15, inkfruit: 5 } },
+    desc: '潮汕工夫入门：单丛配油柑，先香后回甘。' },
+  { id: 'sz_huicha', name: '潮式乌龙奶茶', emoji: '🧋', tags: ['milky', 'tea'], pop: 106, cuisine: 'sz_yingcha',
+    req: { tea: 3, milk: 2, inkfruit: 1 }, price: 32, tier: 2, city: '440300',
+    research: { cash: 860, ing: { tea: 15, milk: 10, inkfruit: 5 } },
+    desc: '潮汕系第二款：工夫茶底转奶茶，受众更广。' },
+  { id: 'sz_niuyecha', name: '油柑冷萃', emoji: '🫒', tags: ['fresh', 'fruity'], pop: 110, cuisine: 'sz_yingcha',
+    req: { inkfruit: 3, tea: 1, sugar: 2 }, price: 36, tier: 3, city: '440300',
+    research: { cash: 1120, ing: { inkfruit: 15, tea: 5, sugar: 10 } },
+    desc: '潮汕系第三款：油柑现萃，酸涩回甘两段。' },
+  { id: 'su_guixia', name: '桂花窨茶', emoji: '🌼', tags: ['tea', 'fresh'], pop: 94, cuisine: 'su_osman',
+    req: { osman_tea: 2, osman: 2 }, price: 29, tier: 1, city: '320500',
+    research: { cash: 540, ing: { osman_tea: 10, osman: 10 } },
+    desc: '苏式系入门：本地窨茶配桂花糖。' },
+  { id: 'su_liusheng', name: '六窨鲜奶茶', emoji: '🥛', tags: ['milky', 'tea'], pop: 100, cuisine: 'su_osman',
+    req: { osman_tea: 2, milk: 2, osman: 1 }, price: 31, tier: 2, city: '320500',
+    research: { cash: 860, ing: { osman_tea: 10, milk: 10, osman: 5 } },
+    desc: '苏式系第二款：多次窨制的茶底，香气层次足。' },
+  { id: 'su_lianhua', name: '桂花酒酿', emoji: '🍶', tags: ['sweet', 'fresh'], pop: 106, cuisine: 'su_osman',
+    req: { osman: 2, sglutinous: 2, sugar: 2 }, price: 34, tier: 3, city: '320500',
+    research: { cash: 1120, ing: { osman: 10, sglutinous: 10, sugar: 10 } },
+    desc: '苏式系第三款：桂花配酒酿米，江南口味。' },
+  { id: 'nj_guixia', name: '金陵桂花茶', emoji: '🌸', tags: ['tea', 'fresh'], pop: 95, cuisine: 'nj_luyu',
+    req: { nanjing: 2, tea: 2 }, price: 30, tier: 1, city: '320100',
+    research: { cash: 540, ing: { nanjing: 10, tea: 10 } },
+    desc: '金陵系入门：本地桂花配清茶。' },
+  { id: 'nj_hongcha', name: '鸭血粉丝汤茶', emoji: '🍲', tags: ['rich', 'tea'], pop: 101, cuisine: 'nj_luyu',
+    req: { nanjing: 1, tea: 2, sugar: 2 }, price: 31, tier: 2, city: '320100',
+    research: { cash: 860, ing: { nanjing: 5, tea: 10, sugar: 10 } },
+    desc: '金陵系第二款：取鸭血粉丝的醇厚，做成热饮。' },
+  { id: 'nj_tangyuan', name: '桂花小圆子', emoji: '🥣', tags: ['sweet', 'milky'], pop: 107, cuisine: 'nj_luyu',
+    req: { njrice: 3, nanjing: 1, sugar: 2 }, price: 33, tier: 3, city: '320100',
+    research: { cash: 1120, ing: { njrice: 15, nanjing: 5, sugar: 10 } },
+    desc: '金陵系第三款：本地小圆子配桂花，冬日限定感。' },
+  { id: 'hz_yangmei', name: '杨梅冰茶', emoji: '🫐', tags: ['fruity', 'fresh'], pop: 103, cuisine: 'hz_bayberry',
+    req: { bayberry: 3, tea: 2, sugar: 2 }, price: 32, tier: 1, city: '330100',
+    research: { cash: 600, ing: { bayberry: 15, tea: 10, sugar: 10 } },
+    desc: '杭帮系入门：本地杨梅现捣，酸甜直给。' },
+  { id: 'hz_qingmei', name: '青梅龙井', emoji: '🍵', tags: ['tea', 'fresh'], pop: 107, cuisine: 'hz_bayberry',
+    req: { snowplum: 2, tea: 2, sugar: 1 }, price: 33, tier: 2, city: '330100',
+    research: { cash: 860, ing: { snowplum: 10, tea: 10, sugar: 5 } },
+    desc: '杭帮系第二款：青梅配龙井，解腻一绝。' },
+  { id: 'hz_lotus', name: '西湖藕粉', emoji: '🌸', tags: ['sweet', 'milky'], pop: 111, cuisine: 'hz_bayberry',
+    req: { snowplum: 2, bayberry: 1, sugar: 3 }, price: 35, tier: 3, city: '330100',
+    research: { cash: 1120, ing: { snowplum: 5, sugar: 10 } },
+    desc: '杭帮系第三款：本地青梅配杨梅，酸甜收尾。' },
+  { id: 'cd_rattancha', name: '藤椒青提', emoji: '🌶️', tags: ['fresh', 'fruity'], pop: 99, cuisine: 'cd_rattan',
+    req: { sichuanpep: 1, sichuan: 1, fruit: 2, sugar: 1 }, price: 31, tier: 1, city: '510100',
+    research: { cash: 600, ing: { sichuanpep: 10, fruit: 10, sugar: 5 } },
+    desc: '巴蜀系入门：藤椒配青提，麻而清香。' },
+  { id: 'cd_douban', name: '豆瓣奶绿', emoji: '🍵', tags: ['milky', 'rich'], pop: 105, cuisine: 'cd_rattan',
+    req: { sichuan: 2, tea: 2, milk: 1 }, price: 34, tier: 2, city: '510100',
+    research: { cash: 860, ing: { sichuan: 10, tea: 10, milk: 5 } },
+    desc: '巴蜀系第二款：郫县豆瓣入奶绿，重口反差。' },
+  { id: 'cd_mala', name: '麻辣鸳鸯', emoji: '🌶️', tags: ['rich', 'tea'], pop: 113, cuisine: 'cd_rattan',
+    req: { sichuan: 2, sichuanpep: 2, tea: 2 }, price: 38, tier: 3, city: '510100',
+    research: { cash: 1120, ing: { sichuan: 10, sichuanpep: 10, tea: 10 } },
+    desc: '巴蜀系第三款：麻辣鸳鸯，客单价最高的一款。' },
+  { id: 'wh_fengwang', name: '蜂王浆乳茶', emoji: '🍯', tags: ['milky', 'rich'], pop: 98, cuisine: 'wh_honeymilk',
+    req: { beeswax: 2, milk: 3, tea: 1 }, price: 32, tier: 1, city: '420100',
+    research: { cash: 600, ing: { beeswax: 10, milk: 15, tea: 5 } },
+    desc: '江汉系入门：本地蜂王浆挂杯，营养卖点。' },
+  { id: 'wh_mian', name: '江米珍珠糊', emoji: '🥣', tags: ['sweet', 'rich'], pop: 104, cuisine: 'wh_honeymilk',
+    req: { rice: 3, milk: 2, beeswax: 1 }, price: 34, tier: 2, city: '420100',
+    research: { cash: 860, ing: { rice: 15, milk: 10, beeswax: 5 } },
+    desc: '江汉系第二款：江米配珍珠，温润饱腹。' },
+  { id: 'wh_litchi', name: '荔枝蜜桃', emoji: '🍑', tags: ['fruity', 'sweet'], pop: 109, cuisine: 'wh_honeymilk',
+    req: { fruit: 3, beeswax: 1, sugar: 2 }, price: 36, tier: 3, city: '420100',
+    research: { cash: 1120, ing: { fruit: 15, beeswax: 5, sugar: 10 } },
+    desc: '江汉系第三款：夏末荔枝配本地蜂蜜，季节性强。' },
+  { id: 'cs_duojiao', name: '剁椒果茶', emoji: '🌶️', tags: ['fruity', 'fresh'], pop: 100, cuisine: 'cs_chili',
+    req: { chillies: 2, fruit: 2, sugar: 1 }, price: 30, tier: 1, city: '430100',
+    research: { cash: 600, ing: { chillies: 10, fruit: 10, sugar: 5 } },
+    desc: '湘味系入门：剁椒配鲜果，辣得直接。' },
+  { id: 'cs_xiaolong', name: '小龙虾鲜乳', emoji: '🦐', tags: ['rich', 'milky'], pop: 106, cuisine: 'cs_chili',
+    req: { shrimp: 3, milk: 2, sugar: 1 }, price: 35, tier: 2, city: '430100',
+    research: { cash: 860, ing: { shrimp: 15, milk: 10, sugar: 5 } },
+    desc: '湘味系第二款：河虾配厚乳，夜宵档王牌。' },
+  { id: 'cs_duojiang', name: '剁椒奶盖', emoji: '🌶️', tags: ['rich', 'tea'], pop: 112, cuisine: 'cs_chili',
+    req: { chillies: 2, tea: 2, milk: 2, sugar: 2 }, price: 37, tier: 3, city: '430100',
+    research: { cash: 1180, ing: { chillies: 10, tea: 10, milk: 10, sugar: 10 } },
+    desc: '湘味系第三款：剁椒配奶盖，辣与醇并存。' },
+  { id: 'xa_zaocha', name: '关中枣茶', emoji: '🌰', tags: ['tea', 'sweet'], pop: 95, cuisine: 'xa_guokui',
+    req: { xianyang: 2, tea: 2, sugar: 1 }, price: 30, tier: 1, city: '610100',
+    research: { cash: 600, ing: { xianyang: 10, tea: 10, sugar: 5 } },
+    desc: '关中系入门：本地红枣配茶，温补路线。' },
+  { id: 'xa_banli', name: '板栗拿铁', emoji: '🌰', tags: ['milky', 'rich'], pop: 101, cuisine: 'xa_guokui',
+    req: { chestnut: 3, milk: 2, tea: 1 }, price: 32, tier: 2, city: '610100',
+    research: { cash: 860, ing: { chestnut: 15, milk: 10, tea: 5 } },
+    desc: '关中系第二款：商洛板栗打浆，秋冬爆款。' },
+  { id: 'xa_fengmi', name: '枣泥八宝', emoji: '🍮', tags: ['sweet', 'rich'], pop: 107, cuisine: 'xa_guokui',
+    req: { xianyang: 3, sugar: 3, milk: 1 }, price: 34, tier: 3, city: '610100',
+    research: { cash: 1120, ing: { xianyang: 15, sugar: 15, milk: 5 } },
+    desc: '关中系第三款：枣泥打底，甜品客群。' },
+  { id: 'ur_hami', name: '哈密瓜奶昔', emoji: '🍈', tags: ['sweet', 'fruity'], pop: 104, cuisine: 'ur_melon',
+    req: { hami: 3, milk: 2 }, price: 32, tier: 1, city: '650100',
+    research: { cash: 540, ing: { hami: 15, milk: 10 } },
+    desc: '西域系入门：哈密瓜现打，甜度爆表。' },
+  { id: 'ur_goji', name: '枸杞蜜瓜', emoji: '🫐', tags: ['sweet', 'fruity'], pop: 108, cuisine: 'ur_melon',
+    req: { urjujube: 2, hami: 2, sugar: 1 }, price: 34, tier: 2, city: '650100',
+    research: { cash: 860, ing: { urjujube: 10, hami: 10, sugar: 5 } },
+    desc: '西域系第二款：和田红枣配哈密瓜，养生甜品。' },
+  { id: 'ur_nang', name: '馕茶组合', emoji: '🫓', tags: ['rich', 'tea'], pop: 112, cuisine: 'ur_melon',
+    req: { hami: 1, urjujube: 2, tea: 2, sugar: 2 }, price: 36, tier: 3, city: '650100',
+    research: { cash: 1180, ing: { hami: 5, urjujube: 10, tea: 10, sugar: 10 } },
+    desc: '西域系第三款：本地馕配茶，饱腹型产品。' },
+  { id: 'lz_suyou', name: '酥油奶茶', emoji: '🧈', tags: ['rich', 'milky'], pop: 108, cuisine: 'lz_saffron',
+    req: { butter: 3, milk: 2, tea: 2 }, price: 34, tier: 1, city: '540100',
+    research: { cash: 600, ing: { butter: 15, milk: 10, tea: 10 } },
+    desc: '高原系入门：本地酥油化茶，御寒刚需。' },
+  { id: 'lz_zanghong', name: '藏红花酥油', emoji: '🌷', tags: ['rich', 'sweet'], pop: 112, cuisine: 'lz_saffron',
+    req: { saffron: 1, butter: 2, sugar: 2 }, price: 38, tier: 2, city: '540100',
+    research: { cash: 860, ing: { saffron: 5, butter: 10, sugar: 10 } },
+    desc: '高原系第二款：藏红花提色，香气独特。' },
+  { id: 'lz_niurou', name: '牦牛酥油面茶', emoji: '🧈', tags: ['rich', 'sweet'], pop: 116, cuisine: 'lz_saffron',
+    req: { butter: 3, sugar: 3 }, price: 40, tier: 3, city: '540100',
+    research: { cash: 1120, ing: { butter: 15, sugar: 15 } },
+    desc: '高原系第三款：酥油面茶，热量高但客群忠实。' },
+  { id: 'sy_yezhi', name: '椰子清补凉', emoji: '🥥', tags: ['fresh', 'sweet'], pop: 102, cuisine: 'sanya_tropic',
+    req: { coconut: 3, sugar: 2, tea: 1 }, price: 30, tier: 1, city: '460200',
+    research: { cash: 600, ing: { coconut: 15, sugar: 10, tea: 5 } },
+    desc: '椰林系入门：文昌椰现榨，冰镇才好喝。' },
+  { id: 'sy_shugu', name: '树熟果冰沙', emoji: '🍈', tags: ['fruity', 'fresh'], pop: 106, cuisine: 'sanya_tropic',
+    req: { mangosteen: 2, coconut: 2, sugar: 2 }, price: 33, tier: 2, city: '460200',
+    research: { cash: 860, ing: { mangosteen: 10, coconut: 10, sugar: 10 } },
+    desc: '热带系第二款：树熟果配椰浆，热带感拉满。' },
+  { id: 'sy_yezi', name: '椰林芒果雪', emoji: '🥭', tags: ['sweet', 'fresh'], pop: 112, cuisine: 'sanya_tropic',
+    req: { mangosteen: 1, coconut: 2, fruit: 3, sugar: 2 }, price: 36, tier: 3, city: '460200',
+    research: { cash: 1180, ing: { mangosteen: 5, coconut: 10, fruit: 15, sugar: 10 } },
+    desc: '热带系第三款：雪沙质地，度假风主打。' },
+  { id: 'yc_gouqi', name: '枸杞鲜奶', emoji: '🫐', tags: ['milky', 'rich'], pop: 100, cuisine: 'yc_goji',
+    req: { goji: 3, milk: 3, sugar: 1 }, price: 30, tier: 1, city: '640100',
+    research: { cash: 600, ing: { goji: 15, milk: 15, sugar: 5 } },
+    desc: '宁夏系入门：本地枸杞配鲜奶，养生日常款。' },
+  { id: 'yc_naicha', name: '枸杞奶茶', emoji: '🧋', tags: ['milky', 'tea'], pop: 106, cuisine: 'yc_goji',
+    req: { goji: 2, milk: 2, tea: 2 }, price: 32, tier: 2, city: '640100',
+    research: { cash: 860, ing: { goji: 10, milk: 10, tea: 10 } },
+    desc: '宁夏系第二款：枸杞入奶茶，受众更广。' },
+  { id: 'yc_jiangzao', name: '枸杞姜枣', emoji: '🍵', tags: ['tea', 'sweet'], pop: 110, cuisine: 'yc_goji',
+    req: { goji: 3, tea: 1, sugar: 2 }, price: 35, tier: 3, city: '640100',
+    research: { cash: 1180, ing: { goji: 10, goji: 1, tea: 10, sugar: 10 } },
+    desc: '宁夏系第三款：枸杞配茶底，冬日温补。' },];
+
+/* ============================================================
+ *  V10：成就专属奖励食谱
+ *
+ *  ★ 硬约束（用户明确要求，也是本表存在的全部意义）：
+ *    **这些食谱不属于研发树的任何节点 —— 没有任何研发路径能拿到它们，
+ *    只能通过成就获得。**
+ *    因此：
+ *      · 它们**不能**出现在 RESEARCH_TREE 里
+ *      · 它们**没有** research 字段（不能被研发）
+ *      · 它们**不占** canListRecipe 的菜系槽位约束之外的任何前置
+ *    探针M 组对此有断言：遍历 RESEARCH_TREE，任何 recipe 都不得命中本表。
+ *    （一旦有人不小心把它们加进研发树，探针会当场失败——
+ *      这类"约定只写在注释里"的约束最终都会被破坏。）
+ *
+ *  ★ 为什么需要这类奖励：
+ *    研发树是**可规划**的，玩家会照着它一路做到底；
+ *    成就食谱是**不可规划**的，玩家必须先达成某件事才会遇见。
+ *    两者叠加才有"目标感"与"惊喜感"的分工 ——
+ *    只有研发树，游戏会变成一张必做的清单。
+ *
+ *  ★ 城市归属：奖励食谱同样绑定城市（与城市菜一致的口径），
+ *    但**判定与给予是跨局的**：成就在任意城市达成都算，
+ *    食谱直接进 s.recipes（不会被"不在那个城市"吞掉）。
+ * ============================================================ */
+const ACH_RECIPES = [
+  { id: 'ach_golden', name: '鎏金奶盖', emoji: '🥇', tags: ['rich', 'milky'], pop: 132, cuisine: 'classic',
+    req: { milk: 3, pearl: 2, sugar: 2 }, price: 46, tier: 4, ach: true,
+    desc: '成就奖励：金色奶盖配珍珠，卖相即正义。' },
+  { id: 'ach_moon', name: '月落栀白', emoji: '🌕', tags: ['fresh', 'tea'], pop: 128, cuisine: 'matcha',
+    req: { tea: 2, fruit: 2, sugar: 1 }, price: 42, tier: 4, ach: true,
+    desc: '成就奖励：夜间限定的话题款。' },
+  { id: 'ach_terrace', name: '梯田云顶', emoji: '🌾', tags: ['milky', 'sweet'], pop: 126, cuisine: 'dessert',
+    req: { milk: 3, sugar: 3, pearl: 1 }, price: 40, tier: 4, ach: true,
+    desc: '成就奖励：层层堆叠的甜品，视觉取胜。' },
+  { id: 'ach_nightfall', name: '夜航咖啡', emoji: '🌃', tags: ['rich', 'tea'], pop: 130, cuisine: 'coffee',
+    req: { tea: 3, milk: 2, sugar: 2 }, price: 44, tier: 4, ach: true,
+    desc: '成就奖励：深夜限定，客单价最高。' },
+  { id: 'ach_firstcity', name: '初见山城', emoji: '🏞️', tags: ['fresh', 'fruity'], pop: 124, cuisine: 'fruit',
+    req: { fruit: 3, tea: 2, sugar: 1 }, price: 38, tier: 4, ach: true, city: '510100',
+    desc: '成就奖励：只在成都可得，山城的第一杯。' },
+  { id: 'ach_southsea', name: '南sea 落日橙', emoji: '🌇', tags: ['fruity', 'sweet'], pop: 127, cuisine: 'fruit',
+    req: { fruit: 3, sugar: 2, milk: 1 }, price: 40, tier: 4, ach: true, city: '460200',
+    desc: '成就奖励：只在三亚可得，落日味的橙。' },
+  { id: 'ach_capital', name: '京韵酥', emoji: '🏯', tags: ['sweet', 'rich'], pop: 125, cuisine: 'dessert',
+    req: { milk: 3, sugar: 3, pearl: 2 }, price: 42, tier: 4, ach: true, city: '110100',
+    desc: '成就奖励：只在北京可得，酥皮与奶香。' },
+];
+
+/* ============================================================
+ *  V10：城市特色菜系的「研发树」
+ *
+ *  ★ 为什么需要研发树（这是本批次的结构核心）：
+ *    改造前**根本不存在研发树** —— 配方只有 research:{cash,ing} 与tier，
+ *    有钱有料就能做，等于 15 个平铺按钮。这样的结构撑不住新要求：
+ *      · 无法表达"先做 A 才能做 B"的依赖
+ *      · 无法表达"第几阶段才开放"
+ *      · 城市菜与通用菜混在一起，玩家看不出该先做什么
+ *    所以引入 RESEARCH_TREE，把配方组织成**按城市分组、按阶段推进**的依赖网。
+ *
+ *  节点字段：
+ *    id       节点 id
+ *    recipe   指向 RECIPES 里的配方 id
+ *    stage    阶段号（1 起）。同一 stage 的节点可并行研发，跨 stage 有先后
+ *    prereq   前置节点 id 数组（全部满足才能研）
+ *    city     所属城市（空 = 通用节点，任何城市都能研）
+ *
+ *  ★ 关键设计：**city 节点在别城不可研**，但已在别城解锁的配方
+ *    也不会因为换城市而消失（存在 s.recipes 里，只是不能上架 ——
+ *    见 engine 的 recipeAvailableAt）。
+ *    换句话说：研发投入是**跨城市保留**的资产，换城只是换了一个可上架的池子。
+ *    这样"去成都开厂"是真的取舍：那边能做的菜这边做不了，反之亦然。
+ *
+ *  ★ 前置与 V9 的教训不冲突：前置约束的是**城市**（天然强边界，玩家清楚），
+ *    不是"有没有花钱"（那才是实测中锁死配方表的元凶）。
+ *    城市前置即使不满足，玩家也会立刻看懂 —— 因为研发页会按城市分组显示。
+ */
+
+
+/* ============================================================
+ *  研发树（RESEARCH_TREE）—— 把配方组织成**按城市分组、按阶段推进**的依赖网
+ *
+ *  ★ 改造前**不存在研发树**：配方只有 research:{cash,ing} + tier，
+ *    有钱有料就能做，15 个配方是平铺的一排按钮。撑不住本批次要求 ——
+ *    既无法表达"先A 后 B"，也无法表达"第几阶段开放"。
+ *
+ *  字段：
+ *    id      节点 id
+ *    recipe  指向 RECIPES 的配方 id
+ *    stage   阶段（0 起）。同阶段可并行，跨阶段有先后
+ *    prereq  前置节点 id（全部满足才能研）
+ *    city    所属城市（空 = 通用节点，任何城市可研）
+ *
+ *  ★ 城市前置与 V9 的教训**不冲突**，因为两者性质不同：
+ *    V9 出事的是「花钱门槛」—— 玩家算不出划不划算，于是配方被永久锁死；
+ *    这里是「地域边界」—— 研发页**按城市分组显示**，玩家一眼看懂
+ *    "这些菜只能在这座城做"，不存在"不知道被锁了"的情况。
+ *    另外：已在某城解锁的配方不会因换城市而消失（它仍在 s.recipes 里），
+ *    只是**不能上架** —— 研发投入是跨城市保留的资产。
+ * ============================================================ */
+const RESEARCH_TREE = [
+  { id: 'n_boba', recipe: 'boba', stage: 0, prereq: [], city: '' },
+  { id: 'n_greentea', recipe: 'greentea', stage: 1, prereq: ['n_boba'], city: '' },
+  { id: 'n_passion', recipe: 'passion', stage: 1, prereq: ['n_boba'], city: '' },
+  { id: 'n_taro', recipe: 'taro', stage: 2, prereq: ['n_greentea'], city: '' },
+  { id: 'n_coco', recipe: 'coco', stage: 2, prereq: ['n_greentea'], city: '' },
+  { id: 'n_grape', recipe: 'grape', stage: 2, prereq: ['n_passion'], city: '' },
+  { id: 'n_matcha', recipe: 'matcha', stage: 2, prereq: ['n_greentea'], city: '' },
+  { id: 'n_brownsugar', recipe: 'brownsugar', stage: 3, prereq: ['n_taro', 'n_coco'], city: '' },
+  { id: 'n_taro2', recipe: 'taro2', stage: 3, prereq: ['n_taro'], city: '' },
+  { id: 'n_lime', recipe: 'lime', stage: 3, prereq: ['n_grape'], city: '' },
+  { id: 'n_latte', recipe: 'latte', stage: 3, prereq: ['n_coco'], city: '' },
+  { id: 'n_matcha2', recipe: 'matcha2', stage: 4, prereq: ['n_matcha', 'n_brownsugar'], city: '' },
+  { id: 'n_taro3', recipe: 'taro3', stage: 4, prereq: ['n_taro2', 'n_brownsugar'], city: '' },
+  /* sakura / star 是 V9 批次追加时漏挂节点的（探针 M1c 抓出来的）。
+     漏挂的后果不是"报错"，而是这两款配方**不受研发树约束**——
+     能跳过前置直接研，研发树的规划性对它们失效。
+     star 是隐藏款（tier4），所以给它 stage 5 作为全树的终点。 */
+  { id: 'n_sakura', recipe: 'sakura', stage: 4, prereq: ['n_lime'], city: '' },
+  { id: 'n_star', recipe: 'star', stage: 5, prereq: ['n_sakura', 'n_taro3'], city: '' },
+
+  /* ---- 城市节点：每城 3 阶段线性推进 ---- */
+  { id: 'n_gz_lishui', recipe: 'gz_lishui', stage: 1, prereq: [], city: '440100' },
+  { id: 'n_gz_shuangjiang', recipe: 'gz_shuangjiang', stage: 2, prereq: ['n_gz_lishui'], city: '440100' },
+  { id: 'n_gz_qinggua', recipe: 'gz_qinggua', stage: 3, prereq: ['n_gz_shuangjiang'], city: '440100' },
+  { id: 'n_xs_chenpitea', recipe: 'xs_chenpitea', stage: 1, prereq: [], city: '440700' },
+  { id: 'n_xs_xianru', recipe: 'xs_xianru', stage: 2, prereq: ['n_xs_chenpitea'], city: '440700' },
+  { id: 'n_xs_laobian', recipe: 'xs_laobian', stage: 3, prereq: ['n_xs_xianru'], city: '440700' },
+  { id: 'n_sz_dancong', recipe: 'sz_dancong', stage: 1, prereq: [], city: '440300' },
+  { id: 'n_sz_huicha', recipe: 'sz_huicha', stage: 2, prereq: ['n_sz_dancong'], city: '440300' },
+  { id: 'n_sz_niuyecha', recipe: 'sz_niuyecha', stage: 3, prereq: ['n_sz_huicha'], city: '440300' },
+  { id: 'n_su_guixia', recipe: 'su_guixia', stage: 1, prereq: [], city: '320500' },
+  { id: 'n_su_liusheng', recipe: 'su_liusheng', stage: 2, prereq: ['n_su_guixia'], city: '320500' },
+  { id: 'n_su_lianhua', recipe: 'su_lianhua', stage: 3, prereq: ['n_su_liusheng'], city: '320500' },
+  { id: 'n_nj_guixia', recipe: 'nj_guixia', stage: 1, prereq: [], city: '320100' },
+  { id: 'n_nj_hongcha', recipe: 'nj_hongcha', stage: 2, prereq: ['n_nj_guixia'], city: '320100' },
+  { id: 'n_nj_tangyuan', recipe: 'nj_tangyuan', stage: 3, prereq: ['n_nj_hongcha'], city: '320100' },
+  { id: 'n_hz_yangmei', recipe: 'hz_yangmei', stage: 1, prereq: [], city: '330100' },
+  { id: 'n_hz_qingmei', recipe: 'hz_qingmei', stage: 2, prereq: ['n_hz_yangmei'], city: '330100' },
+  { id: 'n_hz_lotus', recipe: 'hz_lotus', stage: 3, prereq: ['n_hz_qingmei'], city: '330100' },
+  { id: 'n_cd_rattancha', recipe: 'cd_rattancha', stage: 1, prereq: [], city: '510100' },
+  { id: 'n_cd_douban', recipe: 'cd_douban', stage: 2, prereq: ['n_cd_rattancha'], city: '510100' },
+  { id: 'n_cd_mala', recipe: 'cd_mala', stage: 3, prereq: ['n_cd_douban'], city: '510100' },
+  { id: 'n_wh_fengwang', recipe: 'wh_fengwang', stage: 1, prereq: [], city: '420100' },
+  { id: 'n_wh_mian', recipe: 'wh_mian', stage: 2, prereq: ['n_wh_fengwang'], city: '420100' },
+  { id: 'n_wh_litchi', recipe: 'wh_litchi', stage: 3, prereq: ['n_wh_mian'], city: '420100' },
+  { id: 'n_cs_duojiao', recipe: 'cs_duojiao', stage: 1, prereq: [], city: '430100' },
+  { id: 'n_cs_xiaolong', recipe: 'cs_xiaolong', stage: 2, prereq: ['n_cs_duojiao'], city: '430100' },
+  { id: 'n_cs_duojiang', recipe: 'cs_duojiang', stage: 3, prereq: ['n_cs_xiaolong'], city: '430100' },
+  { id: 'n_xa_zaocha', recipe: 'xa_zaocha', stage: 1, prereq: [], city: '610100' },
+  { id: 'n_xa_banli', recipe: 'xa_banli', stage: 2, prereq: ['n_xa_zaocha'], city: '610100' },
+  { id: 'n_xa_fengmi', recipe: 'xa_fengmi', stage: 3, prereq: ['n_xa_banli'], city: '610100' },
+  { id: 'n_ur_hami', recipe: 'ur_hami', stage: 1, prereq: [], city: '650100' },
+  { id: 'n_ur_goji', recipe: 'ur_goji', stage: 2, prereq: ['n_ur_hami'], city: '650100' },
+  { id: 'n_ur_nang', recipe: 'ur_nang', stage: 3, prereq: ['n_ur_goji'], city: '650100' },
+  { id: 'n_lz_suyou', recipe: 'lz_suyou', stage: 1, prereq: [], city: '540100' },
+  { id: 'n_lz_zanghong', recipe: 'lz_zanghong', stage: 2, prereq: ['n_lz_suyou'], city: '540100' },
+  { id: 'n_lz_niurou', recipe: 'lz_niurou', stage: 3, prereq: ['n_lz_zanghong'], city: '540100' },
+  { id: 'n_sy_yezhi', recipe: 'sy_yezhi', stage: 1, prereq: [], city: '460200' },
+  { id: 'n_sy_shugu', recipe: 'sy_shugu', stage: 2, prereq: ['n_sy_yezhi'], city: '460200' },
+  { id: 'n_sy_yezi', recipe: 'sy_yezi', stage: 3, prereq: ['n_sy_shugu'], city: '460200' },
+  { id: 'n_yc_gouqi', recipe: 'yc_gouqi', stage: 1, prereq: [], city: '640100' },
+  { id: 'n_yc_naicha', recipe: 'yc_naicha', stage: 2, prereq: ['n_yc_gouqi'], city: '640100' },
+  { id: 'n_yc_jiangzao', recipe: 'yc_jiangzao', stage: 3, prereq: ['n_yc_naicha'], city: '640100' },
 ];
 
 /* ---------- 永久升级 ---------- */
@@ -313,6 +761,84 @@ function offlineRate(lv) {
 
 /* ---------- 分店 ---------- */
 const SHOP_COSTS = [3500, 9000, 20000];
+
+/* ============================================================
+ *  店长系统（V11）
+ *
+ *  ★ 定位：**每新开设一家分店，即可招募一名店长**。
+ *    总店（第1 家）不算分店 —— 那是玩家自己，不存在"店长"，
+ *    所以店长上限 = s.shops - 1，而不是 s.shops。
+ *    写成 s.shops 会凭空多出一个空缺槽位，玩家永远填不满。
+ *
+ *  ★ 为什么店长要绑定「分店」而不是只是个加成道具：
+ *    改造前 s.staff 是**全局池**，分店工位靠 `s.staff[(i-1) % pool]`
+ *    取模轮转 —— 3 家店 2 个员工时，同一个员工会同时在多家店"上班"。
+ *    引入店长后，员工正式归属分店（staff.branch），
+ *    店长才有"我管这家店"的实际含义。
+ *
+ *  三条设计约束（违反任意一条都会让店长变成摆设）：
+ *    ① 店长的加成**只作用于自己那家分店**，不碰总店 ——
+ *       否则"招店长"就退化成"花钱买全局加成"，
+ *       而全局加成会让玩家无脑把所有资源砸在同一家店。
+ *    ② 店长**不是万能加成层**。它的能力值是**分发器**：
+ *       把该店的客流/口碑/效率按能力值给一点，
+ *       数值远低于"再开一家分店"（+60% 客流）。
+ *       否则店长会盖过分店本身，分店系统反而被架空。
+ *    ③ 每店编制有上限，店长自动补员与玩家手动招聘**共用名额** ——
+ *       见 CFG.BRANCH_STAFF_CAP。
+ * ============================================================ */
+
+/** 店长姓名池（与 STAFF_NAMES 刻意分开：辨识度要够，玩家要能记住"我招了谁"） */
+const MANAGER_NAMES = ['陈叔', '林姐', '王师傅', '赵总', '刘阿姨', '孙经理', '周姐', '吴老板',
+  '郑哥', '冯姐', '蒋师傅', '沈经理', '韩姐', '杨总', '许师傅', '何姐', '罗总', '高经理',
+  '梁叔', '宋姐', '唐经理', '许姐'];
+
+/** 店长能力等级：越高越贵、加成越强。等级名沿用职场语感 */
+const MANAGER_RANKS = [
+  { lv: 1, name: '见习店长', mult: 1.00 },
+  { lv: 2, name: '正式店长', mult: 1.18 },
+  { lv: 3, name: '资深店长', mult: 1.38 },
+  { lv: 4, name: '金牌店长', mult: 1.60 },
+  { lv: 5, name: '连锁督导', mult: 1.85 },
+];
+
+/** 店长特性：与 STAFF 特质语义区分—— 店长特性偏"经营"而非"干活" */
+const MANAGER_TRAITS = [
+  { id: 'ops',   name: '运营老手',   emoji: '📋', desc: '该店客流 +8%' },
+  { id: 'qc',    name: '品质把关',   emoji: '🔍', desc: '该店满意率加成 +50%' },
+  { id: 'lean',  name: '精打细算',   emoji: '🧾', desc: '该店日薪支出 -12%' },
+  { id: 'trainer', name: '带教能手', emoji: '🎓', desc: '该店员工成长更快（招募费用更低）' },
+  { id: 'hosp',  name: '宾至如归',   emoji: '🤝', desc: '该店口碑加成 +40%' },
+  { id: 'multi', name: '多店管理',   emoji: '🗂️', desc: '可管理 +1 名员工' },
+  { id: 'none',  name: '无特别之处', emoji: '📄', desc: '没有额外特性' },
+];
+
+/**
+ * 店长招募费用阶梯。
+ * 按「当前已招店长数」递增 —— 与 STAFF 的fee（按 staff.length 递增）同一手法：
+ * 人越多，新人越贵（组织规模越大，招人的边际成本越高）。
+ * 但店长阶梯必须比员工陡得多，否则玩家会优先招店长而不是店员
+ * （店长 1 级 ¥3000 vs 员工 ¥260起步，差距要够大才能保住"先扩编再提效"的顺序）。
+ */
+const MANAGER_COSTS = [3000, 6200, 11500, 19000, 30000];
+
+/**
+ * 每家分店的员工编制上限。
+ * 分店总数 = 1（总店）+ SHOP_COSTS.length（最多 3 家分店），
+ * 每店编制 × 分店数 会远超 CFG.STAFF_MAX（20），
+ * 所以真正的上限仍然是 STAFF_MAX —— 这个值是**单店**的软上限，
+ * 超了店长就不再自动补员，但玩家仍可手动招（只要没到 STAFF_MAX）。
+ */
+const BRANCH_STAFF_CAP = 6;
+
+/**
+ * 招募费用与编制上限的**算法**放引擎层（engine.js的 managerCost /
+ * branchStaffCap），这里只保留静态表。
+ * 原因：managerCost 要读 diffOf(s).costMult（引擎的难度系数），
+ * managerCount 要读 s.managers（运行时状态）—— 都依赖引擎，
+ * 留在 data.js 会造成 data→engine 的反向依赖。
+ * 分层原则与本文件其它地方一致：**data.js 只放"数据"，engine.js 放"规则"**。
+ */
 
 /* ============================================================
  *  经营维度：场地类型 / 经营城市 / 经营地图位置
@@ -861,8 +1387,12 @@ const ACHIEVEMENTS = [
     check: s => (s.rep >= 95) },
   { id: 'a_research3', name: '研发狂人', emoji: '🧪', desc: '解锁 4 款配方', reward: { cash: 300, bp: 2 },
     check: s => (s.recipes.length >= 4) },
-  { id: 'a_research_all', name: '配方全收集', emoji: '📖', desc: '解锁全部 10 款配方', reward: { cash: 3000, bp: 12 },
-    check: s => (s.recipes.length >= RECIPES.length) },
+  { id: 'a_research_all', name: '配方全收集', emoji: '📖', desc: '解锁全部可研发配方', reward: { cash: 3000, bp: 12 },
+    /* ★ 用"全部可研发配方"而不是写死数字：
+       V10 加了 42 款城市菜，写死"10 款"的话这条成就永远不可能达成
+       （玩家在 30 天里解锁不到 57 款）—— 一条够不到的成就是纯粹的负担。
+       现在改为「解锁 ≥ 60% 可研发配方」，随配方表增减自动跟随。 */
+    check: s => (s.recipes.length >= Math.ceil(RESEARCH_TREE.length * 0.6)) },
   { id: 'a_star', name: '星球特调', emoji: '🌌', desc: '研发出隐藏款「星球特调」', reward: { cash: 1200, bp: 6 },
     check: s => s.recipes.includes('star') },
   { id: 'a_shop', name: '连锁启航', emoji: '🏪', desc: '开设第 2 家分店', reward: { cash: 500, bp: 3 },
@@ -907,7 +1437,79 @@ const ACHIEVEMENTS = [
     check: s => !!(s.rival && s.rival.proof >= 5) },
   { id: 'a_endless3', name: '无尽传说', emoji: '♾️', desc: '无尽模式达成第 3 个里程碑', reward: { cash: 3000, bp: 12 },
     check: s => !!(s.endless && (s.milestone || 0) >= 3) },
+
+  /* ---------- V10：城市风味 ---------- */
+  { id: 'a_city_3', name: '跨城游商', emoji: '🧭', desc: '经营过 3 个不同城市', reward: { cash: 600, bp: 3 },
+    check: s => cityVisited(s) >= 3 },
+  { id: 'a_city_6', name: '全国连锁', emoji: '🏙️', desc: '经营过 6 个不同城市', reward: { cash: 1500, bp: 6 },
+    check: s => cityVisited(s) >= 6 },
+  { id: 'a_local_3', name: '本地风味', emoji: '🥢', desc: '累计解锁 3 款本地特色菜', reward: { cash: 800, bp: 4 },
+    check: s => localRecipeCount(s) >= 3 },
+  { id: 'a_local_all5', name: '一方水土', emoji: '🏞️', desc: '累计解锁 5 款本地特色菜', reward: { cash: 1800, bp: 8 },
+    check: s => localRecipeCount(s) >= 5 },
+  { id: 'a_master5', name: '研发树大师', emoji: '🌳', desc: '解锁任意 15 款配方', reward: { cash: 1200, bp: 6 },
+    check: s => (s.recipes.length >= 15) },
+
+  /* ---------- V10：成就专属食谱奖励 ----------
+     ★ reward.recipe 指向 ACH_RECIPES —— 它们不在 RESEARCH_TREE 里、
+       没有任何研发路径能拿到，只能这样给。
+       发放 / 重复获得处理见 engine.grantAchRecipe。 */
+  { id: 'a_ach_golden', name: '鎏金传说', emoji: '🥇', desc: '口碑达到 99', reward: { cash: 2000, bp: 10, recipe: 'ach_golden' },
+    check: s => (s.rep >= 99) },
+  { id: 'a_ach_moon', name: '月落之时', emoji: '🌕', desc: '单日卖出 120 杯', reward: { cash: 1500, bp: 7, recipe: 'ach_moon' },
+    check: s => (s.stats.lastDayCups >= 120) },
+  { id: 'a_ach_nightfall', name: '不打烊的城市', emoji: '🌃', desc: '单局连续经营 30 天不换城', reward: { cash: 1800, bp: 8, recipe: 'ach_nightfall' },
+    check: s => ((s.stayDays || 0) >= 30) },
+  { id: 'a_ach_terrace', name: '云顶之上', emoji: '🌾', desc: '累计营收达到 ¥30000', reward: { cash: 2200, bp: 9, recipe: 'ach_terrace' },
+    check: s => (s.stats.totalRevenue >= 30000) },
+  /* 城市绑定的奖励食谱：成就达成即得，但要去对应城市才能上架。
+     这几条把「成就奖励」与「城市绑定」两条线交叉起来 ——
+     玩家拿到菜会立刻知道"哦，得去趟成都"，而不是以为菜单坏了。 */
+  { id: 'a_ach_firstcity', name: '山城初见', emoji: '🏞️', desc: '在成都解锁 3 款本地菜', reward: { cash: 2000, bp: 9, recipe: 'ach_firstcity' },
+    check: s => localCountIn(s, '510100') >= 3 },
+  { id: 'a_ach_southsea', name: '落日收集者', emoji: '🌇', desc: '在三亚解锁 3 款本地菜', reward: { cash: 2000, bp: 9, recipe: 'ach_southsea' },
+    check: s => localCountIn(s, '460200') >= 3 },
+  { id: 'a_ach_capital', name: '京华烟云', emoji: '🏯', desc: '解锁 12 款通用配方', reward: { cash: 2400, bp: 10, recipe: 'ach_capital' },
+    check: s => (s.recipes.filter(rid => { const rr = recipeById(rid); return rr && !rr.city; }).length >= 12) },
 ];
+
+/** 成就 ★ 总量的展示文案。
+ *
+ * ★ 放在 data.js 而不是 ui.js —— 小游戏端不加载 js/ui.js（两个 UI 是独立后端），
+ *   函数放在 ui 里的话 Canvas 端一调用就 ReferenceError。
+ *   凡是要两版共用的，都得放这一层。
+ *
+ * ★ 为什么必须动态算而不是写死数字：
+ *   原先三处文案都硬编码「32 条共 150★」。V10 新增 12 条成就后数字全错，
+ *   而这类错误**没有任何报错** —— 页面照常渲染，只是数字在骗人。
+ */
+function achStarText() {
+  const total = ACHIEVEMENTS.reduce((n, a) => n + (a.reward && a.reward.bp || 0), 0);
+  return `${ACHIEVEMENTS.length} 条共 ${total} ★`;
+}
+
+/* 统计辅助：城市风味成就的 check 全部走这三个纯函数。
+   放在 data.js 而不是 engine.js —— 因为 check 是**数据表里的箭头函数**，
+   若定义在 engine 里，data.js 就得反向引用 engine，破坏单向依赖
+   （data.js 被 engine 与 probe 同时加载，反向引用会造成加载顺序陷阱）。 */
+function cityVisited(s) {
+  const cur = (s.venue && s.venue.cityId) || CITY_DEFAULT;
+  const seen = Array.isArray(s.citiesVisited) ? s.citiesVisited.slice() : [];
+  if (seen.indexOf(cur) < 0) seen.push(cur);
+  return seen.filter(id => !!cityById(id)).length;
+}
+function localRecipeCount(s) {
+  return (s.recipes || []).filter(id => {
+    const r = recipeById(id);
+    return r && !!r.city;
+  }).length;
+}
+function localCountIn(s, cityId) {
+  return (s.recipes || []).filter(id => {
+    const r = recipeById(id);
+    return r && r.city === cityId;
+  }).length;
+}
 
 /* ============================================================
  *  打烊三选一「经营策略卡」
@@ -1438,6 +2040,19 @@ function buildIndex(list, key) {
 }
 const ING_INDEX = buildIndex(ING, 'id');
 const RECIPE_INDEX = buildIndex(RECIPES, 'id');
+/* ★ V10：ALL_RECIPES = 研发树配方 + 成就专属奖励食谱。
+   两张表刻意不合并成一张 —— 它们的**获取路径完全不同**：
+     RECIPES    能研发（有 research 字段、要钱要料、挂在研发树节点上）
+     ACH_RECIPES 只能靠成就（无 research 字段、不在研发树上）
+   但下游逻辑（菜单展示、扣料、定价、存档清洗）必须**一视同仁**，
+   所以建一张合并索引给 recipeById 用。
+   ★ 不合并的风险：如果 recipeById 只查 RECIPES，
+     成就奖励进 s.recipes 之后 `recipeById` 返回 undefined ——
+     表现为"菜上不了架 / 成本算不出 / 菜单卡显示空白"，
+     而且是**静默**的（不是报错，是数据缺失）。
+   所以合并索引这一步是必需的，不是可选的优化。 */
+const ALL_RECIPES = RECIPES.concat(ACH_RECIPES);
+const ALL_RECIPE_INDEX = buildIndex(ALL_RECIPES, 'id');
 const UPGRADES_INDEX = buildIndex(UPGRADES, 'id');
 const TRAITS_INDEX = buildIndex(TRAITS, 'id');
 const WEATHER_INDEX = buildIndex(WEATHERS, 'id');
@@ -1458,10 +2073,22 @@ const CITY_INDEX = buildIndex(CITIES, 'id');
 /* V9 菜系与工坊索引 */
 const CUISINE_INDEX = buildIndex(CUISINES, 'id');
 const WORKSHOP_INDEX = buildIndex(CRAFT_WORKSHOPS, 'id');
+/* V10 研发树与城市索引 */
+const TREE_INDEX = buildIndex(RESEARCH_TREE, 'id');
+const ACH_RECIPE_INDEX = buildIndex(ACH_RECIPES, 'id');
+/* 配方 id → 研发树节点（用于查前置与阶段）。成就食谱不在树里，返回 undefined。 */
+const NODE_BY_RECIPE = new Map();
+for (const n of RESEARCH_TREE) NODE_BY_RECIPE.set(n.recipe, n);
 
 /** 取值一律返回 undefined（而不是抛错），调用方按需兜底 —— 与原来的 Array#find 行为一致 */
 function ingById(id) { return ING_INDEX.get(id); }
-function recipeById(id) { return RECIPE_INDEX.get(id); }
+/* ★ recipeById 现在查**合并索引**（研发 + 成就奖励）。
+     改动影响面：菜单渲染、定价、扣料、备货、清洗、成就判定 —— 全都靠它，
+     所以必须覆盖两类来源，否则成就奖励会静默失效。 */
+function recipeById(id) { return ALL_RECIPE_INDEX.get(id); }
+function treeNodeById(id) { return TREE_INDEX.get(id); }
+function nodeByRecipe(rid) { return NODE_BY_RECIPE.get(rid); }
+function achRecipeById(id) { return ACH_RECIPE_INDEX.get(id); }
 function upgradeById(id) { return UPGRADES_INDEX.get(id); }
 function traitById(id) { return TRAITS_INDEX.get(id); }
 function weatherById(id) { return WEATHER_INDEX.get(id); }
@@ -1484,6 +2111,27 @@ function citiesOfProvince(provId) {
 function districtsOfCity(cityId) {
   const list = DISTRICTS[cityId];
   return Array.isArray(list) ? list : [];
+}
+
+/* ---------- V10 城市特色菜系取值 ---------- */
+/** 某城市拥有的特色菜系（无特色菜系的城市返回空数组 = 只能用通用菜系） */
+function cuisinesOfCity(cityId) {
+  if (!cityId) return [];
+  return CUISINES.filter(c => c.city === cityId);
+}
+/** 某城市是否有特色菜系（UI 用来决定要不要展示「本地风味」分组） */
+function hasCityCuisine(cityId) { return !!cityId && cuisinesOfCity(cityId).length > 0; }
+/** 某城市的专属原料清单（origin === cityId） */
+function ingsOfCity(cityId) {
+  if (!cityId) return [];
+  return ING.filter(g => g.origin === cityId);
+}
+/** 该原料在指定城市是否有货。origin 为空 = 全国都有货。 */
+function ingAvailableAt(ingId, cityId) {
+  const g = ING_INDEX.get(ingId);
+  if (!g) return false;
+  if (!g.origin) return true;
+  return g.origin === cityId;
 }
 
 /* ---------- V9 菜系与工坊取值 ---------- */

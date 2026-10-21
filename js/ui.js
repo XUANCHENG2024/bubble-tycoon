@@ -366,6 +366,119 @@ UI.renderPanel = function (t) {
 };
 UI.renderAll = function () { UI.renderHUD(); UI.renderPanel(UI.tab); };
 
+
+/** 店长与分店编制面板（V11）
+ *
+ *  ★ 面板放在「原料市场」之后 —— 它是"人事管理"，比"进物料"更靠后，
+ *    但仍留在管理页而不是升级页：玩家招完人往往会顺便看一眼编制。
+ *
+ *  ★ 必须同时展示**总店**的编制：
+ *    店长只管分店，玩家很容易忘总店也要人。
+ *    只列分店会出现"店长都满了，总店一个人也没有"的荒谬局面。
+ */
+function managerPanelHtml(s) {
+  const shops = Math.max(1, pos(s.shops, 1));
+  const left = managerSlotsLeft(s);
+  let h = `<div class="card"><div class="card-h">🎩 店长与分店编制
+    <span class="ch-sub">${managerCount(s)}/${shops - 1} 名店长${left > 0 ? ` · 还可招 ${left} 名` : ''}</span></div>`;
+
+  if (shops <= 1) {
+    h += `<div style="font-size:12px;color:var(--txt3);line-height:1.6">
+      目前只有总店（你亲自经营），不需要店长。<br>
+      在「⬆️ 店铺升级」里开设第一家分店后，就能招募一名店长。</div></div>`;
+    return h;
+  }
+  h += `<div style="font-size:11.5px;color:var(--txt3);margin-bottom:9px;line-height:1.6">
+    每开一家<b>分店</b>可招一名店长，店长<b>只管自己那家店</b> ——
+    加成（客流 / 出杯速度 / 口碑 / 满意）不作用于总店，也不作用于别的分店。<br>
+    店长每天会<b>自动补员</b>到该店编制上限（与你手动招聘<b>共用名额</b>），
+    代价是每天都要付他日薪。</div>`;
+
+  const fee = managerCost(s);
+  for (let b = 2; b <= shops; b++) {
+    const mg = managerOfBranch(s, b);
+    const staffN = staffOfBranch(s, b).length;
+    const cap = branchStaffCap(s, b);
+    const cands = (s.mgrCand && s.mgrCand[b]) || [];
+    h += `<div class="mgr-branch">
+      <div class="mgr-bhead">
+        <span class="mgr-be">🏪</span>
+        <span class="mgr-bn">第 ${b} 分店</span>
+        <span class="mgr-bs">编制 ${staffN}/${cap}</span>
+        <span class="mgr-bm${mg ? '' : ' none'}">${mg ? `店长 ${mg.emoji} ${esc(mg.name)}` : '无店长'}</span>
+      </div>`;
+
+    if (mg) {
+      const tr = managerTrait(mg);
+      const mb = managerBonus(s, b);
+      const bnds = [];
+      for (let d = 2; d <= shops; d++) {
+        if (d === b || managerOfBranch(s, d)) continue;
+        bnds.push(`<button class="btn btn-xs" data-act="mmove" data-id="${mg.id}" data-to="${d}">调到第 ${d} 店</button>`);
+      }
+      h += `<div class="mgr-card">
+        <div class="mgr-row">
+          <span class="mgr-e">${mg.emoji}</span>
+          <div class="mgr-info">
+            <div class="mgr-name">${esc(mg.name)}<span class="mgr-lv">Lv.${mg.lv} ${esc(managerRank(mg.lv).name)}</span></div>
+            <div class="mgr-trait">${tr.emoji} ${esc(tr.name)} · ${esc(tr.desc)}</div>
+          </div>
+          <div class="mgr-cost">
+            <div>日薪 ${money(mg.wage)}</div>
+            <div class="mgr-skill">能力 ${Number(mg.skill).toFixed(2)} · 在任 ${mg.days} 天</div>
+          </div>
+        </div>
+        <div class="mgr-bonus">
+          该店加成：客流 +${Math.round((mb.ops - 1) * 100)}% ·
+          速度 +${Math.round((mb.speed - 1) * 100)}% ·
+          口碑 +${Math.round((mb.rep - 1) * 100)}% ·
+          满意 +${Math.round((mb.sat - 1) * 100)}%
+        </div>
+        <div class="mgr-acts">
+          ${bnds.join(' ')}
+          <button class="btn btn-xs btn-danger" data-act="mfire" data-id="${mg.id}">卸任（补偿 ${money(Math.round(mg.wage * 3))}）</button>
+        </div>
+      </div>`;
+    } else if (cands.length) {
+      h += `<div class="mgr-cands">`;
+      for (let i = 0; i < cands.length; i++) {
+        const c = cands[i];
+        const tr = managerTrait(c);
+        h += `<div class="mgr-cand">
+          <div class="mgr-row">
+            <span class="mgr-e">${c.emoji}</span>
+            <div class="mgr-info">
+              <div class="mgr-name">${esc(c.name)}<span class="mgr-lv">Lv.${c.lv} ${esc(managerRank(c.lv).name)}</span></div>
+              <div class="mgr-trait">${tr.emoji} ${esc(tr.name)} · ${esc(tr.desc)}</div>
+            </div>
+            <div class="mgr-cost">
+              <div>日薪 ${money(c.wage)}</div>
+              <div class="mgr-skill">能力 ${Number(c.skill).toFixed(2)}</div>
+            </div>
+          </div>
+          <button class="btn btn-sm btn-primary" style="width:100%;margin-top:6px"
+            data-act="mhire" data-br="${b}" data-i="${i}" ${s.cash >= fee ? '' : 'disabled'}>招募 · ${money(fee)}</button>
+        </div>`;
+      }
+      h += `</div>`;
+    } else {
+      h += `<div class="mgr-tip">暂无候选人（次日会刷新）</div>`;
+    }
+    h += `</div>`;
+  }
+
+  /* ---- 总店编制：必须显式展示，否则玩家会忘 ---- */
+  h += `<div class="mgr-branch hq">
+    <div class="mgr-bhead">
+      <span class="mgr-be">🏠</span><span class="mgr-bn">总店</span>
+      <span class="mgr-bs">编制 ${staffOfBranch(s, 1).length}/${branchStaffCap(s, 1)}</span>
+      <span class="mgr-bm none">你亲自经营</span>
+    </div>
+  </div>`;
+  h += `</div>`;
+  return h;
+}
+
 /* ---------------- 经营面板 ---------------- */
 UI.renderManage = function () {
   const s = window.S; if (!s) return;
@@ -479,12 +592,23 @@ UI.renderManage = function () {
   /* 市场 */
   h += `<div class="card" data-tut="market"><div class="card-h">📦 原料市场
       <span class="ch-sub">库存 ${Math.round(invUsed(s))}/${storageCap(s)}</span></div>`;
-  for (const g of ING) {
+  /* ★ V10：市场只列**当前城市买得到**的原料。
+     全部 29 种列出来的话，北京的玩家会看到 20+ 行「藤椒油 ¥3.50」点下去没反应
+     （当地买不到）—— 表现为整个市场像是坏了。
+     本地原料单独提示，让"为什么别的地方看不到"这件事有解释。 */
+  const mktCity = currentCityId(s);
+  const localSet = new Set(ingsOfCity(mktCity).map(g => g.id));
+  const buyable = ING.filter(g => ingAvailableAt(g.id, mktCity));
+  if (localSet.size) {
+    h += `<div style="font-size:11px;color:var(--txt3);margin-bottom:8px">
+      🗺️ 本地特产：${esc(ingsOfCity(mktCity).map(g => g.emoji + g.name).join('、'))}</div>`;
+  }
+  for (const g of buyable) {
     const p = s.prices[g.id], pv = s.prevPrices[g.id] || p;
     const dir = p > pv + .001 ? 'up' : (p < pv - .001 ? 'down' : '');
     const arrow = dir === 'up' ? '▲' : (dir === 'down' ? '▼' : '—');
     const ratio = clamp(p / (g.base * 2.3), 0, 1);
-    h += `<div class="mkt-row">
+    h += `<div class="mkt-row${localSet.has(g.id) ? ' local' : ''}">
       <div class="mkt-e">${g.emoji}</div>
       <div class="mkt-n">${g.name}</div>
       <div class="mkt-p ${dir}">¥${p.toFixed(2)} ${arrow}</div>
@@ -500,13 +624,22 @@ UI.renderManage = function () {
       <button class="btn btn-cyan" style="flex:1" data-act="autofill">🛒 一键补货</button>
     </div></div>`;
 
+  /* ---------- V11 店长与分店编制 ----------
+     放在「原料市场」之后：它属于人事管理，重要性低于"今天卖什么"，
+     但仍留在管理页 —— 招完人往往顺手看一眼编制。 */
+  h += managerPanelHtml(s);
+
   /* 菜单 */
   const slots = menuSlots(s);
   h += `<div class="card" data-tut="menu"><div class="card-h">📋 今日菜单
       <span class="ch-sub">${s.menu.length}/${slots} 款上架</span></div>
+    ${cityBarHtml(s)}
     <div class="grid2">`;
   for (const rid of s.recipes) {
     const r = recipeById(rid);
+    /* ★ V10：异地已解锁的配方**保留在列表里**（玩家能看到自己的积累），
+       但标记为不可上架并说明原因 —— 直接隐藏会让玩家以为配方丢了。 */
+    const away = r && r.city && !recipeAvailableAt(s, rid, true);
     const on = s.menu.includes(rid);
     const ratio = s.ratios[rid] || 1;
     const price = priceOf(s, rid);
@@ -532,15 +665,16 @@ UI.renderManage = function () {
         ? `<div class="rc-tip">🏭 ${esc(wsW.name)} Lv.${wsLv} · 成本 −${Math.round((wsW.costCut[wsLv] || 0) * 100)}% · 权重 +${Math.round((wsW.saleBonus[wsLv] || 0) * 100)}%${r.tier >= 3 && wsLv >= 3 ? ' · 高端款再 +18%' : ''}</div>`
         : `<div class="rc-tip">🏭 未建线 · 建了可得成本 −${Math.round((wsW.costCut[1] || 0) * 100)}% / 研发 −${Math.round((wsW.researchCut || 0) * 100)}%</div>`)
       : '';
-    h += `<div class="rc ${on ? 'on' : ''}" data-act="toggle" data-id="${rid}">
+    h += `<div class="rc ${on ? 'on' : ''}${away ? ' away' : ''}" ${away ? '' : `data-act="toggle" data-id="${rid}"`}>
       ${hit ? '<div class="rc-badge">🔥流行</div>' : ''}
       ${sgBadge}
-      <div class="rc-h"><span class="rc-e">${r.emoji}</span><span>${r.name}</span></div>
+      ${away ? `<div class="rc-badge away">🗺️ ${esc((cityById(r.city) || {}).name || '异地')}</div>` : ''}
+      <div class="rc-h"><span class="rc-e">${r.emoji}</span><span>${esc(r.name)}</span></div>
       <div class="rc-m">售价 <b style="color:var(--amber)">¥${price}</b> · 成本 ¥${cost.toFixed(1)} · 毛利 ¥${(price - cost).toFixed(1)}</div>
       <div class="rc-tags">${cuTag}${r.tags.map(t => `<span class="rc-tag ${t === s.trend ? 'hit' : ''}">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}</div>
-      ${wsTip}
+      ${away ? `<div class="rc-tip">🗺️ 本店在${esc((cityById(currentCityId(s)) || {}).name || '')}，这款只能在那儿上架</div>` : wsTip}
       <div class="rc-price"><span style="font-size:10px;color:var(--txt3)">定价</span>
-        <input type="range" min="50" max="200" value="${Math.round(ratio * 100)}" data-act="ratio" data-id="${rid}">
+        <input type="range" min="50" max="200" value="${Math.round(ratio * 100)}" data-act="ratio" data-id="${rid}" ${away ? 'disabled' : ''}>
         <span class="pv">×${ratio.toFixed(2)}</span></div>
     </div>`;
   }
@@ -633,76 +767,152 @@ function sigCardHtml(s) {
   return h;
 }
 
+/* ============== 研发页（研发树视图 · V10） ============== */
 UI.renderLab = function () {
   const s = window.S; if (!s) return;
 
-  /* V6 招牌配方：跨局继承的成长线。放在实验室页最上面 ——
+  /* V6 招牌配方：跨局继承的成长线。放在实验室页最上面——
      这里是"长期目标"该待的地方：玩家看到某款已经 142/150 杯，
      下一局就会想专门练它。 */
   const sigHtml = sigCardHtml(s);
 
-  let h = `<div class="card"><div class="card-h">🧪 配方实验室
-    <span class="ch-sub">已解锁 ${s.recipes.length}/${RECIPES.length}</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px;line-height:1.6">
-      研发消耗现金 + 原料。稀有配方能显著提高单杯毛利，隐藏款「星球特调」通吃所有流行趋势。<br>
-      <b>每款配方属于一个菜系</b>。建好对应的<b>制作工坊</b>后，该系研发费打折、销量权重更高——
-      这是<b>可选加成</b>，不建也能研发上架，只是少一层收益。
-    </div>`;
+  const cid = currentCityId(s);
+  const tree = researchTree(s);
+  const doneTree = RESEARCH_TREE.filter(n => s.recipes.includes(n.recipe)).length;
 
-  /* V9 菜系分组：按产品线展示配方，而不是一长条平铺。
-     每个菜系块头部写清工坊状态 —— 未开线时标注「未建 · 有加成」而不是锁死，
-     玩家一眼能看出「开这条产品线能多拿多少」。 */
-  for (const cu of CUISINES) {
-    const list = RECIPES.filter(r => r.cuisine === cu.id);
-    if (!list.length) continue;
-    const cv = cuisineViews(s).find(x => x.id === cu.id);
-    const hasWs = cv && cv.level > 0;
-    const wsName = workshopById(cu.id);
-    h += `<div class="cui-group${hasWs ? '' : ' unbuilt'}">
-      <div class="cui-head">
-        <span class="cui-e">${cu.emoji}</span>
-        <span class="cui-n">${esc(cu.name)}</span>
-        <span class="cui-d">${esc(cu.desc)}</span>
-        <span class="cui-ws${hasWs ? ' on' : ''}">${hasWs
-          ? `🏭 ${esc(wsName.name)} Lv.${cv.level}`
-          : `🏭 未建 · 可得研发 -${Math.round((wsName.researchCut || 0) * 100)}%`}</span>
-      </div>
-      <div class="cui-grid">`;
-    for (const r of list) {
-      const owned = s.recipes.includes(r.id);
-      const cost = researchCost(s, r.id);
-      const need = r.research ? r.research.ing : null;
-      let ok = true, needHtml = '';
-      if (need) {
-        const parts = [];
-        for (const k in need) {
-          const has = Math.round(s.inv[k] || 0);
-          if (has < need[k]) ok = false;
-          parts.push(`${ingById(k).emoji}${need[k]}<span style="color:${has >= need[k] ? 'var(--green)' : 'var(--red)'}">(${has})</span>`);
-        }
-        needHtml = parts.join(' ');
-      }
-      const affordable = s.cash >= cost;
-      /* 能不能研发 = 原料够 + 钱够。工坊**不在其中**（它只是加成，不是门票）。 */
-      const canR = canResearch(s, r.id);
-      h += `<div class="rc ${owned ? 'on' : (canR.ok ? '' : 'locked')}">
-        <div class="rc-h"><span class="rc-e">${r.emoji}</span><span>${r.name}</span></div>
-        <div class="rc-m">${r.desc}</div>
-        <div class="rc-m">人气 ${r.pop} · 建议售价 ¥${r.price} · 成本约 ¥${costOf(s, r.id).toFixed(1)}</div>
-        <div class="rc-tags">${r.tags.map(t => `<span class="rc-tag">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}</div>
-        ${owned
-          ? `<div style="margin-top:7px;font-size:12px;font-weight:800;color:var(--cyan)">✅ 已解锁</div>`
-          : `<div style="margin-top:7px;font-size:11px;color:var(--txt3)">需要 ${needHtml}</div>
-             <button class="btn btn-sm ${canR.ok ? 'btn-primary' : 'btn-ghost'}" style="width:100%;margin-top:6px"
-               data-act="research" data-id="${r.id}" ${canR.ok ? '' : 'disabled'}>研发 ${money(cost)}</button>
-             ${canR.ok ? '' : `<div class="rc-tip">${esc(canR.msg)}</div>`}`}
+  let h = `<div class="card"><div class="card-h">🧪 配方实验室 · 研发树
+    <span class="ch-sub">已解锁 ${doneTree}/${RESEARCH_TREE.length} 节点</span></div>
+    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px;line-height:1.6">
+      配方按<b>阶段</b>推进：先做前面的，才能解锁后面的。每款配方属于一个菜系，
+      建好对应<b>制作工坊</b>后研发费打折、销量权重更高（可选加成，不建也能做）。<br>
+      <b>本地特色菜系只在所属城市可研发与上架</b>—— 换个城市就是换一套产品线。
+    </div>
+    ${cityBarHtml(s)}
+  </div>`;
+
+  /* ---- 研发树主体：按城市分组 ---- */
+  for (const g of tree) {
+    const isAch = g.cityName.indexOf('成就') >= 0;
+    const head = isAch
+      ? `<span class="cui-e">🏅</span><span class="cui-n">${esc(g.cityName)}</span>
+         <span class="cui-d">只能通过成就获得，研发树里没有它们</span>`
+      : !g.city
+        ? `<span class="cui-e">🌐</span><span class="cui-n">通用配方</span>
+           <span class="cui-d">全国都能做 · 5 条基础菜系</span>`
+        : `<span class="cui-e">${g.isHere ? '📍' : '🗺️'}</span>
+           <span class="cui-n">${esc(g.cityName)}${g.isHere ? ' · 本店' : ''}</span>
+           <span class="cui-d">${g.isHere
+             ? `${g.nodes.length} 道本地菜 · 专属原料 ${ingsOfCity(g.city).length} 种`
+             : '需切换经营城市才能研发'}</span>`;
+
+    h += `<div class="cui-group tree${g.isHere ? '' : ' away'}">
+      <div class="cui-head">${head}
+        ${!g.isHere && !isAch ? `<span class="cui-ws off">不在本店</span>` : ''}
       </div>`;
+
+    /* 按阶段分组，阶段之间有明确先后感 */
+    const byStage = new Map();
+    for (const n of g.nodes) {
+      if (!byStage.has(n.stage)) byStage.set(n.stage, []);
+      byStage.get(n.stage).push(n);
     }
-    h += `</div></div>`;
+    for (const st of Array.from(byStage.keys()).sort((a, b) => a - b)) {
+      const nodes = byStage.get(st);
+      if (st === 99) {
+        h += `<div class="tree-stage ach">📜 成就专属 · 不在研发树中</div>`;
+      } else if (st > 0) {
+        const names = [];
+        for (const n of nodes) {
+          for (const pid of (n.prereq || [])) {
+            const pn = treeNodeById(pid);
+            const pr = pn && recipeById(pn.recipe);
+            if (pr && names.indexOf(pr.name) < 0) names.push(pr.name);
+          }
+        }
+        h += `<div class="tree-stage">第 ${st} 阶段${names.length
+          ? ` · 需先做「${esc(names.join('、'))}」` : ''}</div>`;
+      }
+      h += `<div class="cui-grid">`;
+      for (const n of nodes) h += recipeNodeCardHtml(s, n);
+      h += `</div>`;
+    }
+    h += `</div>`;       /* 闭合 cui-group */
   }
-  h += `</div>`;
   $('panel-lab').innerHTML = sigHtml + h;
 };
+
+/** 城市条：明确标示当前城市 + 可用菜系 + 专属原料（需求「界面标示当前城市及其可用菜系」） */
+function cityBarHtml(s) {
+  const cid = currentCityId(s);
+  const city = cityById(cid);
+  const local = cuisinesOfCity(cid);
+  const localIngs = ingsOfCity(cid);
+  const avail = availableCuisineIds(s);
+  const prov = provinceById((s.venue || {}).provId);
+  /* 区级名称走 venueView —— 它已经处理了"没收录区级"的情况（返回空串），
+     直接查 districtsOfCity 要多写一遍同样的兜底。 */
+  const dist = venueView(s).districtName || '';
+  return `<div class="citybar">
+    <div class="citybar-main">
+      <span class="citybar-emoji">📍</span>
+      <div class="citybar-txt">
+        <div class="citybar-city">${esc(city ? city.name : cid)}${
+    prov ? `<span class="citybar-prov">· ${esc(prov.name)}</span>` : ''}${
+    dist ? `<span class="citybar-dist">${esc(dist)}</span>` : ''}</div>
+        <div class="citybar-sub">本店可用菜系 <b>${avail.length}</b> 个${
+    local.length ? ` · 本地特色：${esc(local.map(c => c.emoji + c.name).join('、'))}` : ' · 本地暂无特色菜系'}</div>
+      </div>
+    </div>
+    ${localIngs.length ? `<div class="citybar-ings">${localIngs.map(g =>
+      `<span class="ing-chip">${g.emoji}${esc(g.name)}</span>`).join('')}</div>` : ''}
+    <div class="citybar-hint">💡 在「🏙️ 经营信息」里切换城市可研发当地特色菜；已解锁的异地配方会保留，回来还能卖</div>
+  </div>`;
+}
+
+/** 单个研发树节点卡片 */
+function recipeNodeCardHtml(s, n) {
+  const r = recipeById(n.recipe);
+  if (!r) return '';
+  const owned = n.done;
+  const isAch = !!r.ach;
+  const cls = owned ? 'on' : (n.status === 'open' ? '' : 'locked');
+  let needHtml = '';
+  if (!owned && r.research) {
+    const parts = [];
+    for (const k in r.research.ing) {
+      const g = ingById(k);
+      const has = Math.round(s.inv[k] || 0);
+      parts.push(`${g.emoji}${r.research.ing[k]}<span style="color:${
+        has >= r.research.ing[k] ? 'var(--green)' : 'var(--red)'}">(${has})</span>`);
+    }
+    needHtml = parts.join(' ');
+  }
+  const canR = (owned || isAch) ? { ok: false, msg: isAch ? '仅通过成就获得' : '' } : canResearch(s, n.recipe);
+  const cu = cuisineById(r.cuisine);
+  const ownCity = r.city ? (cityById(r.city) || {}).name : '';
+  let tip = '';
+  if (!owned && !isAch) {
+    if (n.status === 'away') tip = `🗺️ 需切换到${esc(ownCity)}才能研发`;
+    else if (n.status === 'locked' && n.lockMsg) tip = esc(n.lockMsg);
+    else if (!canR.ok && canR.msg) tip = esc(canR.msg);
+  }
+  return `<div class="rc ${cls}${isAch ? ' ach' : ''}">
+    <div class="rc-h"><span class="rc-e">${r.emoji}</span><span>${esc(r.name)}</span></div>
+    <div class="rc-m">${esc(r.desc)}</div>
+    <div class="rc-m">人气 ${r.pop} · 售价 ¥${r.price} · 成本约 ¥${costOf(s, n.recipe).toFixed(1)}</div>
+    <div class="rc-tags">
+      ${cu ? `<span class="rc-tag cui">${cu.emoji}${esc(cu.name)}</span>` : ''}
+      ${r.tags.map(t => `<span class="rc-tag">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}
+    </div>
+    ${owned ? `<div style="margin-top:7px;font-size:12px;font-weight:800;color:var(--cyan)">✅ 已解锁</div>`
+      : isAch ? `<div class="rc-tip">🏅 成就专属 · 不可研发</div>`
+        : `${r.city ? `<div class="rc-tip">📍 仅限${esc(ownCity)}</div>` : ''}
+           <div style="margin-top:7px;font-size:11px;color:var(--txt3)">需要 ${needHtml}</div>
+           <button class="btn btn-sm ${canR.ok ? 'btn-primary' : 'btn-ghost'}" style="width:100%;margin-top:6px"
+             data-act="research" data-id="${n.recipe}" ${canR.ok ? '' : 'disabled'}>研发 ${money(n.cost)}</button>
+           ${tip ? `<div class="rc-tip">${tip}</div>` : ''}`}
+  </div>`;
+}
 
 /* ---------------- 经营维度面板 ----------------
  * 三个字段（场地类型 / 城市 / 地图坐标）都走「数据驱动 + 引擎校验」：
@@ -872,7 +1082,7 @@ UI.renderUp = function () {
       越往后每点换得越少）。本局已到账 <b style="color:var(--green)">+${money(s.startBonus || 0)}</b>，
       由你决定投去雇人、提速还是开店。<br>
       声望<b>不再直接加客流</b>：单加客流会让客人多到做不过来，流失扣口碑，反而更亏。<br>
-      成就首次达成给 ★（32 条共 150 ★），重复达成只给现金。
+      成就首次达成给 ★（${achStarText()}），重复达成只给现金。
       现在转生可获得 <b style="color:var(--amber)">${gain} 点</b>（按当前净资产 ${money(netWorth(s))} 计算）。
     </div>
     <div style="display:flex;gap:7px">
@@ -1103,7 +1313,7 @@ UI.renderAch = function () {
   const s = window.S; if (!s) return;
   const got = ACHIEVEMENTS.filter(a => s.ach[a.id]).length;
   let h = `<div class="card"><div class="card-h">🏅 成就 <span class="ch-sub">${got}/${ACHIEVEMENTS.length}</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px">本局达成给现金；<b>跨局首次</b>达成额外给品牌声望 ★（32 条共 150 ★，永久保留）。</div>`;
+    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px">本局达成给现金；<b>跨局首次</b>达成额外给品牌声望 ★（${achStarText()}，永久保留）。</div>`;
   for (const a of ACHIEVEMENTS) {
     const on = !!s.ach[a.id];
     h += `<div class="ach ${on ? 'got' : ''}">

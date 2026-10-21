@@ -356,6 +356,67 @@ body::before {
 /* 未建线的菜系块：轻微降透明度表示"少一层收益"，但**不置灰到看起来像禁用**
    —— 工坊是可选加成，整块灰掉会让玩家误以为这条线不能做。 */
 .cui-group.unbuilt { opacity: .82; }
+
+/* ---------- V10：研发树 / 城市 ---------- */
+/* 研发树的异地城市组：明显弱化，让玩家先关注「本店能做什么」 */
+.cui-group.tree.away { opacity: .58; }
+.cui-group.tree.away .rc { pointer-events: none; }
+.cui-ws.off {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px;
+  background: rgba(255, 255, 255, .07); color: var(--txt3);
+}
+/* 阶段分隔：让"先做前面才能做后面"有视觉节奏 */
+.tree-stage {
+  margin: 10px 0 6px; padding: 3px 8px;
+  font-size: 11px; font-weight: 800; color: var(--cyan);
+  background: rgba(127, 211, 137, .1);
+  border-left: 3px solid var(--cyan);
+  border-radius: 0 8px 8px 0;
+}
+.tree-stage.ach { color: var(--amber); background: rgba(255, 217, 125, .1); border-left-color: var(--amber); }
+
+/* 城市条：需求要求的「明确标示当前所在城市及其可用菜系」 */
+.mkt-row.local { background: rgba(255, 143, 91, .07); border-radius: 8px; }
+.mkt-row.local .mkt-n { color: var(--amber); font-weight: 700; }
+
+.citybar {
+  margin: 0 0 10px; padding: 9px 10px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(127, 211, 137, .1), rgba(127, 211, 137, .04));
+  border: 1px solid rgba(127, 211, 137, .22);
+}
+.citybar-main { display: flex; align-items: flex-start; gap: 8px; }
+.citybar-emoji { font-size: 17px; line-height: 1.25; }
+.citybar-txt { min-width: 0; }
+.citybar-city { font-size: 14px; font-weight: 800; color: var(--txt); }
+.citybar-prov { font-size: 11px; font-weight: 600; color: var(--txt3); margin-left: 3px; }
+.citybar-dist {
+  font-size: 10px; font-weight: 700; color: var(--cyan);
+  margin-left: 5px; padding: 1px 6px; border-radius: 8px;
+  background: rgba(127, 211, 137, .14);
+}
+.citybar-sub { margin-top: 2px; font-size: 11px; color: var(--txt3); line-height: 1.5; }
+.citybar-sub b { color: var(--cyan); }
+.citybar-ings { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 4px; }
+.ing-chip {
+  font-size: 10.5px; padding: 2px 7px; border-radius: 9px;
+  background: rgba(255, 255, 255, .07); color: var(--txt2);
+}
+.citybar-hint { margin-top: 7px; font-size: 10.5px; color: var(--txt3); line-height: 1.5; }
+
+/* 异地已解锁的配方：保留展示但不可上架（不隐藏 —— 隐藏会让玩家以为配方丢了） */
+.rc.away { opacity: .6; pointer-events: none; }
+.rc-badge.away {
+  top: auto; bottom: 2px; right: 4px; left: auto;
+  background: rgba(255, 143, 91, .2); color: var(--amber);
+}
+/* 成就专属配方卡：给一点专属感，和"可研发"明确区分 */
+.rc.ach { border-style: dashed; }
+.rc.ach .rc-h span:last-child::after {
+  content: '成就'; margin-left: 5px; font-size: 9px; font-weight: 700;
+  padding: 1px 5px; border-radius: 7px;
+  background: rgba(255, 217, 125, .2); color: var(--amber); vertical-align: middle;
+}
 .cui-head {
   display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
   margin-bottom: 8px; padding-bottom: 7px;
@@ -1015,3 +1076,48 @@ body::before {
     -webkit-backdrop-filter: none; backdrop-filter: none;
   }
 }
+
+/* ---------- V11：店长与分店编制 ---------- */
+.mgr-branch {
+  margin-bottom: 10px; padding: 8px 9px; border-radius: 12px;
+  background: rgba(255, 255, 255, .035); border: 1px solid rgba(255, 255, 255, .07);
+}
+.mgr-branch.hq { background: rgba(127, 211, 137, .05); }
+.mgr-bhead { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.mgr-be { font-size: 14px; }
+.mgr-bn { font-size: 12.5px; font-weight: 800; color: var(--txt); }
+.mgr-bs {
+  font-size: 10px; padding: 1px 6px; border-radius: 8px;
+  background: rgba(127, 211, 137, .16); color: var(--cyan); font-weight: 700;
+}
+.mgr-bm { font-size: 11px; color: var(--amber); font-weight: 700; }
+.mgr-bm.none { color: var(--txt3); font-weight: 400; }
+.mgr-card, .mgr-cand {
+  padding: 7px 8px; border-radius: 10px; margin-bottom: 6px;
+  background: rgba(0, 0, 0, .18);
+}
+.mgr-row { display: flex; align-items: flex-start; gap: 7px; }
+.mgr-e { font-size: 18px; line-height: 1.2; }
+.mgr-info { flex: 1; min-width: 0; }
+.mgr-name { font-size: 12.5px; font-weight: 800; color: var(--txt); }
+.mgr-lv {
+  margin-left: 5px; font-size: 9.5px; font-weight: 700; padding: 1px 5px;
+  border-radius: 7px; background: rgba(199, 166, 255, .18); color: var(--purple, #C7A6FF);
+}
+.mgr-trait { font-size: 10.5px; color: var(--txt3); margin-top: 1px; }
+.mgr-cost { text-align: right; font-size: 11px; color: var(--txt2); white-space: nowrap; }
+.mgr-skill { font-size: 10px; color: var(--txt3); }
+.mgr-bonus {
+  margin-top: 6px; font-size: 10.5px; color: var(--cyan); line-height: 1.5;
+}
+.mgr-acts { margin-top: 7px; display: flex; gap: 5px; flex-wrap: wrap; }
+.mgr-cands { display: block; }
+.mgr-tip { font-size: 11px; color: var(--txt3); padding: 4px 2px; }
+.btn-xs {
+  font-size: 10px; padding: 3px 8px; border-radius: 7px;
+  border: 1px solid var(--line, rgba(255,255,255,.14)); background: transparent;
+  color: var(--txt2); cursor: pointer;
+}
+.btn-xs:hover { background: rgba(255, 255, 255, .08); color: var(--txt); }
+.btn-danger { color: var(--red); border-color: rgba(255, 107, 107, .35); }
+.btn-danger:hover { background: rgba(255, 107, 107, .14); }
