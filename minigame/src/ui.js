@@ -260,7 +260,7 @@ function drawHUD(ctx, L, s) {
   var share = num(rivalShare(s));
   var gt = '目标 ' + money(goal) + ' · ' + Math.round(num(netWorth(s)) / goal * 100) + '%'
     + (share >= 0.15 ? ' · 🦑对手抢 ' + Math.round(share * 100) + '%' : '');
-  text(ctx, gt, 16, y + 12, { size: 9.5, color: T.txt3, maxW: barW });
+  text(ctx, gt, 16, y + 12, { size: 10, color: T.txt3, maxW: barW });
 }
 
 function drawTabs(ctx, L) {
@@ -327,7 +327,7 @@ function panelManagers(ctx, x, y, w, s) {
   GFX.card(ctx, x, y, w, 30);
   text(ctx, '🎩 店长与分店编制', x + 10, y + 8, { size: 11.5, weight: 800, color: T.txt });
   text(ctx, managerCount(s) + '/' + (shops - 1) + ' 名店长' + (left > 0 ? ' · 还可招 ' + left + ' 名' : ''),
-    x + w - 10, y + 9, { size: 9.5, align: 'right', color: T.txt3 });
+    x + w - 10, y + 9, { size: 10, align: 'right', color: T.txt3 });
   y += 38;
 
   if (shops <= 1) {
@@ -349,9 +349,9 @@ function panelManagers(ctx, x, y, w, s) {
     GFX.card(ctx, x, y, w, ch + 26);
     /* 分店标题行 */
     text(ctx, '🏪 第' + b + ' 分店', x + 10, y + 8, { size: 11, weight: 800, color: T.txt });
-    text(ctx, '编制 ' + staffN + '/' + cap, x + 96, y + 9, { size: 9.5, color: T.cyan });
+    text(ctx, '编制 ' + staffN + '/' + cap, x + 96, y + 9, { size: 10, color: T.cyan });
     text(ctx, mg ? ('店长 ' + mg.emoji + ' ' + mg.name) : '无店长',
-      x + w - 10, y + 9, { size: 9.5, align: 'right', color: mg ? T.amber : T.txt3 });
+      x + w - 10, y + 9, { size: 10, align: 'right', color: mg ? T.amber : T.txt3 });
     y += 26;
 
     if (mg) {
@@ -360,12 +360,12 @@ function panelManagers(ctx, x, y, w, s) {
       text(ctx, mg.emoji + ' ' + mg.name + '  Lv.' + mg.lv + ' ' + managerRank(mg.lv).name,
         x + 10, y + 4, { size: 11, weight: 700, color: T.txt });
       text(ctx, '日薪' + money(mg.wage) + ' · 能力' + Number(mg.skill).toFixed(2),
-        x + w - 10, y + 5, { size: 9.5, align: 'right', color: T.txt2 });
+        x + w - 10, y + 5, { size: 10, align: 'right', color: T.txt2 });
       text(ctx, tr.emoji + ' ' + tr.name + ' · ' + tr.desc,
-        x + 10, y + 20, { size: 9, color: T.txt3, maxW: w - 20 });
+        x + 10, y + 20, { size: 10, color: T.txt3, maxW: w - 20 });
       text(ctx, '该店加成：客流+' + Math.round((mb.ops - 1) * 100) + '% · 速度+'
         + Math.round((mb.speed - 1) * 100) + '% · 口碑+' + Math.round((mb.rep - 1) * 100) + '%',
-        x + 10, y + 34, { size: 9, color: T.cyan, maxW: w - 20 });
+        x + 10, y + 34, { size: 10, color: T.cyan, maxW: w - 20 });
       /* 卸任 / 调动按钮 */
       var bw2 = 84, bh2 = 22, by = y + 48;
       /* 调动目标：其他没店长的分店 */
@@ -375,10 +375,10 @@ function panelManagers(ctx, x, y, w, s) {
       }
       if (moveTo) {
         GFX.button(ctx, x + 10, by, bw2, bh2, '调到第' + moveTo + '店',
-          { kind: 'ghost', act: 'mmove', id: mg.id, extra: moveTo, size: 9, r: 7 });
+          { kind: 'ghost', act: 'mmove', id: mg.id, extra: moveTo, size: 10, r: 7 });
       }
       GFX.button(ctx, x + w - 10 - bw2, by, bw2, bh2, '卸任',
-        { kind: 'ghost', act: 'mfire', id: mg.id, size: 9, r: 7 });
+        { kind: 'ghost', act: 'mfire', id: mg.id, size: 10, r: 7 });
       y += 74;
     } else if (cands.length) {
       for (var i = 0; i < cands.length; i++) {
@@ -387,19 +387,19 @@ function panelManagers(ctx, x, y, w, s) {
         text(ctx, c.emoji + ' ' + c.name + '  Lv.' + c.lv + ' ' + managerRank(c.lv).name,
           x + 10, y + 4, { size: 10.5, weight: 700, color: T.txt });
         text(ctx, '日薪' + money(c.wage),
-          x + w - 10, y + 5, { size: 9.5, align: 'right', color: T.txt2 });
+          x + w - 10, y + 5, { size: 10, align: 'right', color: T.txt2 });
         text(ctx, ctr.emoji + ' ' + ctr.name + ' · 能力' + Number(c.skill).toFixed(2),
-          x + 10, y + 18, { size: 9, color: T.txt3, maxW: w - 120 });
+          x + 10, y + 18, { size: 10, color: T.txt3, maxW: w - 120 });
         GFX.button(ctx, x + 10, y + 30, w - 20, 20,
           s.cash >= fee ? ('招募 · ' + money(fee)) : ('现金不足（' + money(fee) + '）'),
           { kind: s.cash >= fee ? 'primary' : 'ghost', act: 'mhire', id: b, extra: i,
-            disabled: s.cash < fee, size: 9.5, r: 7 });
+            disabled: s.cash < fee, size: 10, r: 7 });
         y += 52;
       }
       /* 付费刷新：免费刷会让玩家无限刷出金牌店长 */
       var rc = managerRerollCost(s, b);
       GFX.button(ctx, x + 10, y, 118, 20, '🔄 刷新（' + money(rc) + '）',
-        { kind: 'ghost', act: 'mcand', id: b, disabled: s.cash < rc, size: 9, r: 7 });
+        { kind: 'ghost', act: 'mcand', id: b, disabled: s.cash < rc, size: 10, r: 7 });
       y += 26;
     } else {
       text(ctx, '暂无候选人（次日刷新）', x + 6, y + 2, { size: 10, color: T.txt3 });
@@ -411,8 +411,8 @@ function panelManagers(ctx, x, y, w, s) {
   GFX.card(ctx, x, y, w, 26);
   text(ctx, '🏠 总店', x + 10, y + 7, { size: 10.5, weight: 800, color: T.txt });
   text(ctx, '编制 ' + staffOfBranch(s, 1).length + '/' + branchStaffCap(s, 1),
-    x + 72, y + 8, { size: 9.5, color: T.cyan });
-  text(ctx, '你亲自经营', x + w - 10, y + 8, { size: 9.5, align: 'right', color: T.txt3 });
+    x + 72, y + 8, { size: 10, color: T.cyan });
+  text(ctx, '你亲自经营', x + w - 10, y + 8, { size: 10, align: 'right', color: T.txt3 });
   return y + 34;
 }
 
@@ -431,19 +431,19 @@ function panelManage(ctx, x, y, w, s) {
     text(ctx, '🏔️ 第' + sv.chapter + '章', x + 10, y + 8, { size: 11, weight: 800, color: T.purple });
     if (sv.cur) {
       text(ctx, sv.cur.emoji + ' ' + sv.cur.desc, x + 66, y + 9,
-        { size: 9.5, color: T.txt2, maxW: w - 76 - 52 });
+        { size: 10, color: T.txt2, maxW: w - 76 - 52 });
       text(ctx, '+' + money(sv.cur.cash), x + w - 10, y + 8,
         { size: 10, weight: 800, align: 'right', color: T.green });
     } else {
       text(ctx, '✅ 本章已通关 · ' + sv.cleared + '/' + sv.total, x + 66, y + 9,
-        { size: 9.5, color: T.green, maxW: w - 76 });
+        { size: 10, color: T.green, maxW: w - 76 });
     }
     /* 三个难度档按钮：门槛越高、奖励越丰厚 */
     var dbw = (w - 20 - 16) / 3;
     for (var di = 0; di < sv.diffs.length; di++) {
       var d = sv.diffs[di];
       GFX.button(ctx, x + 10 + di * (dbw + 8), y + 30, dbw, 28, d.emoji + d.name,
-        { kind: d.cur ? 'primary' : 'ghost', act: 'stagediff', id: d.id, size: 9.5, r: 9 });
+        { kind: d.cur ? 'primary' : 'ghost', act: 'stagediff', id: d.id, size: 10, r: 9 });
     }
     y += sh + 10;
   }
@@ -496,7 +496,7 @@ function panelManage(ctx, x, y, w, s) {
       var colx = x + 10 + (ci % 2) * ((w - 20) / 2);
       var coly = y + 22 + Math.floor(ci / 2) * 20;
       text(ctx, card.emoji + ' ' + card.name, colx, coly,
-        { size: 9.5, color: T.txt2, maxW: (w - 20) / 2 - 4 });
+        { size: 10, color: T.txt2, maxW: (w - 20) / 2 - 4 });
     }
     y += 22 + rows * 20 + 10;
   }
@@ -546,7 +546,7 @@ function panelManage(ctx, x, y, w, s) {
           /* 越少越好型的数字是「上限」，直接写 x/y 会被读成「已完成 x 个」 */
           ? '剩 ' + Math.max(0, q.goal - Math.round(q.prog)) + q.unit
           : q.prefix + Math.round(q.prog) + '/' + q.prefix + q.goal + q.unit);
-      text(ctx, qshow, x + w - 74, qy + 8, { size: 9.5, color: T.txt3, align: 'right', maxW: 64 });
+      text(ctx, qshow, x + w - 74, qy + 8, { size: 10, color: T.txt3, align: 'right', maxW: 64 });
       text(ctx, (q.done ? '✅ ' : '') + '+' + money(q.reward), x + w - 10, qy + 8,
         { size: 10, weight: 800, align: 'right', color: q.done ? T.green : T.amber });
       qy += 30;
@@ -573,7 +573,7 @@ function panelManage(ctx, x, y, w, s) {
     var names = [];
     for (var ln = 0; ln < localIngs.length; ln++) names.push(localIngs[ln].emoji + localIngs[ln].name);
     text(ctx, '🗺️ 本地特产：' + names.join('、'), x + 8, ry + 4,
-      { size: 9.5, color: T.amber, maxW: w - 16 });
+      { size: 10, color: T.amber, maxW: w - 16 });
     ry += 22;
   }
   for (var i = 0; i < ING.length; i++) {
@@ -647,7 +647,7 @@ function panelManage(ctx, x, y, w, s) {
   for (var mi = 0; mi < mks.length; mi++) {
     GFX.button(ctx, x + 10 + mi * (mw + 8), y + 40, mw, 22,
       mks[mi] === 0 ? '不投' : '¥' + mks[mi],
-      { kind: 'ghost', act: 'mkt', id: String(mks[mi]), size: 9.5, r: 6 });
+      { kind: 'ghost', act: 'mkt', id: String(mks[mi]), size: 10, r: 6 });
   }
   text(ctx, num(s.lastMarketing) > 0
     ? '📢 昨日投入 ' + money(num(s.lastMarketing)) + ' 已用完，今天要重新投'
@@ -716,9 +716,9 @@ function panelManage(ctx, x, y, w, s) {
 }
 
 function intel(ctx, x, y, w, k, v, sub) {
-  text(ctx, k, x, y, { size: 9.5, color: T.txt3 });
+  text(ctx, k, x, y, { size: 10, color: T.txt3 });
   text(ctx, v, x, y + 13, { size: 12, weight: 800, color: T.txt, maxW: w });
-  if (sub) text(ctx, sub, x, y + 30, { size: 9, color: T.txt3, maxW: w });
+  if (sub) text(ctx, sub, x, y + 30, { size: 10, color: T.txt3, maxW: w });
 }
 
 /* ============================================================
@@ -739,7 +739,7 @@ function panelLab(ctx, x, y, w, s) {
     { size: 10, align: 'right', color: T.cyan });
   y += 34;
   text(ctx, '累计卖出杯数跨局继承 · 专精一款比铺开十款更划算',
-    x + 10, y + 2, { size: 9.5, color: T.txt3, maxW: w - 20 });
+    x + 10, y + 2, { size: 10, color: T.txt3, maxW: w - 20 });
   y += 16;
   /* 两列排布（10 款 → 5 行）：单列 10 行会把下面的配方行顶出首屏，
      玩家打开研发页先看到一整屏招牌进度、却看不到任何能点的配方。
@@ -761,7 +761,7 @@ function panelLab(ctx, x, y, w, s) {
        招牌是长期目标，研发是当次决策，后者更急。 */
     text(ctx, shown.map(function (g) {
       return g.emoji + g.name + ' ' + g.cups + '/' + g.need;
-    }).join('　'), x + 10, y + 4, { size: 9, color: T.txt3, maxW: w - 20 });
+    }).join('　'), x + 10, y + 4, { size: 10, color: T.txt3, maxW: w - 20 });
     y += 20;
   } else {
     for (var sg = 0; sg < shown.length; sg += 2) {
@@ -770,11 +770,11 @@ function panelLab(ctx, x, y, w, s) {
         var gx = x + cc * (cw2 + 8);
         GFX.fillRR(ctx, gx, y, cw2, 26, 8, 'rgba(53,229,240,.07)', null);
         text(ctx, g.emoji, gx + 6, y + 5, { size: 13 });
-        text(ctx, g.name, gx + 26, y + 6, { size: 9.5, weight: 700, maxW: cw2 - 78 });
+        text(ctx, g.name, gx + 26, y + 6, { size: 10, weight: 700, maxW: cw2 - 78 });
         text(ctx, g.lv > 0 ? g.tierEmoji + g.tierName : '—', gx + cw2 - 50, y + 6,
-          { size: 9, color: g.lv > 0 ? T.cyan : T.txt3, maxW: 46 });
+          { size: 10, color: g.lv > 0 ? T.cyan : T.txt3, maxW: 46 });
         text(ctx, g.cups + (g.maxed ? '' : '/' + g.nextCups), gx + cw2 - 6, y + 6,
-          { size: 8.5, align: 'right', color: T.txt3, maxW: 48 });
+          { size: 10, align: 'right', color: T.txt3, maxW: 48 });
         GFX.bar(ctx, gx + 6, y + 19, cw2 - 12, 4, g.ratio, { color: T.cyan });
       }
       y += 30;
@@ -800,17 +800,17 @@ function panelLab(ctx, x, y, w, s) {
     /* V9 菜系 + 工坊状态：菜系是产品线，玩家需要一眼看出这条线能不能做 */
     var cu2 = cuisineById(r.cuisine);
     var sub2 = (cu2 ? cu2.emoji + cu2.name + ' · ' : '') + tagNames(r.tags) + ' · ' + money(num(r.price, 0));
-    text(ctx, sub2, x + 10, y + 25, { size: 9.5, color: T.txt3, maxW: w - 96 });
+    text(ctx, sub2, x + 10, y + 25, { size: 10, color: T.txt3, maxW: w - 96 });
     /* V9：工坊是可选深度，不是门槛 —— 提示这条线开了没开 */
     if (r.cuisine) {
       var wsl = workshopLevel(s, r.cuisine);
       text(ctx, wsl > 0 ? ('🏭 Lv.' + wsl + ' · 权重+' + Math.round((workshopById(r.cuisine).saleBonus[wsl] || 0) * 100) + '%')
         : '🏭 未开线 · 研发省' + Math.round((workshopById(r.cuisine).researchCut || 0) * 100) + '%',
-        x + 10, y + 36, { size: 9, color: wsl > 0 ? T.cyan : T.txt3 });
+        x + 10, y + 36, { size: 10, color: wsl > 0 ? T.cyan : T.txt3 });
     }
     if (sgv.lv > 0) {
       text(ctx, sgv.tier.emoji + ' ' + sgv.tier.name, x + w - 84, y + 8,
-        { size: 9.5, align: 'right', color: T.cyan, maxW: 74 });
+        { size: 10, align: 'right', color: T.cyan, maxW: 74 });
     }
     GFX.button(ctx, x + w - 74, y + 10, 64, 24, on ? '✅ 在售' : '上架',
       { kind: on ? 'ghost' : 'primary', act: 'toggle', id: r.id, size: 10.5, r: 8 });
@@ -868,7 +868,7 @@ function panelLab(ctx, x, y, w, s) {
       : (!g.city ? '全国都能做 · 5 条基础菜系'
         : (g.isHere ? (g.nodes.length + ' 道本地菜') : '需切换经营城市才能研发')),
       x + w - 4, y + 8,
-      { size: 9, align: 'right', color: g.isHere || isAch || !g.city ? T.txt3 : T.amber });
+      { size: 10, align: 'right', color: g.isHere || isAch || !g.city ? T.txt3 : T.amber });
     y += 20;
 
     /* 按阶段分组 */
@@ -884,7 +884,7 @@ function panelLab(ctx, x, y, w, s) {
       var nodes = byStage[st];
       if (st === 99) {
         text(ctx, '📜 成就专属 · 不在研发树中', x + 8, y + 4,
-          { size: 9, color: T.amber, maxW: w - 16 });
+          { size: 10, color: T.amber, maxW: w - 16 });
         y += 18;
       } else if (st > 0) {
         /* 阶段标题带前置提示 —— Canvas 没有 tooltip，
@@ -899,7 +899,7 @@ function panelLab(ctx, x, y, w, s) {
           }
         }
         text(ctx, '第 ' + st + ' 阶段' + (pre.length ? ' · 需先做「' + pre.join('、') + '」' : ''),
-          x + 8, y + 4, { size: 9, color: T.cyan, maxW: w - 16 });
+          x + 8, y + 4, { size: 10, color: T.cyan, maxW: w - 16 });
         y += 18;
       }
       for (var ni = 0; ni < nodes.length; ni++) {
@@ -923,9 +923,9 @@ function panelLab(ctx, x, y, w, s) {
         text(ctx, nr.emoji + ' ' + nr.name, x + 10, y + 8, { size: 12, weight: 700 });
         text(ctx, nr.city ? (nr.city === currentCityId(s) ? '📍本地' : '🗺️' + ((cityById(nr.city) || {}).name || ''))
           : (tagNames(nr.tags)),
-        x + 10, y + 26, { size: 9.5, color: T.txt3, maxW: w - 100 });
+        x + 10, y + 26, { size: 10, color: T.txt3, maxW: w - 100 });
         if (why) {
-          text(ctx, why, x + 10, y + 26, { size: 9.5, color: T.amber, maxW: w - 100 });
+          text(ctx, why, x + 10, y + 26, { size: 10, color: T.amber, maxW: w - 100 });
         }
         GFX.button(ctx, x + w - 84, y + 12, 74, 26,
           nd.status === 'ach' ? '成就获得' : ('研发 ' + money(nd.cost)),
@@ -967,14 +967,14 @@ function cityBar(ctx, x, y, w, s) {
   /* ★ 文案与 H5 端 cityBarHtml 保持一致（「本店可用菜系 N 个」）。
      两版措辞不统一会让玩家怀疑是两个不同的功能。*/
   text(ctx, '本店可用菜系 ' + avail + ' 个' + (local.length ? ' · 本地特色 ' + local.length + ' 系' : ' · 本地暂无特色'),
-    x + w - 10, y + 9, { size: 9, align: 'right', color: T.cyan });
+    x + w - 10, y + 9, { size: 10, align: 'right', color: T.cyan });
   if (localIngs.length) {
     h = 56;
     var names = [];
     for (var i = 0; i < localIngs.length; i++) names.push(localIngs[i].emoji + localIngs[i].name);
     GFX.card(ctx, x, y, w, h);
     text(ctx, '🗺️ ' + names.join('、'), x + 10, y + 40,
-      { size: 9, color: T.amber, maxW: w - 20 });
+      { size: 10, color: T.amber, maxW: w - 20 });
   }
   return y + h + 6;
 }
@@ -995,17 +995,17 @@ function panelVenue(ctx, x, y, w, s) {
   GFX.card(ctx, x, y, w, 62);
   text(ctx, '🏙️ 经营信息', x + 10, y + 9, { size: 12.5, weight: 800 });
   text(ctx, v.typeName + ' · ' + [v.provName, v.cityName, v.districtName].filter(Boolean).join(' / '),
-    x + w - 10, y + 10, { size: 9.5, align: 'right', color: T.txt3, maxW: w * 0.55 });
-  text(ctx, '场地类型（点按循环切换）', x + 10, y + 26, { size: 9.5, color: T.txt2 });
+    x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3, maxW: w * 0.55 });
+  text(ctx, '场地类型（点按循环切换）', x + 10, y + 26, { size: 10, color: T.txt2 });
   GFX.button(ctx, x + 10, y + 40, 124, 30, v.typeEmoji + ' ' + v.typeName + ' ▸',
     { kind: 'primary', act: 'vtypeNext', size: 11, r: 9 });
-  text(ctx, v.typeDesc, x + 144, y + 48, { size: 9, color: T.txt3, maxW: w - 154 });
+  text(ctx, v.typeDesc, x + 144, y + 48, { size: 10, color: T.txt3, maxW: w - 154 });
   y += 72;
 
   /* 省市：点一下切到下一个值。列表很长时循环是唯一合理的触屏交互 */
   GFX.card(ctx, x, y, w, 96);
   text(ctx, '经营城市', x + 10, y + 9, { size: 12.5, weight: 800 });
-  text(ctx, '限中国大陆 · 点按循环', x + w - 10, y + 10, { size: 9, align: 'right', color: T.txt3 });
+  text(ctx, '限中国大陆 · 点按循环', x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3 });
   var halfW = (w - 30) / 2;
   GFX.button(ctx, x + 10, y + 26, halfW, 30, '省 ' + v.provName + ' ▸',
     { kind: 'ghost', act: 'vprovNext', size: 10, r: 9 });
@@ -1016,20 +1016,20 @@ function panelVenue(ctx, x, y, w, s) {
     GFX.button(ctx, x + 10, y + 60, w - 20, 30, '区 ' + (v.districtName || '（不指定）') + ' ▸',
       { kind: 'ghost', act: 'vdistNext', size: 10, r: 9 });
   } else {
-    text(ctx, '该城市暂未收录区级（可选仅到市级）', x + 10, y + 70, { size: 9, color: T.txt3, maxW: w - 20 });
+    text(ctx, '该城市暂未收录区级（可选仅到市级）', x + 10, y + 70, { size: 10, color: T.txt3, maxW: w - 20 });
   }
   y += 106;
 
   /* 地图坐标：Canvas 无软键盘，用「定位 / 清除」 */
   GFX.card(ctx, x, y, w, 74);
   text(ctx, '经营地图位置', x + 10, y + 9, { size: 12.5, weight: 800 });
-  text(ctx, GEO.COORD_SYS + '（高德）', x + w - 10, y + 10, { size: 9, align: 'right', color: T.txt3 });
+  text(ctx, GEO.COORD_SYS + '（高德）', x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3 });
   text(ctx, v.hasGeo ? (v.geo.lng + ', ' + v.geo.lat) : '尚未选点',
     x + 10, y + 30, { size: 11, color: v.hasGeo ? T.cyan : T.txt3, maxW: w - 20 });
   GFX.button(ctx, x + 10, y + 46, 96, 28, v.hasGeo ? '清除坐标' : '定位当前城市',
     { kind: v.hasGeo ? 'ghost' : 'primary', act: v.hasGeo ? 'vgeoclear' : 'vgeoCity', size: 10, r: 9 });
   text(ctx, '境内 ' + GEO.MIN_LAT + '~' + GEO.MAX_LAT + ' / ' + GEO.MIN_LNG + '~' + GEO.MAX_LNG,
-    x + 116, y + 63, { size: 8.5, color: T.txt3, maxW: w - 126 });
+    x + 116, y + 63, { size: 10, color: T.txt3, maxW: w - 126 });
   y += 84;
   return y;
 }
@@ -1060,7 +1060,7 @@ function panelUp(ctx, x, y, w, s) {
     x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3 });
   y += 40;
   text(ctx, '工坊 = 三层加成（成本下降为主力 / 研发更便宜 / 更抢手）；不建也能研发上架',
-    x + 4, y + 2, { size: 9.5, color: T.txt3, maxW: w - 8 });
+    x + 4, y + 2, { size: 10, color: T.txt3, maxW: w - 8 });
   y += 18;
   for (var wi = 0; wi < cvs2.length; wi++) {
     var cv2 = cvs2[wi];
@@ -1069,12 +1069,12 @@ function panelUp(ctx, x, y, w, s) {
     text(ctx, cv2.emoji + ' ' + wsn.name + ' Lv.' + cv2.level + '/' + cv2.maxLevel,
       x + 10, y + 8, { size: 11, weight: 700, maxW: w - 90 });
     text(ctx, cv2.unlocked + '/' + cv2.total + ' 款已研发', x + 10, y + 24,
-      { size: 9.5, color: T.txt3 });
+      { size: 10, color: T.txt3 });
     var focusTxt2 = cv2.focusCount >= 2
       ? ('🔥 主打' + cv2.focusLabel + ' +' + Math.round(cv2.focusBonus * 100) + '%')
       : ('同系满2款触发主打 · 现' + cv2.focusCount + '款');
     text(ctx, focusTxt2, x + 10, y + 40,
-      { size: 9, color: cv2.focusCount >= 2 ? T.amber : T.txt3, maxW: w - 100 });
+      { size: 10, color: cv2.focusCount >= 2 ? T.amber : T.txt3, maxW: w - 100 });
     if (cv2.cost == null) {
       text(ctx, '已满级', x + w - 10, y + 22, { size: 10, align: 'right', color: T.green });
     } else {
@@ -1128,9 +1128,9 @@ function panelUp(ctx, x, y, w, s) {
   text(ctx, '开局创业基金 ' + money(prestigeStartCash(mbp)) + '（封顶 ' + money(CFG.BP_START_CAP) + '）',
     x + w - 10, y + 9, { size: 10, align: 'right', color: T.green });
   text(ctx, '本局已到账 +' + money(num(s.startBonus, 0)) + '，由你决定投去雇人 / 提速 / 开店',
-    x + 10, y + 28, { size: 9.5, color: T.txt3, maxW: w - 20 });
+    x + 10, y + 28, { size: 10, color: T.txt3, maxW: w - 20 });
   text(ctx, '声望不再直接加客流（客人多到做不过来只会流失扣口碑）；现在转生 +'
-    + prestigeGain(s) + ' ★', x + 10, y + 44, { size: 9.5, color: T.txt3, maxW: w - 20 });
+    + prestigeGain(s) + ' ★', x + 10, y + 44, { size: 10, color: T.txt3, maxW: w - 20 });
   y += 72;
 
   /* 转生 / 收官 */
@@ -1244,7 +1244,7 @@ function panelAch(ctx, x, y, w, s) {
     { size: 11, align: 'right', color: T.amber });
   y += 44;
   text(ctx, '本局达成给现金；跨局首次达成额外给 ★（' + achStarText() + '）',
-    x + 10, y - 6, { size: 9.5, color: T.txt3, maxW: w - 20 });
+    x + 10, y - 6, { size: 10, color: T.txt3, maxW: w - 20 });
 
   var cols = 3, cw = (w - 8 * (cols - 1)) / cols;
   for (var i = 0; i < ACHIEVEMENTS.length; i++) {
@@ -1257,7 +1257,7 @@ function panelAch(ctx, x, y, w, s) {
       on ? 'rgba(255,194,71,.5)' : T.line);
     text(ctx, a.emoji, cx + cw / 2, cy + 6, { size: 20, align: 'center' });
     text(ctx, a.name, cx + cw / 2, cy + 30, { size: 10, weight: 700, align: 'center', color: on ? T.amber : T.txt3, maxW: cw - 6 });
-    text(ctx, on ? '+' + a.reward.bp + '★' : a.desc, cx + cw / 2, cy + 44, { size: 8.5, align: 'center', color: T.txt3, maxW: cw - 6 });
+    text(ctx, on ? '+' + a.reward.bp + '★' : a.desc, cx + cw / 2, cy + 44, { size: 10, align: 'center', color: T.txt3, maxW: cw - 6 });
   }
   return y + Math.ceil(ACHIEVEMENTS.length / cols) * 68 + 10;
 }
@@ -1312,7 +1312,7 @@ function drawStage(ctx, L, s) {
   ];
   for (var i = 0; i < 4; i++) {
     GFX.fillRR(ctx, x + i * (lw + 6), y, lw, 38, 10, T.card, T.line);
-    text(ctx, live[i].k, x + i * (lw + 6) + lw / 2, y + 4, { size: 9, align: 'center', color: T.txt3 });
+    text(ctx, live[i].k, x + i * (lw + 6) + lw / 2, y + 4, { size: 10, align: 'center', color: T.txt3 });
     text(ctx, live[i].v, x + i * (lw + 6) + lw / 2, y + 16,
       { size: 14, weight: 800, align: 'center', color: live[i].c, maxW: lw - 6 });
   }
@@ -1395,7 +1395,7 @@ function drawStage(ctx, L, s) {
       if (compact) {
         text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + 8, sy + 16, { size: 13 });
         text(ctx, pay, sx + sw - 8, sy + 18,
-          { size: 9.5, align: 'right', color: hit ? T.amber : T.txt2, maxW: sw - 34 });
+          { size: 10, align: 'right', color: hit ? T.amber : T.txt2, maxW: sw - 34 });
         GFX.bar(ctx, sx + 8, sy + sh - 16, sw - 16, 5, num(st.order.progress), { color: T.cyan });
       } else {
         text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + sw / 2, sy + 22, { size: 17, align: 'center' });
@@ -1478,7 +1478,7 @@ function drawModal(ctx, L) {
   /* 超高时给一条提示，玩家才知道能滑 */
   if (VIEW.modalMax > 0) {
     text(ctx, '↕ 上下滑动查看更多', box.x + box.w / 2, box.y + box.h - 12,
-      { size: 9.5, align: 'center', color: T.txt3 });
+      { size: 10, align: 'center', color: T.txt3 });
   }
   /* 事件弹窗不给 ×：step() 每帧都会重建它，给了 × 就是「关掉→下一帧又弹出来」，
      看起来像按钮失灵。H5 的 showEvent() 同样锁死，必须选一个选项。 */
@@ -1544,7 +1544,7 @@ MODALS.report = function (ctx, b, m) {
   for (var i = 0; i < items.length; i++) {
     var ix = x + (i % cols) * (cw + 8), iy = y + Math.floor(i / cols) * 44;
     GFX.fillRR(ctx, ix, iy, cw, 38, 10, T.card, T.line);
-    text(ctx, items[i].k, ix + 8, iy + 5, { size: 9.5, color: T.txt3 });
+    text(ctx, items[i].k, ix + 8, iy + 5, { size: 10, color: T.txt3 });
     text(ctx, items[i].v, ix + 8, iy + 19, { size: 12.5, weight: 800, color: items[i].c, maxW: cw - 16 });
   }
   y += Math.ceil(items.length / cols) * 44 + 8;
@@ -1647,7 +1647,7 @@ MODALS.chart = function (ctx, b, m) {
   for (var i = 0; i < items.length; i++) {
     var ix = x + (i % cols) * (cw + 8), iy = y + Math.floor(i / cols) * 44;
     GFX.fillRR(ctx, ix, iy, cw, 38, 10, T.card, T.line);
-    text(ctx, items[i].k, ix + 8, iy + 5, { size: 9.5, color: T.txt3 });
+    text(ctx, items[i].k, ix + 8, iy + 5, { size: 10, color: T.txt3 });
     text(ctx, items[i].v, ix + 8, iy + 19, { size: 12.5, weight: 800, color: items[i].c, maxW: cw - 16 });
   }
 };
@@ -1686,8 +1686,8 @@ MODALS.card = function (ctx, b, m) {
     /* 高度按「收益 + 代价」两行算，用 para 换行会被裁掉一半 */
     GFX.fillRR(ctx, x, y, w, 58, 12, T.card2, T.line);
     text(ctx, c.emoji + ' ' + c.name, x + 11, y + 8, { size: 12.5, weight: 800, maxW: w - 90 });
-    text(ctx, '↑ ' + c.gain, x + 11, y + 27, { size: 9.5, color: T.green, maxW: w - 100 });
-    text(ctx, '↓ ' + c.cost, x + 11, y + 41, { size: 9.5, color: T.red, maxW: w - 100 });
+    text(ctx, '↑ ' + c.gain, x + 11, y + 27, { size: 10, color: T.green, maxW: w - 100 });
+    text(ctx, '↓ ' + c.cost, x + 11, y + 41, { size: 10, color: T.red, maxW: w - 100 });
     GFX.button(ctx, x + w - 66, y + 16, 56, 26, '选它',
       { kind: i === 0 ? 'primary' : 'ghost', act: 'pickcard', id: c.id, size: 11, r: 8 });
     y += 66;
@@ -1716,10 +1716,10 @@ MODALS.dailyrank = function (ctx, b, m) {
 
   var cw = (w - 10) / 2;
   GFX.fillRR(ctx, x, y, cw, 40, 10, T.card2, T.line);
-  text(ctx, '今日最好', x + 9, y + 6, { size: 9.5, color: T.txt3 });
+  text(ctx, '今日最好', x + 9, y + 6, { size: 10, color: T.txt3 });
   text(ctx, today ? money(today) : '未挑战', x + 9, y + 20, { size: 13, weight: 800, color: T.amber });
   GFX.fillRR(ctx, x + cw + 10, y, cw, 40, 10, T.card2, T.line);
-  text(ctx, '个人最佳', x + cw + 19, y + 6, { size: 9.5, color: T.txt3 });
+  text(ctx, '个人最佳', x + cw + 19, y + 6, { size: 10, color: T.txt3 });
   text(ctx, ever ? money(ever) : '—', x + cw + 19, y + 20, { size: 13, weight: 800, color: T.amber });
   y += 50;
 
@@ -1743,7 +1743,7 @@ MODALS.dailyrank = function (ctx, b, m) {
       GFX.fillRR(ctx, bx, y + 8 + (bh - hgt), bw2, hgt, 3,
         (ever > 0 && r.best >= ever) ? 'rgba(255,194,71,.85)' : 'rgba(53,229,240,.78)');
       text(ctx, String(r.d).slice(5), x + i * slot + slot / 2, y + bh + 10,
-        { size: 8.5, align: 'center', color: T.txt3 });
+        { size: 10, align: 'center', color: T.txt3 });
     }
   }
   y += bh + 30;
@@ -1932,7 +1932,7 @@ function drawEnd(ctx, L) {
   for (var i = 0; i < its.length; i++) {
     var ix = x + (i % 2) * (cw + 8), iy = y + Math.floor(i / 2) * 40;
     GFX.fillRR(ctx, ix, iy, cw, 34, 10, T.card, T.line);
-    text(ctx, its[i].k, ix + 8, iy + 9, { size: 9.5, color: T.txt3 });
+    text(ctx, its[i].k, ix + 8, iy + 9, { size: 10, color: T.txt3 });
     text(ctx, its[i].v, ix + cw - 8, iy + 9, { size: 11.5, weight: 700, align: 'right', color: T.amber });
   }
   y += Math.ceil(its.length / 2) * 40 + 12;
@@ -1948,9 +1948,9 @@ function drawEnd(ctx, L) {
       var axx = x + 10 + (ai % 2) * (axw + 6);
       var axy = y + 30 + Math.floor(ai / 2) * 30;
       text(ctx, ax.emoji + ' ' + ax.name + (ax.title ? ' · ' + ax.title : ''),
-        axx, axy, { size: 9.5, weight: 700, color: ax.tier > 0 ? T.amber : T.txt3, maxW: axw });
+        axx, axy, { size: 10, weight: 700, color: ax.tier > 0 ? T.amber : T.txt3, maxW: axw });
       text(ctx, GFX.plainText(ax.desc), axx, axy + 13,
-        { size: 8.5, color: T.txt3, maxW: axw });
+        { size: 10, color: T.txt3, maxW: axw });
     }
     y += 26 + Math.ceil(axs.length / 2) * 30 + 10;
   }
