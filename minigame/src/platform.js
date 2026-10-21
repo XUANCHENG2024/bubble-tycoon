@@ -190,14 +190,29 @@ var PLAT = (function () {
         else if (typeof tt.vibrateShort === 'function') tt.vibrateShort();
       } catch (e) { /* 部分机型没有马达，忽略 */ }
     },
-    /* 复制到剪贴板：小游戏有原生 API，浏览器走异步 Clipboard */
-    copy: function (text) {
+    /* 复制到剪贴板。
+       返回值语义很重要：以前浏览器分支是 fire-and-forget，Promise 被拒时
+       也已经 return true 了，于是「📋 已复制」是个**假成功** —— 玩家把码丢了
+       还以为复制过，存档直接找不回来。现在浏览器分支只在"能发起写入"时返回
+       'pending'，由调用方用回调拿真实结果；TT 分支保持同步 true/false。 */
+    copy: function (text, onDone) {
       try {
-        if (isTT) { tt.setClipboardData({ data: text }); return true; }
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text); return true;
+        if (isTT) {
+          tt.setClipboardData({
+            data: text,
+            success: function () { if (onDone) onDone(true); },
+            fail: function () { if (onDone) onDone(false); },
+          });
+          return 'pending';
         }
-      } catch (e) { /* 忽略 */ }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(
+            function () { if (onDone) onDone(true); },
+            function () { if (onDone) onDone(false); }
+          );
+          return 'pending';
+        }
+      } catch (e) { /* 忽略，落到 false */ }
       return false;
     },
   };

@@ -1,4 +1,12 @@
-/* XSS / 脏存档 专项验证：确认恶意字符串只作为文本存在，不会被解析成元素或事件属性 */
+/* ============================================================
+ *  XSS / 脏存档 专项验证
+ *
+ *  判定口径很重要：早期版本靠 `window.__PWN` 这个 onerror 回调来判断，
+ *  但 jsdom 默认**不加载外部资源**（img src=x 根本不会发起请求），
+ *  onerror 永远不触发 —— 那条断言恒为 false，看着像"很安全"，其实是虚假安全感。
+ *  真正可靠的判据是：payload 有没有被浏览器**解析成元素或事件属性**。
+ *  所以这里统一数 img / script / [onerror] / [onload] 的个数。
+ * ============================================================ */
 const fs = require('fs'), path = require('path');
 const { JSDOM, VirtualConsole } = require('./jsdom-loader');
 
@@ -12,41 +20,75 @@ html = html.replace(/<script src="js\/([a-z]+)\.js"><\/script>/g,
 const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'http://localhost/', pretendToBeVisual: true, virtualConsole: vc });
 const { window } = dom, doc = window.document;
 
+let failed = 0;
+function check(cond, msg) {
+  console.log(`  ${cond ? '✔' : '✘'} ${msg}`);
+  if (!cond) failed++;
+}
+/* 有没有被解析成真正的元素 / 事件属性 */
+function evilCount(el) {
+  const q = s => el.querySelectorAll(s).length;
+  return { img: q('img'), script: q('script'), svg: q('svg'), onerror: q('[onerror]'), onload: q('[onload]') };
+}
+function total(c) { return c.img + c.script + c.svg + c.onerror + c.onload; }
+
+/* 覆盖所有会进 innerHTML 的玩家可控字符串：
+   日志、员工/候选人名、对手名、新闻文案、成就与任务文案 */
+const PAYLOADS = [
+  '<img src=x onerror="window.__PWN=1">',
+  '<script>window.__PWN2=1<\/script>',
+  '<svg onload=alert(1)>',
+  '"><b onclick="window.__PWN3=1">evil</b>',
+];
+
 setTimeout(() => {
   window.eval('window.__G = { UI, sanitizeState, importSave, b64encode, newGame };');
   const G = window.__G;
+
   const s = window.newGame('normal', 0);
-  s.log = ['<img src=x onerror="window.__PWN=1">', '<script>window.__PWN2=1<\/script>', '<svg onload=alert(1)>'];
-  s.rival.name = '<img src=y onerror="window.__PWN3=1">';
-  s.staff = [{ id: 9, name: '<b onclick="window.__PWN4=1">evil</b>', emoji: '<svg>', skill: 1, trait: null, wage: 50, stamina: 100 }];
+  s.log = PAYLOADS.slice();
+  s.rival.name = '<img src=y onerror="window.__PWN4=1">';
+  s.news = { id: 'evil', text: '<img src=z onerror="window.__PWN5=1">📰 新闻', fx: {} };
+  s.staff = [{ id: 9, name: '<b onclick="window.__PWN6=1">evil</b>', emoji: '<svg>', skill: 1, trait: null, wage: 50, stamina: 100 }];
+  s.candidates = [{ name: '<img src=c onerror="window.__PWN7=1">', emoji: '🧑', skill: 1, trait: null, wage: 60, fee: 260 }];
   window.S = s;
-  G.UI.setTab('manage'); G.UI.setTab('staff'); G.UI.setTab('rival');
+  G.UI.setTab('manage'); G.UI.setTab('staff'); G.UI.setTab('rival'); G.UI.setTab('lab');
+  G.UI.renderHUD();
 
-  const pm = doc.getElementById('panel-manage');
-  console.log('--- 日志区实际 HTML ---');
-  console.log(((pm.innerHTML.match(/jrow[\s\S]{0,110}/) || [''])[0]).replace(/\n\s*/g, ' '));
-  console.log('--- 解析结果 ---');
-  for (const id of ['panel-manage', 'panel-staff', 'panel-rival']) {
+  console.log('--- 直接把脏状态塞给渲染层 ---');
+  for (const id of ['panel-manage', 'panel-staff', 'panel-rival', 'panel-lab', 'hudDay', 'hudCash']) {
     const el = doc.getElementById(id);
-    console.log(`  ${id}: img=${el.querySelectorAll('img').length} script=${el.querySelectorAll('script').length} [onerror]=${el.querySelectorAll('[onerror]').length} [onclick]=${el.querySelectorAll('[onclick]').length}`);
+    if (!el) { check(false, `${id} 面板不存在`); continue; }
+    const c = evilCount(el);
+    check(total(c) === 0, `${id}：payload 未被解析成元素/事件属性（img=${c.img} script=${c.script} svg=${c.svg} onerror=${c.onerror} onload=${c.onload}）`);
   }
-  console.log('注入是否得逞(__PWN*):', !!(window.__PWN || window.__PWN2 || window.__PWN3 || window.__PWN4));
-  console.log('payload 以纯文本保留:', pm.textContent.includes('onerror="window.__PWN=1"'));
-  console.log('脚本错误:', errors.length ? errors.slice(0, 3) : '无');
+  const pm = doc.getElementById('panel-manage');
+  check(pm.textContent.includes('onerror="window.__PWN=1"'), 'payload 以纯文本原样保留（说明转义生效）');
 
-  /* 再走一遍「导出→导入→渲染」全链路 */
+  /* 再走一遍「导出 → 导入 → 渲染」全链路：这是玩家真正能拿到别人存档的路径 */
+  console.log('--- 导出 → 导入 → 渲染（真实的外部存档入口）---');
   const evil = Object.assign({}, s, { v: 2, day: 3 });
   const r = G.importSave(G.b64encode(JSON.stringify(evil)));
-  console.log('导入成功:', !!r.ok);
+  check(!!r.ok, '恶意存档能被导入（清洗器放行，但必须已净化）');
   if (r.ok) {
     window.S = r.state;
-    G.UI.setTab('manage'); G.UI.setTab('rival'); G.UI.renderHUD();
-    const el = doc.getElementById('panel-manage');
-    console.log('导入后 img/script/[onerror]:',
-      el.querySelectorAll('img').length, el.querySelectorAll('script').length, el.querySelectorAll('[onerror]').length);
-    console.log('HUD:', doc.getElementById('hudCash').textContent + doc.getElementById('hudRep').textContent + doc.getElementById('hudWorth').textContent);
+    G.UI.setTab('manage'); G.UI.setTab('rival'); G.UI.setTab('lab'); G.UI.renderHUD();
+    for (const id of ['panel-manage', 'panel-rival', 'panel-lab']) {
+      const el = doc.getElementById(id);
+      const c = evilCount(el);
+      check(total(c) === 0, `${id}：导入后 payload 仍未变成元素（${JSON.stringify(c)}）`);
+    }
   }
-  console.log('注入是否得逞(导入后):', !!(window.__PWN || window.__PWN2 || window.__PWN3 || window.__PWN4));
-  console.log('脚本错误:', errors.length ? errors.slice(0, 3) : '无');
-  process.exit(errors.length ? 1 : 0);
+
+  /* 引擎内部拼 HTML 的地方（adviceOf 带 <b> 标签，渲染层会整段放行） */
+  console.log('--- 引擎生成的 HTML 片段 ---');
+  const adv = window.eval('(function(){ var s2 = newGame("normal",0); s2.rival.name = "<img src=q onerror=window.__PWN8=1>"; s2.rival.rep = 80; s2.rep = 20; var box = document.createElement("div"); box.innerHTML = adviceOf(s2).map(function(a){return a.text;}).join(""); return box.querySelectorAll("img").length + "|" + box.querySelectorAll("[onerror]").length; })()');
+  check(adv === '0|0', `adviceOf 里的对手名已转义（img|[onerror] = ${adv}）`);
+
+  check(errors.length === 0, `无脚本错误${errors.length ? '：' + errors.slice(0, 3).join(' / ') : ''}`);
+
+  console.log('');
+  if (failed === 0) console.log('✅ 注入未得逞：' + PAYLOADS.length + ' 组 payload 均作为纯文本存在');
+  else console.log(`❌ 有 ${failed} 项被成功注入`);
+  process.exit(failed === 0 ? 0 : 1);
 }, 60);

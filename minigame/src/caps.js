@@ -9,6 +9,10 @@
  *    ④ 订阅消息   —— 同上。
  *    ⑤ 广告（插屏 / 激励）—— 需软著资质。
  *    ① 内购       —— 需版号资质 + 已开通虚拟支付。
+ *    ⑥ 分享       —— 无需后台配置，宿主支持就显示。
+ *    ⑦ 每日挑战日榜 —— 无需后台配置（分区标识自定义），默认开。
+ *                    用 tt.setImRankData / tt.getImRankList 这对原生 API，
+ *                    不碰开放数据域 —— 详见 ⑦ 那一节的注释。
  *
  *  三条贯穿全文件的原则：
  *
@@ -63,6 +67,20 @@ var CAPS = (function () {
     /* {worth} 会被 money() 的结果替换（自带 ¥），别在这里再加一个 ¥ */
     shareTitle: '我在奶茶星球第 {day} 天做到了净资产 {worth}，你能超过我吗？',
     shareDesc: '🧋 低价囤货、招人扩产能、连点加速出杯 —— 来开一家奶茶店',
+
+    /* ⑦ 每日挑战日榜
+       与微信那套不同：抖音这里不需要在后台把 key 配成「排行榜标识」，
+       分区标识（zoneId）直接自定义即可，所以默认就是开的。
+       宿主不支持时两个 API 都不存在，会自动降级到本机记录。 */
+    rank: true,
+    /* 每个小游戏除 default / test 外最多 10 个分区，
+       「每日挑战」单独占一个，不与默认分区混用。 */
+    rankZoneId: 'daily',
+    /* day / week / month / all。日榜正好对应「全网同一天打同一局」 */
+    rankType: 'day',
+    rankTitle: '每日挑战 · 净资产榜',
+    /* 分数后缀。净资产单位是元，标题里已经写了，这里留空免得显示成「38402 分」 */
+    rankSuffix: '',
     iapGoods: [
       /* 示例，按需改：
       { id: 'pearl60',  name: '60 珍珠',  qty: 60,  price: 600,  grantCash: 1200, grantIng: 60 },
@@ -138,6 +156,9 @@ var CAPS = (function () {
     } catch (e) { sysPlatform = ''; }
     checkScene();
     if (CFG.shortcut) checkShortcut();
+    /* ⑦ 登录态预热：放在这里而不是等到上报/拉榜时才补，
+       是为了让 openRank 在触摸回调里能同步走到 getImRankList。 */
+    if (CFG.rank) ensureLogin();
   }
 
   function sidebarOn() { return isTT && CFG.sidebar && scene.supported; }
@@ -153,10 +174,12 @@ var CAPS = (function () {
     return true;
   }
 
-  /** 跳转侧边栏。onOk(true) = 玩家跳出去了 */
+  /** 跳转侧边栏。onOk(ok, reason)：reason = 'notsupported' 真不支持 /
+      'cancelled' 玩家取消 / 'failed' 接口报错。以前三种都只说"环境不支持"，
+      玩家明明是自己按了返回，却被提示成游戏问题。 */
   function gotoSidebar(onOk) {
     if (!sidebarOn() || typeof tt.navigateToScene !== 'function') {
-      if (onOk) onOk(false);
+      if (onOk) onOk(false, 'notsupported');
       return false;
     }
     try {
@@ -164,12 +187,13 @@ var CAPS = (function () {
         scene: 'sidebar',
         success: function (r) {
           /* 成功回调里 code=0 表示跳转成功，1 表示用户取消 */
-          if (onOk) onOk(!r || r.code === 0 || r.code === undefined);
+          var cancelled = !!(r && r.code === 1);
+          if (onOk) onOk(!cancelled, cancelled ? 'cancelled' : undefined);
         },
-        fail: function () { if (onOk) onOk(false); },
+        fail: function () { if (onOk) onOk(false, 'failed'); },
       });
       return true;
-    } catch (e) { if (onOk) onOk(false); return false; }
+    } catch (e) { if (onOk) onOk(false, 'failed'); return false; }
   }
 
   /* ============================================================
@@ -261,19 +285,25 @@ var CAPS = (function () {
     return rewarded;
   }
 
-  /** 播激励视频。onEnd(true) = 完整看完，可以发奖 */
+  /** 播激励视频。onEnd(ok, reason)：ok=false 时 reason 说明是哪种失败 ——
+      调用方要按原因给文案，不能一律说"环境不支持"（拉取失败 / 用户中途关掉 /
+      今天次数用完是三回事，混成一句玩家会以为游戏坏了）。 */
   function showRewarded(onEnd) {
-    if (!isTT || !CFG.rewardedAdUnitId) { if (onEnd) onEnd(false); return false; }
-    if (adLeft() <= 0) { if (onEnd) onEnd(false); return false; }
+    if (!isTT || !CFG.rewardedAdUnitId) { if (onEnd) onEnd(false, 'unconfigured'); return false; }
+    if (adLeft() <= 0) { if (onEnd) onEnd(false, 'exhausted'); return false; }
     var ad = ensureRewarded();
-    if (!ad) { if (onEnd) onEnd(false); return false; }
+    if (!ad) { if (onEnd) onEnd(false, 'loadfail'); return false; }
     var done = false;
-    var finish = function (ok) { if (done) return; done = true; if (onEnd) onEnd(ok); };
+    var finish = function (ok, why) { if (done) return; done = true; if (onEnd) onEnd(ok, why); };
     try {
       /* 官方：每个激励实例只能 show 一次，播完即释放，必须重新创建 */
-      ad.onClose(function (res) { rewarded = null; finish(!(res && res.isEnded === false)); });
-      thenable(ad.show(), function () { rewarded = null; finish(false); });
-    } catch (e) { rewarded = null; finish(false); }
+      ad.onClose(function (res) {
+        rewarded = null;
+        /* isEnded===false = 用户中途关掉；其它情况算看完（含正常播完） */
+        finish(!(res && res.isEnded === false), res && res.isEnded === false ? 'aborted' : undefined);
+      });
+      thenable(ad.show(), function () { rewarded = null; finish(false, 'loadfail'); });
+    } catch (e) { rewarded = null; finish(false, 'loadfail'); }
     return true;
   }
 
@@ -352,6 +382,112 @@ var CAPS = (function () {
   }
 
   /* ============================================================
+   *  ⑦ 每日挑战日榜
+   *
+   *  为什么用 tt.setImRankData / tt.getImRankList，
+   *  而不是 tt.setUserCloudStorage + 开放数据域：
+   *  后者是微信的做法 —— key 要在后台配成「排行榜标识」，而且自定义 UI
+   *  必须走开放数据域（一个独立子包，只能往 sharedCanvas 上渲染）。
+   *  抖音这边有省得多的原生路径：
+   *    上报  tt.setImRankData({ dataType: 0, value: '38402', zoneId })
+   *    拉榜  tt.getImRankList({ rankType: 'day', ... })  —— 平台直接画出原生榜单
+   *  只有想自定义 UI 才需要 getImRankData，而它必须在开放数据域里调用。
+   *  对当前「单 bundle 拼接」的架构，开放数据域是实打实的成本，不做。
+   *
+   *  两条硬约束（踩了是静默失败，不会报错）：
+   *  1. 必须先 tt.login。两个 API 的错误码里都有 21101 / 10601 not login，
+   *     拉榜未登录还会闪退 —— 所以在 init 里就预热一次。
+   *  2. value 是字符串，且必须是 [0, int32_MAX) 的正整数。
+   * ============================================================ */
+  var logged = false;
+  var rankShowing = false;
+  var lastSubmitted = -1;
+
+  /**
+   * 登录态预热。
+   * 已登录时同步回调 —— openRank 是在触摸回调里被调用的，
+   * 一旦这里走了异步，getImRankList 就脱离了手势上下文。
+   */
+  function ensureLogin(cb) {
+    if (!isTT || !CFG.rank) { if (cb) cb(false); return; }
+    if (logged) { if (cb) cb(true); return; }
+    if (typeof tt.login !== 'function') { if (cb) cb(false); return; }
+    try {
+      tt.login({
+        success: function () { logged = true; if (cb) cb(true); },
+        fail: function () { if (cb) cb(false); },
+      });
+    } catch (e) { if (cb) cb(false); }
+  }
+
+  /** 能上报才算「日榜可用」：拉得到 UI 却写不进分数是没有意义的 */
+  function rankOn() {
+    return !!(isTT && CFG.rank && typeof tt.setImRankData === 'function');
+  }
+  function rankListOn() {
+    return !!(isTT && CFG.rank && typeof tt.getImRankList === 'function');
+  }
+
+  /**
+   * 上报净资产。
+   * 只在「刷新了当天最好成绩」时调用（判定在引擎的 recordDaily 里）——
+   * 榜单按 value 从大到小排、每次上报是覆盖，拿一局摆烂成绩盖上去
+   * 等于自己把自己的名次冲掉。
+   */
+  function submitRank(score, onOk) {
+    if (!rankOn()) { if (onOk) onOk(false); return false; }
+    /* 钳制直接复用引擎的 rankScore()（engine.js 排在本文件之前装载）。
+       注意：这里的 CFG 是**本模块自己的平台配置**（IIFE 内的 var CFG 遮蔽了
+       data.js 的那份），里面没有 RANK_SCORE_MAX —— 引用它会得到 undefined、
+       Math.min 出 NaN，上报直接变成 "NaN"。常量的唯一来源在 data.js。 */
+    var v = rankScore(score);
+    ensureLogin(function (okLogin) {
+      if (!okLogin) { if (onOk) onOk(false); return; }
+      try {
+        tt.setImRankData({
+          dataType: 0,
+          value: String(v),
+          priority: 0,
+          zoneId: CFG.rankZoneId || 'daily',
+          success: function () { lastSubmitted = v; if (onOk) onOk(true); },
+          fail: function () { if (onOk) onOk(false); },
+        });
+      } catch (e) { if (onOk) onOk(false); }
+    });
+    return true;
+  }
+
+  /**
+   * 拉起平台原生榜单 UI。
+   * relationType: 'default' = 同时给好友榜和总榜，切页由平台组件自己做。
+   */
+  /* onOk(ok, reason)：ok=false 时 reason 说明原因，调用方据此给文案。
+     reason: 'notlogin' 未登录 / 'notsupported' 真不支持 / 'showing' 正在展示中 */
+  function openRank(onOk) {
+    if (!rankListOn()) { if (onOk) onOk(false, 'notsupported'); return false; }
+    /* 21105 rank list is showing：已经在展示了还去拉会直接报错 */
+    if (rankShowing) { if (onOk) onOk(false, 'showing'); return false; }
+    rankShowing = true;
+    ensureLogin(function (okLogin) {
+      if (!okLogin) { rankShowing = false; if (onOk) onOk(false, 'notlogin'); return; }
+      try {
+        tt.getImRankList({
+          relationType: 'default',
+          dataType: 0,
+          rankType: CFG.rankType || 'day',
+          suffix: CFG.rankSuffix || '',
+          rankTitle: CFG.rankTitle || '',
+          zoneId: CFG.rankZoneId || 'daily',
+          success: function () { rankShowing = false; if (onOk) onOk(true); },
+          fail: function () { rankShowing = false; if (onOk) onOk(false, 'loadfail'); },
+          complete: function () { rankShowing = false; },
+        });
+      } catch (e) { rankShowing = false; if (onOk) onOk(false, 'loadfail'); }
+    });
+    return true;
+  }
+
+  /* ============================================================
    *  入口显隐：任一能力可用才显示福利卡
    * ============================================================ */
   function visible() {
@@ -424,6 +560,10 @@ var CAPS = (function () {
     iapList: iapList, pay: pay,
     /* ⑥ */
     shareOn: shareOn, share: share,
+    /* ⑦ */
+    rankOn: rankOn, rankListOn: rankListOn,
+    submitRank: submitRank, openRank: openRank,
+    get rankSubmitted() { return lastSubmitted; },
     /* 测试用：注入启动参数，模拟「从侧边栏回来」 */
     _onShow: onShowInfo,
   };

@@ -74,7 +74,29 @@ ctx.removeEventListener = () => { };
 ctx.AudioContext = FakeAC;
 ctx.window = ctx; ctx.globalThis = ctx;
 
-const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
+/* ============================================================
+ *  顶层符号冲突预防（必须在加载前做）
+ *  H5 用经典脚本顺序加载，顶层 const/let 属于**共享的全局词法环境**：
+ *  两个文件声明同名顶层 const 不是「后者覆盖前者」，而是让后加载的文件整份
+ *  解析失败 —— H5 端表现为白屏，控制台只留一句 "already been declared"。
+ *  这类错误加载后再怎么查都只剩白屏，所以先扫一遍源码。
+ * ============================================================ */
+const FILES = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js'];
+{
+  const seen = {};
+  for (const f of FILES) {
+    const code = fs.readFileSync(path.join(root, f), 'utf8');
+    const re = /^(?:const|let)\s+([A-Za-z_$][\w$]*)/gm;
+    let m;
+    while ((m = re.exec(code))) {
+      const name = m[1];
+      if (seen[name]) console.log(`  ⚠ 顶层符号 "${name}" 在 ${seen[name]} 与 ${f} 中各声明了一次（会导致白屏）`);
+      else seen[name] = f;
+    }
+  }
+}
+
+const src = FILES
   .map(f => fs.readFileSync(path.join(root, f), 'utf8')).join('\n')
   + '\n;globalThis.__D={CFG,ING,RECIPES,UPGRADES,TRAITS,EVENTS,ACHIEVEMENTS,DIFFICULTY,TAGS,SHOP_COSTS,WEATHERS,NEWS,UI,TUT,SFX,'
   + 'adviceOf,maxCupsFromStock,maxOrdersFromStock,dailyOrderCapacity,dailyClickOrderCapacity,avgCupsPerOrder,typeWeightOf,'
@@ -82,7 +104,10 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalLevel,rivalAction,updateRival,money,clamp,pick,rnd,'
   + 'QUESTS,QUEST_COUNT,questById,questPool,questGoalOf,questRewardOf,rollQuests,bumpQuest,closeQuests,questViews,'
   + 'goalOf,startEndless,togglePause,slotInfo,hasAnySave,getSlot,setSlot,exportSave,importSave,'
-  + 'MILESTONE_EVERY,MILESTONE_RATIO,milestoneOf,endlessPressure,prestigeGain};';
+  + 'MILESTONE_EVERY,MILESTONE_RATIO,milestoneOf,endlessPressure,prestigeGain,'
+  + 'prestigeStartCash,claimAchStars,checkAchievements,trafficOf,claimOffline,isBankrupt,'
+  + 'STRATEGY_CARDS,cardById,cardMul,cardSum,drawCards,applyCard,shouldOfferCard,serviceTimeOf,'
+  + 'rankScore,recordDaily,dailyRecent,newMeta,loadMeta,pushRunRecord};';
 vm.createContext(ctx);
 vm.runInContext(src, ctx, { filename: 'bundle.js' });
 Object.assign(ctx, ctx.__D);
@@ -660,6 +685,303 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
   E.renderTitle();
   checkHTML('标题页(战绩榜)', E.document.getElementById('metaBox').innerHTML);
   ok(`本机战绩榜：按净资产降序保留 ${E.CFG.RUN_TOP_N} 局 · 破产局也记 · 存档往返 · 脏数据清洗`);
+}
+
+/* 30. F1：声望点改为开局资金 + 成就 ★ 一次性入账 */
+{
+  /* --- 折算曲线：√ 增长 + 封顶 --- */
+  const cases = [[0, 0], [-5, 0], [1, 45], [4, 90], [25, 225], [100, 450], [400, 900], [9000, 900]];
+  for (const [bp, want] of cases) {
+    const got = E.prestigeStartCash(bp);
+    if (got !== want) throw new Error(`prestigeStartCash(${bp}) = ${got}，期望 ${want}`);
+  }
+  if (E.prestigeStartCash('x') !== 0) throw new Error('非法声望值没有被归零');
+  if (E.prestigeStartCash(null) !== 0) throw new Error('null 声望值没有被归零');
+
+  /* --- 开局资金真的落进现金，且能被 UI 读到 --- */
+  const rich = E.newGame('normal', 100);
+  if (rich.startBonus !== 450) throw new Error('startBonus 没有落进 state：' + rich.startBonus);
+  if (rich.cash !== E.DIFFICULTY.normal.cash + 450) throw new Error('开局资金没有加进现金：' + rich.cash);
+  if (!rich.log.some(l => typeof l === 'string' && l.indexOf('创业基金') >= 0)) {
+    throw new Error('日志里没有说明这笔钱从哪来');
+  }
+  const poor = E.newGame('normal', 0);
+  if (poor.cash !== E.DIFFICULTY.normal.cash || poor.startBonus !== 0) throw new Error('首局不该有开局资金');
+
+  /* --- 声望不再影响客流：改 bpBonus 前后必须完全一致 --- */
+  const t0 = E.trafficOf(poor);
+  poor.bpBonus = 150;
+  if (E.trafficOf(poor) !== t0) throw new Error('声望还在影响客流 —— 这正是会导致「需求涨、供给不涨」的那一刀');
+  poor.bpBonus = 0;
+
+  /* --- 声望也不再影响离线收益 --- */
+  const off = E.newGame('normal', 0);
+  off.up.auto = 3;
+  off.lastTime = Date.now() - 60 * 60000;
+  const g1 = E.claimOffline(off);
+  off.lastTime = Date.now() - 60 * 60000;
+  off.bpBonus = 200;
+  const g2 = E.claimOffline(off);
+  if (!g1 || g1.gain <= 0) throw new Error('离线收益没有算出值，无法做对照');
+  if (g1.gain !== g2.gain) throw new Error(`离线收益仍在吃声望加成：${g1.gain} vs ${g2.gain}`);
+
+  /* --- 成就 ★：跨局首次才给，重复达成只给现金 --- */
+  const meta = E.newMeta();
+  const a0 = E.ACHIEVEMENTS[0], a1 = E.ACHIEVEMENTS[1];
+  const f1 = E.claimAchStars(meta, [a0, a1]);
+  if (f1.length !== 2) throw new Error('首次达成没有返回全部成就 id');
+  if (meta.bp !== (a0.reward.bp + a1.reward.bp)) throw new Error('首次达成没有把 ★ 写进 META.bp：' + meta.bp);
+  if (!meta.ach[a0.id] || !meta.ach[a1.id]) throw new Error('首次达成没有在 META.ach 上留痕');
+  const f2 = E.claimAchStars(meta, [a0, a1]);
+  if (f2.length !== 0 || meta.bp !== (a0.reward.bp + a1.reward.bp)) {
+    throw new Error('重复达成又发了一遍 ★ —— 这样两局就会把开局资金顶到上限');
+  }
+  /* 坏输入不能炸，也不能白给 */
+  const before = meta.bp;
+  if (E.claimAchStars(null, [a0]).length) throw new Error('meta 为空时不该假装入账');
+  E.claimAchStars(meta, null); E.claimAchStars(meta, [null, undefined, { }]);
+  if (meta.bp !== before) throw new Error('脏列表改动了声望');
+  if (!Array.isArray(E.claimAchStars(undefined, undefined))) throw new Error('claimAchStars 必须始终返回数组');
+  /* 32 条成就的 ★ 总量是长期目标的上限，写死在这里防止有人手滑改坏了平衡 */
+  const totalBp = E.ACHIEVEMENTS.reduce((n, a) => n + (a.reward && a.reward.bp || 0), 0);
+  if (totalBp !== 150) throw new Error('成就 ★ 总量变了（现在 ' + totalBp + '），开局资金曲线需要重新标定');
+  if (meta.maxBpEarned !== meta.bp) throw new Error('maxBpEarned 没有跟着涨');
+
+  /* --- 存档清洗：startBonus 不能被人改存档凭空放大 --- */
+  const clean = E.sanitizeState(Object.assign({}, E.newGame('normal', 0), { startBonus: 99999 }));
+  if (clean.startBonus !== E.CFG.BP_START_CAP) throw new Error('startBonus 没有被夹到上限：' + clean.startBonus);
+  const clean2 = E.sanitizeState(Object.assign({}, E.newGame('normal', 0), { startBonus: 'abc' }));
+  if (clean2.startBonus !== 0) throw new Error('字符串 startBonus 没有被归零');
+  const clean3 = E.sanitizeState(Object.assign({}, E.newGame('normal', 0), { startBonus: -80 }));
+  if (clean3.startBonus !== 0) throw new Error('负数 startBonus 没有被归零');
+  /* 存档往返保留 */
+  E.setSlot(0); E.saveGame(rich);
+  if (E.loadGame(0).startBonus !== 450) throw new Error('startBonus 没有随存档保留');
+
+  /* --- 两版文案都渲染得出来 --- */
+  E.window.S = rich; E.window.META = meta;
+  UI.renderUp();                     /* 品牌卡在「⬆️ 升级」面板里，不是经营面板 */
+  const up = E.document.getElementById('panel-up').innerHTML;
+  checkHTML('升级面板(品牌声望)', up);
+  if (up.indexOf('声望点永久生效') < 0) throw new Error('品牌面板丢了说明文案');
+  if (up.indexOf('+¥450') < 0) {
+    const i = up.indexOf('声望点永久生效');
+    throw new Error('品牌面板没有显示本局到账的开局资金：' + JSON.stringify(up.slice(i, i + 260)));
+  }
+  E.renderTitle();
+  const box = E.document.getElementById('metaBox').innerHTML;
+  checkHTML('标题页(声望)', box);
+  if (box.indexOf('开局创业基金') < 0) throw new Error('标题页没有显示开局创业基金');
+
+  ok('F1：声望 → 开局资金（√ 曲线 ¥0~900）· 客流/离线不再吃声望 · 成就 ★ 跨局首次才给 · 存档清洗与往返');
+}
+
+/* 31. F2：打烊三选一策略卡 */
+{
+  /* --- 卡池自检：每张卡必须有好处、有代价、id 唯一、fx 只对得上的键 --- */
+  const FX_KEYS = ['traffic', 'speed', 'priceTol', 'patience', 'tip', 'unitSub', 'cogs', 'rent', 'wage', 'stamina', 'repGain'];
+  const seen = {};
+  for (const c of E.STRATEGY_CARDS) {
+    if (!c.id || seen[c.id]) throw new Error('策略卡 id 重复或缺失：' + c.id);
+    seen[c.id] = true;
+    if (!c.name || !c.emoji || !c.gain || !c.cost) throw new Error(`策略卡 ${c.id} 缺少名称/图标/收益/代价文案`);
+    let posCount = 0, negCount = 0;
+    for (const k in c.fx) {
+      if (FX_KEYS.indexOf(k) < 0) throw new Error(`策略卡 ${c.id} 用了未知效果键 ${k}（engine 不会读它）`);
+      /* unitSub 是「每杯扣钱」，越大越坏；其余都是倍率，>1 为好 */
+      if (k === 'unitSub') { if (c.fx[k] > 0) negCount++; }
+      else if (k === 'cogs' || k === 'rent' || k === 'wage' || k === 'stamina') { if (c.fx[k] < 1) posCount++; }
+      else if (c.fx[k] > 1) posCount++;
+    }
+    for (const k in c.fx) {
+      if (k !== 'unitSub' && k !== 'cogs' && k !== 'rent' && k !== 'wage' && k !== 'stamina' && c.fx[k] < 1) negCount++;
+      if ((k === 'cogs' || k === 'rent' || k === 'wage' || k === 'stamina') && c.fx[k] > 1) negCount++;
+    }
+    if (!posCount || !negCount) throw new Error(`策略卡 ${c.id} 不是「有得有失」——纯增益会让最优解变成全都要`);
+  }
+
+  /* --- 抽取规则：每 CARD_EVERY 天一次，不重复，上限 CARD_MAX --- */
+  const g = E.newGame('normal', 0);
+  if (E.cardMul(g, 'traffic') !== 1) throw new Error('无卡时效果必须是 1（不能改变原有数值）');
+  g.day = 2;
+  if (E.drawCards(g) !== null) throw new Error(`Day 2 不该抽卡（每 ${E.CFG.CARD_EVERY} 天一次）`);
+  g.day = E.CFG.CARD_EVERY;
+  const offer1 = E.drawCards(g);
+  if (!Array.isArray(offer1) || offer1.length !== E.CFG.CARD_OFFER_N) throw new Error('首 must offer three');
+  const ids1 = offer1.map(c => c.id);
+  if (new Set(ids1).size !== ids1.length) throw new Error('同一次抽卡出现了重复卡');
+
+  /* --- 采纳后效果立刻生效 --- */
+  const base = E.trafficOf(g);
+  E.applyCard(g, 'takeout');
+  if (!g.cards.length || g.cards[0] !== 'takeout') throw new Error('applyCard 没有写进 s.cards');
+  if (g.cardOffer !== null) throw new Error('选完之后卡包要清空（否则下一天还会重复弹）');
+  const afterCard = E.trafficOf(g);
+  /* 期望值从卡配置里读，别写死 —— 一改数值平衡就得改测试，等于把两个真相绑在一起 */
+  const want = Math.round(base * E.cardById('takeout').fx.traffic);
+  if (Math.abs(afterCard - want) > 1) throw new Error(`外卖平台没有按配置改变客流：${base} → ${afterCard}（期望 ${want}）`);
+  /* 同一张不能拿第二次 */
+  if (E.applyCard(g, 'takeout') !== null || g.cards.length !== 1) throw new Error('同一张卡被重复持有');
+  /* 未知 id 不能混进来 */
+  if (E.applyCard(g, '不存在的卡') !== null) throw new Error('非法卡 id 也能采纳');
+  /* 速度类 / 绝对值类 */
+  const sv0 = E.serviceTimeOf(g, null, null);
+  E.applyCard(g, 'express');
+  if (!(E.serviceTimeOf(g, null, null) < sv0)) throw new Error('极速出杯没有真的缩短出杯时间');
+  E.applyCard(g, 'chain');
+  const wantSub = E.cardById('takeout').fx.unitSub + E.cardById('chain').fx.unitSub;
+  if (Math.abs(E.cardSum(g, 'unitSub') - wantSub) > 1e-6) throw new Error('unitSub 应当叠加而不是叠乘');
+  /* 上限 */
+  const capped = E.newGame('normal', 0);
+  for (const c of E.STRATEGY_CARDS) E.applyCard(capped, c.id);
+  if (capped.cards.length !== E.CFG.CARD_MAX) throw new Error(`持有上限应为 ${E.CFG.CARD_MAX}，实际 ${capped.cards.length}`);
+  if (E.drawCards(capped) !== null) throw new Error('满了还继续抽卡');
+
+  /* --- 抽卡必须用 QUEST_RNG：每日挑战靠「同种子同局」，不能被新增的随机调用弄坏 --- */
+  const mkDay = () => { const st = E.newGame('normal', 0); st.day = E.CFG.CARD_EVERY; return st; };
+  E.QUEST_RNG.setSeed(E.seedFromText('bubble-quest-cardtest'));
+  const seedA = (E.drawCards(mkDay()) || []).map(c => c.id).join(',');
+  E.QUEST_RNG.setSeed(E.seedFromText('bubble-quest-cardtest'));
+  const seedB = (E.drawCards(mkDay()) || []).map(c => c.id).join(',');
+  E.QUEST_RNG.clear();
+  if (!seedA.length || seedA !== seedB) throw new Error(`同种子抽到的卡不一样：「${seedA}」vs「${seedB}」`);
+
+  /* --- 完整一天：打烊要真的给出三选一 --- */
+  const day = E.newGame('normal', 0);
+  day.day = E.CFG.CARD_EVERY;      /* 打烊时 day 还没自增，所以直接设成倍数那天 */
+  day.menu = day.recipes.slice(0, E.menuSlots(day));
+  E.openShop(day);
+  let steps = 0;
+  while (day.phase === 'open' && steps++ < 5000) E.tick(day, 1 / 30);
+  if (!day.cardOffer || !day.cardOffer.length) throw new Error('打烊后没有生成卡包');
+  E.nextDay(day);
+  if (day.cardOffer !== null) throw new Error('进入下一天后卡包没有作废');
+
+  /* --- 存档：改存档不能凭空加卡 --- */
+  const dirty = E.sanitizeState(Object.assign({}, E.newGame('normal', 0),
+    { cards: ['takeout', 'takeout', 'hack', null, 42], cardOffer: ['x', 'express'] }));
+  if (dirty.cards.join(',') !== 'takeout') throw new Error('脏 smarter 卡片没有被清洗：' + JSON.stringify(dirty.cards));
+  if (dirty.cardOffer.join(',') !== 'express') throw new Error('脏卡包没有被清洗：' + JSON.stringify(dirty.cardOffer));
+  const many = E.sanitizeState(Object.assign({}, E.newGame('normal', 0),
+    { cards: E.STRATEGY_CARDS.map(c => c.id) }));
+  if (many.cards.length !== E.CFG.CARD_MAX) throw new Error('超过上限的卡没有被截断');
+  E.setSlot(0); E.saveGame(g);
+  const loaded = E.loadGame(0);
+  if (!loaded.cards || loaded.cards.join(',') !== g.cards.join(',')) throw new Error('策略卡没有随存档保留');
+
+  /* --- 两版都要画得出来 --- */
+  E.window.S = g; E.window.META = E.newMeta();
+  UI.renderManage();
+  checkHTML('经营面板(策略卡)', E.document.getElementById('panel-manage').innerHTML);
+  if (E.document.getElementById('panel-manage').innerHTML.indexOf('cd-chip') < 0) {
+    throw new Error('经营面板没有显示已持有的策略卡');
+  }
+  g.cardOffer = E.drawCards(g);
+  if (!UI.showCardDraft()) throw new Error('卡包存在时却弹不出三选一');
+  const draft = E.document.getElementById('modalBox').innerHTML;
+  checkHTML('打烊三选一', draft);
+  if (draft.indexOf('data-act="pickcard"') < 0) throw new Error('三选一没有给出选卡按钮：' + draft.slice(0, 200));
+  if (draft.indexOf('data-act="skipcard"') < 0) throw new Error('三选一没有「都不要」出口');
+  if (draft.indexOf('cd-up') < 0 || draft.indexOf('cd-down') < 0) throw new Error('三选一没有标出收益与代价');
+
+  ok(`F2：12 张「有得有失」策略卡 · 每 ${E.CFG.CARD_EVERY} 天三选一 · 上限 ${E.CFG.CARD_MAX} 张 · 存档清洗与往返`);
+}
+
+/* 32. F3：每日挑战「同种子日榜」 */
+{
+  /* --- 上报分数：平台只收 [0, int32_MAX) 的正整数 --- */
+  const MAX = E.CFG.RANK_SCORE_MAX;
+  if (E.rankScore(38402) !== 38402) throw new Error('rankScore 不该改变正常值');
+  if (E.rankScore(-500) !== 0) throw new Error('净资产为负（破产）必须夹到 0，平台只收正数');
+  if (E.rankScore(MAX + 9999) !== MAX) throw new Error('超过 int32_MAX 的分数没有被夹住');
+  if (E.rankScore('x') !== 0 || E.rankScore(null) !== 0) throw new Error('非法净资产没有被归零');
+  if (E.rankScore(1234.6) !== 1235) throw new Error('上报分数必须是整数');
+
+  /* --- 一天打多局：只记最好的那一局 ---
+     日期动态生成：以前这里硬编码 '2026-10-20'，日历翻过午夜后
+     「日榜没有显示今日种子日期」就会假失败 —— 和代码无关的坑。
+     D2 = 明天：换天分支需要两个不同的日期。 */
+  const m = E.newMeta();
+  const D1 = E.todayKey();
+  const _tm = new Date(); _tm.setDate(_tm.getDate() + 1);
+  const D2 = `${_tm.getFullYear()}-${String(_tm.getMonth() + 1).padStart(2, '0')}-${String(_tm.getDate()).padStart(2, '0')}`;
+  let r = E.recordDaily(m, D1, 10000);
+  if (!r.newToday || !r.newEver) throw new Error('首局应同时刷新今日与个人最佳');
+  if (m.dailyBest !== 10000 || m.dailyBestEver !== 10000) throw new Error('成绩没有落进 META');
+
+  r = E.recordDaily(m, D1, 8000);
+  if (r.newToday || r.newEver) throw new Error('更差的一局不该刷新纪录');
+  if (m.dailyBest !== 10000) throw new Error('更差的一局把今天的最佳覆盖掉了（上报会把名次冲掉）');
+  if (m.dailyLog.length !== 1 || m.dailyLog[0].best !== 10000) throw new Error('日志被更差的一局污染');
+
+  r = E.recordDaily(m, D1, 12000);
+  if (!r.newToday || !r.newEver) throw new Error('更好的一局没有刷新纪录');
+  if (m.dailyBest !== 12000 || m.dailyBestEver !== 12000) throw new Error('更好的一局没有覆盖');
+  if (r.prevToday !== 10000) throw new Error('prevToday 没有回传上一局的成绩');
+  if (m.dailyLog.length !== 1 || m.dailyLog[0].best !== 12000) throw new Error('同一天应只有一条日志且取最好值');
+
+  /* --- 换天：今日重置，个人最佳保留 --- */
+  r = E.recordDaily(m, D2, 5000);
+  if (m.dailyDate !== D2 || m.dailyBest !== 5000) throw new Error('换天没有重置今日成绩');
+  if (m.dailyBestEver !== 12000) throw new Error('个人最佳被换天清掉了');
+  if (r.newEver) throw new Error('更差的一天不该刷新个人最佳');
+  if (m.dailyLog.length !== 2 || m.dailyLog[0].d !== D1 || m.dailyLog[1].d !== D2) {
+    throw new Error('日志没有按日期升序排列：' + JSON.stringify(m.dailyLog));
+  }
+
+  /* --- 日志上限与 recent 取法 --- */
+  const m2 = E.newMeta();
+  for (let i = 0; i < E.CFG.DAILY_LOG_MAX + 6; i++) {
+    E.recordDaily(m2, '2026-01-' + String(i + 1).padStart(2, '0'), 100 + i);
+  }
+  if (m2.dailyLog.length !== E.CFG.DAILY_LOG_MAX) throw new Error('日志没有截断到 ' + E.CFG.DAILY_LOG_MAX);
+  if (m2.dailyLog[0].d !== '2026-01-07') throw new Error('截断时丢的不是最早的那天：' + m2.dailyLog[0].d);
+  const rec = E.dailyRecent(m2, 7);
+  if (rec.length !== 7) throw new Error('dailyRecent 没有取到 7 天');
+  if (rec[6].d !== '2026-01-20') throw new Error('dailyRecent 应返回最近 7 天且按日期升序');
+  if (E.dailyRecent(E.newMeta(), 7).length) throw new Error('空记录不该返回任何东西');
+  if (E.recordDaily(null, D1, 100).newToday) throw new Error('meta 为空时不该假装入账');
+
+  /* --- 存档：脏数据不能污染日榜 --- */
+  E.saveMeta(m);
+  const m4 = E.loadMeta();
+  if (m4.dailyBest !== 5000 || m4.dailyBestEver !== 12000 || m4.dailyLog.length !== 2) {
+    throw new Error('每日成绩没有随 META 持久化');
+  }
+  store[E.CFG.META_KEY] = JSON.stringify({
+    dailyDate: '<script>alert(1)</script>', dailyBest: -99, dailyBestEver: 'x',
+    dailyLog: [{ d: 'not-a-date', best: 5 }, null, 42, { d: '2026-02-02', best: -1 }, { d: '2026-02-01', best: 700 }],
+  });
+  const m5 = E.loadMeta();
+  if (m5.dailyDate !== '') throw new Error('非法日期没有被清空：' + m5.dailyDate);
+  if (m5.dailyBest !== 0 || m5.dailyBestEver !== 0) throw new Error('非法成绩没有被归零');
+  if (m5.dailyLog.length !== 2 || m5.dailyLog[0].d !== '2026-02-01' || m5.dailyLog[1].best !== 0) {
+    throw new Error('脏日志没有被清洗：' + JSON.stringify(m5.dailyLog));
+  }
+
+  /* --- 面板渲染 --- */
+  E.window.META = m;
+  UI.showDailyRank();
+  const html = E.document.getElementById('modalBox').innerHTML;
+  checkHTML('每日挑战日榜', html);
+  if (html.indexOf('rk-bars') < 0) throw new Error('日榜面板没有渲染最近 7 天的柱图');
+  if (html.indexOf(D1) < 0) throw new Error('日榜没有显示今日种子日期');
+  /* 这里必须走 onclick 而不是 data-act：全局委托不会顺手关掉弹窗，
+     不先 closeModal 就 startGame 会把日榜面板挂在游戏画面上。 */
+  if (html.indexOf("UI.closeModal();doAct('daily')") < 0) throw new Error('日榜面板没有给出挑战入口');
+  UI.closeModal();
+
+  /* 标题页按钮：打过就把成绩顶上去 */
+  m.dailyDate = E.todayKey(); m.dailyBest = 12345;
+  E.renderTitle();
+  const br = E.document.getElementById('btnDailyRank');
+  if (!br) throw new Error('标题页缺少日榜按钮');
+  if (br.textContent.indexOf('12,345') < 0) {
+    throw new Error('打过之后日榜按钮没有显示今天的成绩：' + br.textContent);
+  }
+  checkHTML('标题页(日榜)', E.document.getElementById('metaBox').innerHTML);
+
+  ok('F3：每日挑战日榜（只记当天最好一局 · 近 7 天 · 上报分数夹到 int32 · 存档清洗 · 两版入口）');
 }
 
 console.log('\n✅ 全部冒烟测试通过，无运行时异常');

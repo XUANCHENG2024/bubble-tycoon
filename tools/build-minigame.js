@@ -98,6 +98,18 @@ function build() {
   }
   out = "'use strict';\n" + out + TAIL;
 
+  /* 打包前先自己解析一遍。两个源文件各写一句顶层 `const X` 会让**后加载的那份**
+     整段失效（经典脚本共享全局词法环境），打包出来的 bundle 语法上就是坏的。
+     在这里挡住，比传到开发者工具里看白屏强。 */
+  try {
+    new (require('vm').Script)(out, { filename: 'bundle.js' });
+  } catch (e) {
+    console.error('✘ 拼接后的 bundle 存在语法错误（多半是顶层符号重名）：');
+    console.error('  ' + String(e.message || e).split('\n').slice(0, 4).join('\n  '));
+    console.error('  单独跑 `node tools/symbol-check.js` 可以看到是哪两个文件冲突。');
+    process.exit(1);
+  }
+
   const dest = path.join(root, 'minigame', 'bundle.js');
   fs.writeFileSync(dest, out);
   const kb = (Buffer.byteLength(out, 'utf8') / 1024).toFixed(1);

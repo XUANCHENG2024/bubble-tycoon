@@ -32,7 +32,10 @@
     <div class="title-btns">
       <button id="btnStart" class="btn btn-primary btn-big">🚀 开始营业</button>
       <button id="btnContinue" class="btn btn-ghost">💾 继续存档</button>
-      <button id="btnDaily" class="btn btn-amber">📅 每日挑战</button>
+      <div class="btn-row">
+        <button id="btnDaily" class="btn btn-amber">📅 每日挑战</button>
+        <button id="btnDailyRank" class="btn btn-ghost">🏆 日榜</button>
+      </div>
       <button id="btnLogin" class="btn btn-amber" data-act="login">🔥 连续登录</button>
       <div class="btn-row">
         <button id="btnHelp" class="btn btn-ghost">📖 玩法说明</button>
@@ -106,6 +109,12 @@
       <button class="btn btn-ghost" id="btnPause">⏸ 暂停</button>
       <button class="btn btn-ghost" id="btnRestock">🚚 紧急进货</button>
       <button class="btn btn-ghost" id="btnClose">🔔 提前打烊</button>
+    </div>
+    <!-- 营业中两个即时决策（V2）：每天各一次。放在按钮排下面单独一行，
+         因为它们是"要不要用"的判断，不是常规操作 —— 混在按钮堆里会被无脑点掉。 -->
+    <div class="stage-ops">
+      <button class="btn btn-op" id="btnSale">📣 限时促销 <i id="saleCd"></i></button>
+      <button class="btn btn-op" id="btnPull">📥 临时下架</button>
     </div>
   </div>
 </section>

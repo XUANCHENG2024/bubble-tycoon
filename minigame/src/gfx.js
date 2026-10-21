@@ -42,6 +42,18 @@ function textW(ctx, str, size, weight) {
 }
 
 /**
+ * 剥掉 HTML 标签，返回纯文本。
+ * 引擎里 adviceOf() 与 TUTORIAL 的文案是写给 H5 的 innerHTML 的（带 <b> / <br>），
+ * 而 Canvas 的 fillText 不认识标签 —— 不剥的话玩家每天都会在「今日建议」和
+ * 日报弹窗里看到一串 "</b>" 之类的乱码。三处渲染点共用这一个实现。
+ */
+function plainText(s) {
+  return String(s == null ? '' : s)
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, '');
+}
+
+/**
  * 按最大宽度断行。
  * 中文没有空格，必须逐字量；英文/数字则先按空格切词，避免把单词从中间劈开。
  */
@@ -160,9 +172,15 @@ function chip(ctx, x, y, w, h, label, value, color) {
  *  命中区域 + 裁剪栈
  *  滚动列表里的按钮如果不做裁剪，手指点在列表外的位置也会误触。
  * ---------------------------------------------------------- */
-var HIT = { list: [], stack: [] };
+var HIT = { list: [], stack: [], offY: 0 };
 
 function hitReset() { HIT.list = []; HIT.stack = []; }
+
+/* 弹窗滚动偏移：内容比弹窗高时（如玩法说明 8 节），drawModal 会
+   ctx.translate(0, -scroll) 上移绘制。但 addHit 记录的是绝对坐标，
+   translate 对它无效 —— 不跟着偏移的话，滚动后按钮画在 A 处、点 B 处才命中。
+   drawModal 在调用弹窗绘制器前后 set / clear 这个值。 */
+function setHitOffset(dy) { HIT.offY = dy || 0; }
 
 /** 进入裁剪区（同时压栈，供绘制与命中两侧共同使用） */
 function clipPush(ctx, x, y, w, h) {
@@ -178,6 +196,7 @@ function clipPop(ctx) {
 }
 
 function addHit(x, y, w, h, act, id, extra) {
+  y += HIT.offY;   /* 弹窗滚动时命中区跟着内容一起走（见 setHitOffset） */
   for (var i = 0; i < HIT.stack.length; i++) {
     var c = HIT.stack[i];
     var nx = Math.max(x, c.x), ny = Math.max(y, c.y);
@@ -232,7 +251,16 @@ function button(ctx, x, y, w, h, label, o) {
     color: disabled ? T.txt3 : (st.fg || T.txt),
     maxW: w - 16,
   });
-  if (!disabled) addHit(x, y, w, h, o.act, o.id, o.extra);
+  /* 命中区垂直兜底：视觉高度不足 30px 的按钮，命中矩形自动扩到 30px
+     （上下各补一半）。面板里不少按钮只有 16~24px 高，手指（约 9mm ≈ 34px）
+     根本对不准，而把视觉尺寸全改大会牵动布局。只扩命中不扩视觉 = 布局零风险。
+     垂直方向行距最小 30px（采购行），上下各补 3px 不会碰到相邻行的命中区。
+     水平方向**不做**兜底：采购 +10/+50 之间只有 6px 间隙，扩了会互相重叠。 */
+  if (!disabled) {
+    var hitH = Math.max(h, 30);
+    var hy = y - Math.floor((hitH - h) / 2);
+    addHit(x, hy, w, hitH, o.act, o.id, o.extra);
+  }
   return { x: x, y: y, w: w, h: h };
 }
 
@@ -253,7 +281,10 @@ function cardBtn(ctx, x, y, w, h, lines, o) {
     });
     cy += (L.size || 12) * 1.6;
   }
-  addHit(x, y, w, h, o.act, o.id, o.extra);
+  /* hitPad：命中区四边外扩（视觉不变）。给弹窗右上角的 ×（20×20）用的 ——
+     那是全游戏最小的关闭目标，且周围是空白，外扩 5px 不会碰到任何东西。 */
+  var pad = o.hitPad || 0;
+  addHit(x - pad, y - pad, w + pad * 2, h + pad * 2, o.act, o.id, o.extra);
   return h;
 }
 
@@ -335,26 +366,18 @@ function sheet(ctx, W, H, top, bottom, o) {
   return { x: x, y: y, w: w, h: h };
 }
 
-/** 面板右上角关闭按钮 */
-function closeX(ctx, x, y, r, act) {
-  fillRR(ctx, x - r, y - r, r * 2, r * 2, r, 'rgba(255,255,255,.10)', T.line);
-  ctx.strokeStyle = T.txt2; ctx.lineWidth = 1.6;
-  var q = r * 0.42;
-  ctx.beginPath();
-  ctx.moveTo(x - q, y - q); ctx.lineTo(x + q, y + q);
-  ctx.moveTo(x + q, y - q); ctx.lineTo(x - q, y + q);
-  ctx.stroke();
-  addHit(x - r, y - r, r * 2, r * 2, act || 'close');
-}
+/* 原来这里有一个 closeX()（画 × 并登记 hit）。全仓零调用 —— 弹窗的 × 是用
+   GFX.cardBtn 画的（见 ui.js drawModal），留着一个没人用的副本只会让人以为
+   有两套关闭按钮实现。已删。 */
 
 if (typeof globalThis !== 'undefined') {
   globalThis.T = T;
   globalThis.GFX = {
-    text: text, para: para, wrapText: wrapText, textW: textW,
+    text: text, para: para, wrapText: wrapText, textW: textW, plainText: plainText,
     rr: rr, fillRR: fillRR, card: card, bar: bar, chip: chip,
     button: button, cardBtn: cardBtn, lineChart: lineChart,
-    shortNum: shortNum, sheet: sheet, closeX: closeX,
-    hitReset: hitReset, hitAt: hitAt, addHit: addHit,
+    shortNum: shortNum, sheet: sheet,
+    hitReset: hitReset, hitAt: hitAt, addHit: addHit, setHitOffset: setHitOffset,
     clipPush: clipPush, clipPop: clipPop,
     get hits() { return HIT.list; },
   };
