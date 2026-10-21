@@ -212,6 +212,75 @@ console.log('\n=============== 字号令牌两版一致性 ===============');
       ? '  ✔ 新增代码（V12 段之后 + V12/V13 函数）字号全部走 var(--fs-*)'
       : `  ✘ ${offenders.length} 处字号该用令牌却写了字面量：\n      ${offenders.slice(0, 8).join('\n      ')}`);
   }
+
+  /* ★★ V13.1：防「改完又长回去」的两条不变式。
+     *
+     * 为什么要加：这轮做了三件「修正界面」的事（P1-1 按钮加高、
+     * P1-2 地图收进弹窗、P1-3 硬编码色收敛），
+     * 但**没有机制防止下次改代码时又退回去** ——
+     * 按钮变矮、地图重新铺开、颜色又硬编码，都是很自然的手滑。
+     *
+     * ★ 判据都取「可量化的下限」而不是「具体数值」：
+     *   ① 触控目标：≥26px（低于 32px 在中低端机上误触率明显上升）
+     *   ② 商圈页：城市地图**不得**在页面上铺开（否则又变成 3633 字的巨卡）
+     *   ③ 硬编码色：新增段不得出现裸 hex
+     */
+  {
+    const cssNow = fs_read();
+    const uiNow = fs.readFileSync(path.join(root, 'js/ui.js'), 'utf8');
+    const problems = [];
+
+    /* ① 触控目标下限
+       ★ 必须先剥掉注释 —— 否则「被注释掉的 min-height 声明」仍会被正则
+         匹配到，防线就漏了（注入验证时踩到过）。 */
+    /* ★ 匹配属性前要剥掉注释（被注释掉的 min-height 仍会被正则匹配到，
+         防线就漏了 —— 注入验证时踩到过）。
+         ★ 但**行号必须按原文算**：剥注释会改变行数，
+         若拿剥后的内容找分段标记，标记本身被删掉 → from2=0 →
+         整份文件都被当成「新增段」（实测报出 7 处假违规）。 */
+    const stripComments = t => t.replace(/\/\*[\s\S]*?\*\//g, '');
+    const btnXs = stripComments(cssNow).match(/\.btn-xs\s*\{[^}]*\}/);
+    if (!btnXs) problems.push('找不到 .btn-xs 定义');
+    else {
+      const mh = btnXs[0].match(/min-height:\s*([0-9.]+)px/);
+      if (!mh) problems.push('.btn-xs 没有 min-height（触控目标会退回约 20px）');
+      else if (parseFloat(mh[1]) < 26) problems.push(`.btn-xs min-height=${mh[1]}px < 26px`);
+    }
+
+    /* ② 商圈页不得铺开大地图
+       ★ 判据是「renderRival 里调用了哪个函数」而不是「有没有 map-svg 字面量」——
+         注入时把 `cityMapPanelHtml(s)` 换成 `cityMapModalHtml(s)`，
+         函数体里并没有 map-svg 字符串，按字面量判会漏（注入验证时踩到）。
+       ★ 正确做法：rival 页只许调**入口条**函数（cityMapPanelHtml），
+         调了**弹窗**函数（cityMapModalHtml）就是回归。 */
+    const rivalFn = (uiNow.match(/UI\.renderRival = function[\s\S]*?\n};\n/) || [''])[0];
+    if (/cityMapModalHtml/.test(rivalFn)) {
+      problems.push('rival 页又直接渲染了完整地图（应只保留入口条 + 弹窗）');
+    }
+
+    /* ③ 新增段不得有裸 hex
+       ★ 行号按**原文**算 —— 分段标记本身在注释里，
+         若拿剥过注释的内容找标记，标记会被删掉 → from2=0 →
+         整份文件都被当成「新增段」（实测报出 7 处假违规）。
+         匹配时再逐行剥注释。 */
+    const lines2 = cssNow.split('\n');
+    let from2 = 0;
+    lines2.forEach((ln, i) => { if (ln.indexOf('V12：店铺地图') >= 0) from2 = i + 1; });
+    const bare = [];
+    lines2.forEach((ln, i) => {
+      if (i + 1 <= from2) return;
+      const clean = ln.replace(/\/\*[\s\S]*?\*\//g, '');   /* 逐行剥注释 */
+      if (/--[a-z-]+:\s*#/.test(clean)) return;              /* 变量定义行 */
+      if (/gradient|linear-gradient/.test(clean)) return;    /* 渐变端点 */
+      const m = clean.match(/(?<![0-9a-zA-Z-])#([0-9a-fA-F]{6})\b/g);
+      if (m) bare.push(`styles.css:${i + 1} ${m[0]}`);
+    });
+    if (bare.length) problems.push(`新增段有 ${bare.length} 处裸 hex：${bare.slice(0, 3).join('、')}`);
+
+    console.log(problems.length === 0
+      ? '  ✔ 界面不变式守住：按钮 ≥26px · 商圈页地图收在弹窗 · 新增段无裸 hex'
+      : `  ✘ ${problems.length} 项界面不变式被破坏：\n      ${problems.join('\n      ')}`);
+  }
 }
 
 console.log('\n=============== 响应式断点 ===============');

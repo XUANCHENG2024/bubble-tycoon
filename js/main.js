@@ -553,6 +553,11 @@ function doAct(act, el) {
       break;
     }
     /* ---------- V13 城市地图 ---------- */
+    case 'mapopen': {
+      /* V13.1：打开城市地图弹窗（完整地图 + 省份概览） */
+      UI.modal(cityMapModalHtml(s));
+      break;
+    }
     case 'mapcity': {
       /* 地图上点城市 → 弹出详情（不直接切换，避免误触） */
       UI.modal(cityDetailModalHtml(s, id));

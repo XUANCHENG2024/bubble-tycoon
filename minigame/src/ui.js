@@ -1357,34 +1357,34 @@ function panelStores(ctx, x, y, w, s) {
     var by = y + h - 48;
     var bw = (w - 26) / 3;
     if (mg) {
-      GFX.button(ctx, x + 8, by, bw, 20, st.auto ? '我来接管' : '交给店长', {
+      GFX.button(ctx, x + 8, by, bw, 26, st.auto ? '我来接管' : '交给店长', {
         kind: 'primary', act: 'stoggle', id: st.branch, extra: st.auto ? 0 : 1, size: 9, r: 7,
       });
-      GFX.button(ctx, x + 8 + bw + 5, by, bw, 20, '撤下店长', {
+      GFX.button(ctx, x + 8 + bw + 5, by, bw, 26, '撤下店长', {
         kind: 'ghost', act: 'smgrfire', id: st.branch, size: 9, r: 7,
       });
     } else {
-      GFX.button(ctx, x + 8, by, bw, 20, '任命店长', {
+      GFX.button(ctx, x + 8, by, bw, 26, '任命店长', {
         kind: 'primary', act: 'smgrh', id: st.branch, size: 9, r: 7,
       });
     }
-    GFX.button(ctx, x + 8 + (bw + 5) * 2, by, bw, 20, st.isMain ? '主店' : '设为主店', {
+    GFX.button(ctx, x + 8 + (bw + 5) * 2, by, bw, 26, st.isMain ? '主店' : '设为主店', {
       kind: 'ghost', act: 'smain', id: st.branch, disabled: st.isMain, size: 9, r: 7,
     });
     var by2 = by + 26;
     var bw2 = (w - 26) / 4;
-    GFX.button(ctx, x + 8, by2, bw2, 20, '💰注资', {
+    GFX.button(ctx, x + 8, by2, bw2, 26, '💰注资', {
       kind: 'ghost', act: 'sfund', id: st.branch, size: 9, r: 7,
     });
-    GFX.button(ctx, x + 8 + bw2 + 4, by2, bw2, 20, '💵提现', {
+    GFX.button(ctx, x + 8 + bw2 + 4, by2, bw2, 26, '💵提现', {
       kind: 'ghost', act: 'sdraw', id: st.branch, size: 9, r: 7,
     });
-    GFX.button(ctx, x + 8 + (bw2 + 4) * 2, by2, bw2, 20, '改名', {
+    GFX.button(ctx, x + 8 + (bw2 + 4) * 2, by2, bw2, 26, '改名', {
       kind: 'ghost', act: 'srename', id: st.branch, size: 9, r: 7,
     });
     /* 关店只在非总店时出现（总店不可关闭） */
     if (!st.isMain) {
-      GFX.button(ctx, x + 8 + (bw2 + 4) * 3, by2, bw2, 20, '关店', {
+      GFX.button(ctx, x + 8 + (bw2 + 4) * 3, by2, bw2, 26, '关店', {
         kind: 'ghost', act: 'sclose', id: st.branch, size: 9, r: 7,
       });
     }
@@ -1404,12 +1404,12 @@ function panelStores(ctx, x, y, w, s) {
         text(ctx, '已满级', x + w - 10, y + h + upH + 4,
           { size: 9, align: 'right', color: T.amber });
       } else {
-        GFX.button(ctx, x + w - 76, y + h + upH - 2, 66, 18, money(ucost), {
+        GFX.button(ctx, x + w - 76, y + h + upH - 4, 66, 24, money(ucost), {
           kind: s.cash >= ucost ? 'ghost' : 'ghost', act: 'stbuy',
           id: st.branch, extra: uu.id, disabled: s.cash < ucost, size: 8.5, r: 6,
         });
       }
-      upH += 22;
+      upH += 28;
     }
     /* ---- 待聘店长（关店留档，可免费请回）---- */
     var fms = s.formerManagers || [];
@@ -1419,10 +1419,10 @@ function panelStores(ctx, x, y, w, s) {
         { size: 9.5, color: T.purple, maxW: w - 100 });
       text(ctx, '原任职于' + (fm.fromStore || '已关闭店铺'), x + w - 92, y + h + upH + 4,
         { size: 8.5, color: T.txt3, maxW: 74 });
-      GFX.button(ctx, x + w - 76, y + h + upH - 2, 66, 18, '请回', {
+      GFX.button(ctx, x + w - 76, y + h + upH - 4, 66, 24, '请回', {
         kind: 'primary', act: 'smgrre', id: st.branch, extra: fm.id, size: 8.5, r: 6,
       });
-      upH += 22;
+      upH += 28;
     }
     h += upH;
     y += h + 8;

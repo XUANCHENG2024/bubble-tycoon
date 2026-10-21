@@ -236,7 +236,7 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     storeUpLevel, storeUpCost, buyStoreUpgrade, storeTrafficBonus, STORE_UPGRADES,
     storeById, playerStores, syncStoreManagers, venueTrafficMul,
     managerOfBranch, managerById, managerCount, managerRank, managerTrait,
-    cityMapView, cityPickerModalHtml, cityDetailModalHtml, setVenueCity, PROVINCES,
+    cityMapView, cityMapModalHtml, cityPickerModalHtml, cityDetailModalHtml, setVenueCity, PROVINCES,
   };`);
   const T = window.__T;
 
@@ -1047,20 +1047,27 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     window.UI.setTab('rival'); window.UI.renderAll();
     const html = doc.getElementById('panel-rival').innerHTML;
     check(/城市地图/.test(html), 'V13 商圈页有「城市地图」区块');
-    check(/<svg[^>]*class="map-svg"/.test(html), 'V13 地图用 SVG 绘制');
-    /* 城市点：每个有坐标的城市一个可点的 <g> */
-    const dots = doc.querySelectorAll('#panel-rival .map-dot');
-    check(dots.length >= 40, `V13 地图画出 ${dots.length} 个城市点`);
-    check(dots.length === doc.querySelectorAll('#panel-rival .map-dot.cur').length + dots.length - 1
-      || doc.querySelectorAll('#panel-rival .map-dot.cur').length === 1,
-    'V13 当前城市在地图上高亮（恰好 1 个 .cur）');
-    /* 每个点都要有 data-act 与 data-id（可点） */
-    const noAct = Array.from(dots).filter(d => !d.getAttribute('data-act') || !d.getAttribute('data-id'));
-    check(noAct.length === 0, 'V13 每个城市点都带 data-act/data-id（可点）');
-    /* 省份概览 */
-    check(/省份概览|map-prov/.test(html), 'V13 地图显示省份信息');
-    /* 「切换城市」入口 */
-    check(/切换经营城市|mapgoto/.test(html), 'V13 有进入「经营城市」的入口');
+    /* ★ V13.1：页面只留**入口条**，完整地图进弹窗 ——
+       原来地图卡占 rival 页 64% 文字量（3633 字 vs 竞争对手 269 字），
+       辅助信息比核心信息重 13.5 倍，层级倒了。 */
+    check(/打开地图/.test(html), 'V13.1 商圈页有「打开地图」入口条');
+    check(!/<svg[^>]*class="map-svg"/.test(html),
+      'V13.1 页面不再铺开大地图（收成入口条）');
+    check(/map-bar-cur/.test(html), 'V13.1 入口条显示当前城市');
+
+    /* 完整地图在弹窗里 */
+    const modal = window.eval('cityMapModalHtml(window.S)');
+    check(/<svg[^>]*class="map-svg"/.test(modal), 'V13.1 弹窗里用 SVG 绘制完整地图');
+    const dots = doc.createElement('div');
+    dots.innerHTML = modal;
+    const ds = dots.querySelectorAll('.map-dot');
+    check(ds.length >= 40, `V13.1 地图画出 ${ds.length} 个城市点`);
+    check(dots.querySelectorAll('.map-dot.cur').length === 1,
+      'V13.1 当前城市在地图上高亮（恰好 1 个 .cur）');
+    const noAct = Array.from(ds).filter(d => !d.getAttribute('data-act') || !d.getAttribute('data-id'));
+    check(noAct.length === 0, 'V13.1 每个城市点都带 data-act/data-id（可点）');
+    check(/map-prov/.test(modal), 'V13.1 地图显示省份信息');
+    check(/切换经营城市/.test(modal), 'V13.1 有进入「经营城市」的入口');
   }
 
   /* 城市选择器弹窗：列出全部城市（不只是有坐标的） */

@@ -41,6 +41,11 @@
        见 minigame/src/gfx.js 的 FS 常量，命名必须与此处一致。
        之前两版最小字号差 1.5px（H5 10px vs Canvas 8.5px），
        跨版本切换时字号会跳变。 */
+  /* 浅色变体（V13.1）：--purple/--red 的浅色版。
+     这三个值原先散在 5 处硬编码里，换肤时会漏改。 */
+  --purple-soft: #c4a8ff;
+  --red-soft: #ff8080;
+  --bg-sel: #2a1150;
   --fs-xs: 10px;
   --fs-sm: 11px;
   --fs-md: 12px;
@@ -370,7 +375,7 @@ body::before {
 /* 配方卡上的招牌徽章（V6） */
 .rc-badge.sig { background: rgba(53, 229, 240, .9); color: #06202a; left: auto; right: 6px; }
 /* 配方卡上的菜系标签（V9）与工坊缺失提示 */
-.rc-tag.cui { background: rgba(139, 92, 255, .18); color: #c4a8ff; }
+.rc-tag.cui { background: rgba(139, 92, 255, .18); color: var(--purple-soft); }
 .rc-tip { font-size: var(--fs-xs); color: var(--amber); margin-top: 5px; line-height: 1.4; }
 
 /* V9 菜系分组（研发页） */
@@ -486,7 +491,7 @@ body::before {
   border: 1px solid rgba(255, 255, 255, .1);
 }
 .rep-ct.ok { color: var(--green); border-color: rgba(74, 222, 128, .35); background: rgba(74, 222, 128, .08); }
-.rep-ct.bad { color: #ff8080; border-color: rgba(255, 128, 128, .3); background: rgba(255, 128, 128, .07); }
+.rep-ct.bad { color: var(--red-soft); border-color: rgba(255, 128, 128, .3); background: rgba(255, 128, 128, .07); }
 
 .quest {
   display: flex; align-items: center; gap: 8px;
@@ -1001,7 +1006,7 @@ body::before {
 .tut-card::after {
   content: ""; position: absolute; width: 12px; height: 12px; transform: rotate(45deg);
   left: var(--ax, 24px);
-  background: #2a1150; border: 1px solid rgba(139, 92, 255, .6);
+  background: var(--bg-sel); border: 1px solid rgba(139, 92, 255, .6);
 }
 .tut-card.arrow-up::after { top: -7px; border-right: none; border-bottom: none; }
 .tut-card.arrow-down::after { bottom: -7px; border-left: none; border-top: none; }
@@ -1142,6 +1147,16 @@ body::before {
   font-size: var(--fs-xs); padding: 3px 8px; border-radius: 7px;
   border: 1px solid var(--line, rgba(255,255,255,.14)); background: transparent;
   color: var(--txt2); cursor: pointer;
+  /* ★ V13.1：触控目标从约 20px 提到 28px。
+     这批按钮全是高频操作（注资/提现/关店，其中"关店"不可逆），
+     而 20px 在中低端机上误触率明显上升。
+     ★ 用 **min-height** 而不是加大 padding ——
+       padding 变大会让按钮同时变宽，横向空间被挤（14 个按钮在窄屏上排布更挤）；
+       min-height 只加高、不加宽，是纯增益。
+     ★ 注意这只影响 H5：Canvas 端按钮高度是 GFX.button 显式给的（20px），
+       要一起改需另动 minigame/src/ui.js 的调用处。 */
+  min-height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .btn-xs:hover { background: rgba(255, 255, 255, .08); color: var(--txt); }
 .btn-danger { color: var(--red); border-color: rgba(255, 107, 107, .35); }
@@ -1166,7 +1181,7 @@ body::before {
   background: rgba(255, 255, 255, .1); color: var(--txt2);
 }
 .store-badge.main { background: rgba(255, 194, 71, .2); color: var(--amber); }
-.store-badge.auto { background: rgba(139, 92, 255, .22); color: #c4a8ff; margin-left: 0; }
+.store-badge.auto { background: rgba(139, 92, 255, .22); color: var(--purple-soft); margin-left: 0; }
 .store-badge.play { background: rgba(127, 211, 137, .18); color: var(--green); margin-left: 0; }
 .store-grid {
   display: grid; grid-template-columns: 1fr 1fr; gap: 4px 8px;
@@ -1215,7 +1230,7 @@ body::before {
   margin-top: 7px; padding: 5px 7px; border-radius: 9px;
   background: rgba(139, 92, 255, .09); border: 1px solid rgba(139, 92, 255, .22);
 }
-.store-former-t { font-size: var(--fs-xs); color: #c4a8ff; margin-bottom: 2px; }
+.store-former-t { font-size: var(--fs-xs); color: var(--purple-soft); margin-bottom: 2px; }
 
 /* ---------- V13：城市地图 ---------- */
 .map-wrap {
@@ -1275,3 +1290,12 @@ body::before {
 .cp-city:hover { background: rgba(255, 255, 255, .13); color: var(--txt); }
 .cp-city.cur { background: rgba(255, 194, 71, .2); border-color: rgba(255, 194, 71, .4); color: var(--amber); }
 .cp-city i { font-style: normal; margin-left: 2px; }
+
+/* ---------- V13.1：城市地图入口条（页面只留这个，完整地图进弹窗） ---------- */
+.map-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 2px 0 4px;
+}
+.map-bar-info { flex: 1; min-width: 0; }
+.map-bar-cur { font-size: var(--fs-md); font-weight: 800; color: var(--txt); }
+.map-bar-sub { font-size: var(--fs-xs); color: var(--txt3); margin-top: 1px; }

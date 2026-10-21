@@ -604,6 +604,27 @@ function openStoreModalHtml(s) {
  *    没有坐标的城市仍可从省份列表进入（列表里有城市按钮）。
  */
 function cityMapPanelHtml(s) {
+  /* ★ V13.1：商圈页只留**入口条**，完整地图进弹窗。
+     实测：地图卡 3633 字占 rival 页 64%，而核心的「竞争对手」只有 269 字 ——
+     辅助信息比核心信息重 13.5 倍，层级完全倒了。
+     改成入口条后，商圈页回归「主功能在前」的层级。
+     ★ 同时与 Canvas 端形态统一（那边本来就是入口条 + 弹窗），
+       两版交互一致，玩家跨端不用重新学。 */
+  const mv = cityMapView(s);
+  return `<div class="card"><div class="card-h">🗺️ 城市地图
+      <span class="ch-sub">${mv.geoTotal} 城 · ${mv.cityTotal} 市 · ${mv.provs.length} 省</span></div>
+    <div class="map-bar">
+      <div class="map-bar-info">
+        <div class="map-bar-cur">📍 ${esc(mv.currentCityName)}</div>
+        <div class="map-bar-sub">点城市看详情，可切换经营城市</div>
+      </div>
+      <button class="btn btn-sm btn-primary" data-act="mapopen">🗺️ 打开地图</button>
+    </div>
+  </div>`;
+}
+
+/** 城市地图弹窗内容（V13.1）：完整地图 + 省份概览 + 城市选择入口 */
+function cityMapModalHtml(s) {
   const mv = cityMapView(s);
   const W = 320, H = 240;      /* viewBox 尺寸（会等比缩放到容器宽） */
   const pad = 16;
@@ -622,7 +643,7 @@ function cityMapPanelHtml(s) {
       <title>${esc(p.name)}（${esc(p.provName)}）${p.hasCuisine ? ' · 有本地特色' : ''}</title>
       ${p.isCurrent ? `<circle class="map-halo" cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="11"/>` : ''}
       <circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}"/>
-      ${dish ? `<text class="map-dish" x="${cx.toFixed(1)}" y="${(cy - 8).toFixed(1)}" text-anchor="middle">${dish}</text>` : ''}
+      ${dish ? `<text class="map-dish" x="${cx.toFixed(1)}" y="${(cy - 8).toFixed(1)}" text-anchor="middle" aria-hidden="true">${dish}</text>` : ''}
     </g>`;
   }
 
@@ -642,8 +663,8 @@ function cityMapPanelHtml(s) {
       }).join('、')
       : '该城市暂无本地特色菜系（走通用菜系）'}</div>
       <div class="map-info-a">
-        <button class="btn btn-xs btn-primary" data-act="mapgoto">🗺️ 去这里经营</button>
-        <button class="btn btn-xs" data-act="mapcitylist" data-id="${cur.id}">查看城市详情</button>
+        <button class="btn btn-xs" data-act="mapcitylist" data-id="${cur.id}">查看详情</button>
+        <button class="btn btn-xs btn-primary" data-act="mapgoto">🗺️ 切换城市</button>
       </div>
     </div>`;
   }
@@ -658,8 +679,8 @@ function cityMapPanelHtml(s) {
     </div>`;
   }
 
-  return `<div class="card"><div class="card-h">🗺️ 城市地图
-      <span class="ch-sub">${mv.geoTotal} 个有坐标城市 · ${mv.cityTotal} 市 · ${mv.provs.length} 省</span></div>
+  return `<div class="m-title">🗺️ 城市地图</div>
+    <div class="m-sub">${mv.geoTotal} 个有精确坐标 · ${mv.cityTotal} 市 · ${mv.provs.length} 省</div>
     <div class="map-wrap">
       <svg class="map-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet"
         role="group" aria-label="全国城市分布地图">
@@ -676,7 +697,9 @@ function cityMapPanelHtml(s) {
       <span><i class="map-lg dish"></i>有本地特色菜系</span>
     </div>
     <div class="map-provs">${provList}</div>
-  </div>`;
+    <div style="margin-top:10px">
+      <button class="btn btn-cyan" style="width:100%" data-act="mapgoto">🗺️ 切换经营城市（全 ${mv.cityTotal} 市）</button>
+    </div>`;
 }
 
 /** 城市选择器弹窗（V13）
@@ -695,14 +718,26 @@ function cityPickerModalHtml(s) {
   let h = `<div class="m-title">🗺️ 选择经营城市</div>
     <div class="m-sub">${PROVINCES.length} 省 · ${PROVINCES.reduce((a, p) => a + p.cities.length, 0)} 个市</div>
     <div class="cp-list">`;
-  for (const p of PROVINCES) {
+  /* ★ V13.1（P2-1）：**当前省份排最前**。
+     272 个市按省序平铺，找到目标城市要滚很久；
+     而大多数时候玩家就是想「在当前省换个市」或「看看邻省」——
+     把当前省提到最前，省下的滚动是实打实的。 */
+  const curProv = (s.venue && s.venue.provId) || '';
+  const provOrder = PROVINCES.slice().sort((a, b) => {
+    if (a.id === curProv) return -1;
+    if (b.id === curProv) return 1;
+    return 0;
+  });
+  for (const p of provOrder) {
     h += `<div class="cp-prov">${esc(p.name)}</div><div class="cp-cities">`;
     for (const cid of p.cities) {
       const c = cityById(cid);
       if (!c) continue;
       const cu = hasCityCuisine(c);
+      /* ★ P2-4：🍜 是纯装饰标记（"该城市有本地特色"），
+         但屏幕阅读器会把它读出来 —— 加 aria-hidden 让它只对眼睛可见。 */
       h += `<button class="cp-city${cid === cur ? ' cur' : ''}" data-act="mappick" data-id="${cid}">
-        ${esc(c.name)}${cu ? '<i>🍜</i>' : ''}</button>`;
+        ${esc(c.name)}${cu ? '<i aria-hidden="true">🍜</i>' : ''}</button>`;
     }
     h += `</div>`;
   }
