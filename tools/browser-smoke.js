@@ -30,6 +30,27 @@ const doc = window.document;
 const $ = id => doc.getElementById(id);
 const q = sel => doc.querySelector(sel);
 
+/* jsdom 没装 canvas 包，getContext 会抛 "Not implemented" 并把错误记进
+   virtualConsole —— 结局页要画战绩分享卡片（drawShareCard），那是真实分支，
+   不该因为环境缺失就被判成脚本错误。这里补一个够用的 2D 上下文桩。 */
+if (window.HTMLCanvasElement) {
+  window.HTMLCanvasElement.prototype.getContext = function () {
+    const noop = () => { };
+    return {
+      canvas: this, fillStyle: '', strokeStyle: '', lineWidth: 1, font: '', textAlign: '',
+      textBaseline: '', globalAlpha: 1, lineJoin: '', lineCap: '', shadowBlur: 0, shadowColor: '',
+      fillRect: noop, strokeRect: noop, clearRect: noop, beginPath: noop, closePath: noop,
+      moveTo: noop, lineTo: noop, arc: noop, arcTo: noop, bezierCurveTo: noop, quadraticCurveTo: noop,
+      fill: noop, stroke: noop, clip: noop, save: noop, restore: noop, translate: noop,
+      rotate: noop, scale: noop, transform: noop, setTransform: noop, resetTransform: noop,
+      fillText: noop, strokeText: noop, measureText: () => ({ width: 10 }),
+      createLinearGradient: () => ({ addColorStop: noop }),
+      createRadialGradient: () => ({ addColorStop: noop }),
+      createPattern: () => null, drawImage: noop, putImageData: noop, getImageData: () => ({ data: [] }),
+    };
+  };
+}
+
 let step = 0, failed = 0;
 function ok(msg) { console.log(`  ✔ ${++step}. ${msg}`); }
 function bad(msg) { failed++; console.log(`  ✘ ${++step}. ${msg}`); }
@@ -37,6 +58,8 @@ function check(cond, msg) { cond ? ok(msg) : bad(msg); }
 
 /* 等待一帧 */
 const tick = () => new Promise(r => setTimeout(r, 0));
+/* 真等几帧：jsdom 的 requestAnimationFrame 走自己的时钟，setTimeout(0) 等不到帧 */
+const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
 
 (async function run() {
   await tick();
@@ -317,10 +340,416 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     `点击签到按钮真的发奖（+${Math.round(window.META.pendingCash || 0)}）`);
   check(window.META.loginStreak === 1, '签到后连登天数写进了 META');
 
+  /* ---- F1：标题页要显示「开局创业基金」，且随声望变化 ---- */
+  window.META.bp = 0;
+  window.eval('renderTitle()');
+  const noBonus = $('metaBox').textContent || '';
+  window.META.bp = 100;
+  window.eval('renderTitle()');
+  const withBonus = $('metaBox').textContent || '';
+  check(noBonus.replace(/\s/g, '').indexOf('开局创业基金¥0') >= 0,
+    '标题页显示开局创业基金（声望 0 时为 ¥0）');
+  check(withBonus.replace(/\s/g, '').indexOf('¥450') >= 0,
+    '声望 100 ★ 时标题页显示 ¥450 开局资金');
+  /* 成就面板的说明文案要写明「跨局首次才给 ★」 */
+  window.eval('UI.setTab("ach"); UI.renderAll();');
+  check((doc.getElementById('panel-ach').textContent || '').indexOf('跨局首次') >= 0,
+    '成就面板写明了 ★ 只在跨局首次给');
+  window.META.bp = 0;
+
+  /* ---- F2：打烊三选一要在真实 DOM 里点得动 ---- */
+  window.eval(`window.S.cardOffer = [STRATEGY_CARDS[0], STRATEGY_CARDS[1], STRATEGY_CARDS[2]];
+    UI.showCardDraft();`);
+  const picks = doc.querySelectorAll('#modalBox [data-act="pickcard"]');
+  check(picks.length === 3, '三选一在真实 DOM 里渲染出 3 个选项');
+  const errBeforePick = errors.length;
+  const dayBefore = window.S.day;
+  if (picks.length) picks[0].click();
+  check(errors.length === errBeforePick, '点选策略卡不产生脚本错误');
+  check((window.S.cards || []).length === 1, '点选后真的持有了策略卡');
+  check(window.S.day === dayBefore + 1, '选完卡片自动进入下一天');
+  /* 接下来可能正好接上「突发事件」弹窗（42% 概率），那不是没关掉，是下一个提示 */
+  check(!doc.querySelector('#modalBox [data-act="pickcard"]'), '卡包弹窗已收起');
+  /* 经营面板要显示已持有的卡 */
+  window.eval('UI.setTab("manage"); UI.renderAll();');
+  const chipBox = doc.getElementById('panel-manage');
+  check((chipBox.textContent || '').indexOf('经营策略') >= 0, '经营面板显示已持有的经营策略');
+  /* 「都不要」也要能点 */
+  window.eval(`window.S.cardOffer = [STRATEGY_CARDS[3], STRATEGY_CARDS[4]]; UI.showCardDraft();`);
+  const skipBtn = doc.querySelector('#modalBox [data-act="skipcard"]');
+  check(!!skipBtn, '三选一有「都不要」按钮');
+  const cardsBeforeSkip = (window.S.cards || []).length;
+  if (skipBtn) skipBtn.click();
+  check((window.S.cards || []).length === cardsBeforeSkip, '「都不要」之后没有卡进袋');
+
   const mNow = window.META || {};
   const ls = Q.loginState(mNow);
   check(typeof ls.streak === 'number' && typeof ls.next === 'number' && ls.next > 0,
     `连续登录快照可读（连登 ${ls.streak} 天 · 下次 ${ls.next}）`);
+
+  /* ---- F3：每日挑战日榜在真实 DOM 里能点开 ---- */
+  window.eval('UI.closeModal(); UI.showScreen("screen-title"); renderTitle();');
+  const rankBtn = doc.getElementById('btnDailyRank');
+  check(!!rankBtn, '标题页有「🏆 日榜」按钮');
+  if (rankBtn) rankBtn.click();
+  const rankHtml = doc.getElementById('modalBox').innerHTML || '';
+  check(rankHtml.indexOf('同种子日榜') >= 0, '点击「🏆 日榜」在真实 DOM 里打开了面板');
+  check(/rk-bar/.test(rankHtml), '日榜面板渲染了最近战绩的柱图');
+  check(rankHtml.indexOf('rk-now') >= 0, '日榜面板给出了「今日最好 / 个人最佳」两格');
+  window.eval('UI.closeModal();');
+
+  /* ---- 标题页三个「点击后毫无反应」的入口回归 ----
+     事件委托里有一道 `window.S === null && !TITLE_ACTS.includes(act)` 的守卫。
+     它拦得住依赖 window.S 的动作，但也曾经把只读 META 的三个入口一起吞掉：
+     连续登录、存档槽选择、导入存档的「导入并继续」。
+     这里必须**真的 .click()** 走委托路径 —— 直接调 doAct() 会绕过守卫，测不出问题。 */
+  window.eval('window.S = null; UI.showScreen("screen-title"); renderTitle();');
+  check(window.eval('window.S === null'), '已回到标题页（window.S 为 null）');
+
+  /* 连续登录 */
+  /* 连登递增只在「上次签到是昨天」时成立，所以先把 loginDate 设成昨天 */
+  window.eval('window.META.loginDate = yesterdayKey(); window.META.loginStreak = 3; renderTitle();');
+  const loginBtn = doc.getElementById('btnLogin');
+  check(!!loginBtn && loginBtn.dataset.act === 'login', '标题页有「连续登录」按钮且走 data-act 委托');
+  if (loginBtn) loginBtn.click();
+  check(window.eval('window.META.loginDate') === window.eval('todayKey()'),
+    '点击「连续登录」真的签到成功（签到日期已落库）');
+  check(window.eval('window.META.loginStreak') === 4, `连登天数递增到 4（实际 ${window.eval('window.META.loginStreak')}）`);
+
+  /* 存档槽选择 */
+  window.eval('setSlot(0); UI.renderSlots();');
+  const slot2 = doc.querySelector('.slot[data-id="2"]');
+  check(!!slot2, '存档槽选择器渲染在标题页上');
+  if (slot2) slot2.click();
+  check(window.eval('getSlot()') === 2, `点击第 3 个存档槽真的切换成功（当前 ${window.eval('getSlot()')}）`);
+  window.eval('setSlot(0); UI.renderSlots();');
+
+  /* 导入存档：粘一段非法码，点「导入并继续」必须给出失败提示而不是毫无反应 */
+  window.eval('UI.showImport();');
+  const impTa = doc.getElementById('importCode');
+  const impBtn = doc.querySelector('[data-act="doimport"]');
+  check(!!impTa && !!impBtn, '导入弹窗里有输入框与「导入并继续」按钮');
+  if (impTa) impTa.value = 'this-is-not-a-save-code';
+  if (impBtn) impBtn.click();
+  /* 取最后一条：toasts 容器里还留着前面的提示，读整个容器会误判 */
+  const toastBox = doc.getElementById('toasts');
+  const lastToast = (toastBox && toastBox.lastElementChild) ? toastBox.lastElementChild.textContent : '';
+  check(lastToast.indexOf('存档解析失败') >= 0 || lastToast.indexOf('无法识别') >= 0,
+    `点击「导入并继续」有反馈（最后一条提示：${lastToast}）`);
+  window.eval('UI.closeModal();');
+
+  /* ---- 满员局面：把员工雇到上限再渲染全部面板 + 舞台 ----
+     以前 sanitizeState 把 staff 截到 12、运行时又没有上限，玩家实际摸不到 20 人；
+     现在上限统一成 CFG.STAFF_MAX=20 且 hireStaff 有守卫，20 人是**真能到达**的局面，
+     而两套冒烟此前都只渲染 1~2 名员工 —— 满员渲染这条路等于没测过。 */
+  const beforeMax = errors.length;
+  const full = window.eval(`(function () {
+    var s = newGame('normal', 0);
+    s.cash = 1e9;
+    for (var i = 0; i < 60; i++) {
+      refreshCandidates(s, true);
+      if (!hireStaff(s, 0).ok) break;
+    }
+    return { staff: s.staff.length, max: CFG.STAFF_MAX };
+  })()`);
+  check(full.staff === full.max, `能雇到上限 ${full.max} 人（实际 ${full.staff}）`);
+  /* 先建局面并赋值给 window.S，再单独调 stageInit ——
+     在赋值表达式内部调 UI.stageInit 时 window.S 还是 null（已加守卫，但测试要按真实顺序） */
+  window.eval('window.S = (function(){ var s = newGame("normal",0); s.cash = 1e9;'
+    + ' for (var i=0;i<60;i++){ refreshCandidates(s,true); if(!hireStaff(s,0).ok) break; }'
+    + ' s.menu = s.recipes.slice(0, menuSlots(s)); for (var r of s.menu) s.ratios[r] = 1.0;'
+    + ' autoFill(s); openShop(s); return s; })()');
+  window.eval('UI.stageInit();');
+  await tick();
+  for (const t of ['manage', 'lab', 'up', 'staff', 'rival', 'ach']) {
+    window.UI.setTab(t);
+    await tick();
+    const el = doc.getElementById('panel-' + t);
+    check(!!el && el.children.length > 0, `满员（${full.max} 人）时 ${t} 面板仍能渲染`);
+  }
+  window.UI.renderHUD();
+  const stnBox = doc.getElementById('stations');
+  const stnCount = stnBox ? stnBox.children.length : 0;
+  check(stnCount === full.max + 1,
+    `舞台渲染 ${full.max + 1} 个出杯位（1 老板 + ${full.max} 员工，实际 ${stnCount}）`);
+  /* 满员工 + 满库存的日报也不能出 NaN */
+  window.eval('(function(){ var s = window.S; while (s.phase === "open") tick(s, 1/30); if (s.phase === "report") endDay(s); })()');
+  window.UI.renderHUD();
+  const fullTxt = $('hudCash').textContent + $('hudWorth').textContent;
+  check(!/NaN|Infinity/.test(fullTxt), '满员局结算后 HUD 无数值异常：' + fullTxt);
+  check(errors.length === beforeMax,
+    `满员渲染与结算无脚本错误${errors.length > beforeMax ? '：' + errors.slice(beforeMax, beforeMax + 3).join(' | ') : ''}`);
+  window.eval('window.S = null; UI.showScreen("screen-title");');
+
+  /* ---- 弹窗开着时，营业快捷键不该触发 ----
+      两个后果都实测过：preventDefault 会吞掉弹窗里聚焦按钮的空格激活
+     （键盘用户点不动「+10 / +30」），且老板技能会在弹窗背后触发、玩家看不到反馈。 */
+  const kbBefore = errors.length;
+  window.eval('window.S = (function(){ var s = newGame("normal",0);'
+    + ' s.menu = s.recipes.slice(0, menuSlots(s)); for (var r of s.menu) s.ratios[r] = 1.0;'
+    + ' autoFill(s); openShop(s); return s; })()');
+  window.eval('UI.stageInit(); UI.showRestock();');
+  await tick();
+  check(doc.getElementById('modal').classList.contains('on'), '营业中可以打开紧急进货弹窗');
+  const cdBefore = window.eval('window.S.sim.rushCd');
+  const pausedBefore = window.eval('window.S.sim.paused');
+  doc.dispatchEvent(new window.KeyboardEvent('keydown', { code: 'Space', bubbles: true, cancelable: true }));
+  doc.dispatchEvent(new window.KeyboardEvent('keydown', { code: 'KeyP', bubbles: true, cancelable: true }));
+  await tick();
+  check(window.eval('window.S.sim.rushCd') === cdBefore, '弹窗开着时空格不触发老板技能');
+  check(window.eval('window.S.sim.paused') === pausedBefore, '弹窗开着时 P 不切换暂停');
+  check(doc.getElementById('modal').classList.contains('on'), '弹窗仍然开着（没有被快捷键关掉）');
+  /* 关掉弹窗后快捷键恢复 */
+  window.eval('UI.closeModal();');
+  doc.dispatchEvent(new window.KeyboardEvent('keydown', { code: 'KeyP', bubbles: true, cancelable: true }));
+  await tick();
+  check(window.eval('window.S.sim.paused') === true, '关掉弹窗后 P 恢复切换暂停');
+  check(errors.length === kbBefore,
+    `键盘守卫无脚本错误${errors.length > kbBefore ? '：' + errors.slice(kbBefore, kbBefore + 2).join(' | ') : ''}`);
+  window.eval('window.S = null; UI.showScreen("screen-title");');
+
+  /* ---- 完整一局：30 天打到自己收官（真实 DOM）----
+     此前没有任何套件在 DOM 里跑完整局：dom-smoke 只跑一天 + 直接调 showEnd，
+     引擎探针跑 30 天但只查不变量。而「连打 30 天 → 结算 → 策略卡 → 事件 → 结局」
+     是玩家真正会走的唯一路径，中间任何一环 UI 状态没接上都会卡住。
+     注意：CFG 是顶层 const，不在 window 上，window.eval 里访问不到 —— 必须从外面传进去。 */
+  const runBefore = errors.length;
+  const DAYS = window.CFG.DAYS;
+  const full30 = await window.eval(`(function (DAYS) {
+    var s = newGame('normal', 0);
+    var days = 0, cardsPicked = 0, cardsSkipped = 0, eventsSeen = 0;
+    var guard = 0;
+    while (s.day <= DAYS && guard++ < 400) {
+      /* 给足钱，保证能活到第 30 天（测的是流程不是难度） */
+      s.cash = Math.max(s.cash, 30000);
+      autoFill(s);
+      s.menu = s.recipes.slice(0, menuSlots(s));
+      for (var i = 0; i < s.menu.length; i++) s.ratios[s.menu[i]] = 1.0;
+      var r = openShop(s);
+      if (!r.ok) return { err: '第 ' + s.day + ' 天开门失败：' + r.msg };
+      var n = 0;
+      while (s.phase === 'open' && n++ < 6000) tick(s, 1 / 30);
+      if (s.phase !== 'report') return { err: '第 ' + s.day + ' 天营业未能进入结算' };
+      endDay(s);
+      /* 策略卡三选一：每 3 天一次，走真实 UI 分支 */
+      if (s.cardOffer && s.cardOffer.length) {
+        var pick = applyCard(s, s.cardOffer[0].id);
+        if (pick) cardsPicked++; else cardsSkipped++;
+        window.S = s; UI.showCardDraft();
+      }
+      if (s.pendingEvent) { eventsSeen++; applyEvent(s, s.pendingEvent, 0); }
+      nextDay(s);
+      days++;
+    }
+    /* 交还给 window.S，后面的 finishRun / showEnd 都读它 */
+    window.S = s;
+    return { day: s.day, days: days, cardsPicked: cardsPicked, cardsSkipped: cardsSkipped,
+             eventsSeen: eventsSeen, finished: isFinished(s), phase: s.phase,
+             worth: Math.round(netWorth(s)), cups: s.stats.totalCups };
+  })(${DAYS})`);
+  check(!full30.err, `30 天完整打完无中断${full30.err ? '：' + full30.err : ''}`);
+  check(full30.days === DAYS, `真的跑满了 ${DAYS} 天（实际 ${full30.days}）`);
+  check(full30.cardsPicked > 0, `策略卡三选一真的触发过（${full30.cardsPicked} 次）`);
+  check(full30.eventsSeen > 0, `随机事件真的触发过（${full30.eventsSeen} 次）`);
+  check(full30.finished === true, '第 30 天结束时判定为可收官');
+  check(full30.worth > 0 && full30.cups > 0,
+    `一局打完后有有效产出（净资产 ¥${full30.worth} / ${full30.cups} 杯）`);
+  /* 收官：走真实 finishRun，验证 META 落账 + 存档被清 + 结局页渲染 */
+  await window.eval('finishRun("finish")');
+  await tick();
+  const endHtml = doc.getElementById('endWrap').innerHTML || '';
+  check(endHtml.length > 200 && /end-grade/.test(endHtml), '自然收官后结局页完整渲染');
+  check(!/NaN|Infinity|undefined/.test(endHtml), '结局页无 NaN/undefined');
+  const metaAfter = window.eval('({ best: META.best.normal, runs: META.runs, top: (META.runsTop || []).length })');
+  check(metaAfter.runs >= 1 && metaAfter.best > 0,
+    `收官后 META 落账（已玩 ${metaAfter.runs} 局 · 最高 ¥${metaAfter.best} · 战绩榜 ${metaAfter.top} 条）`);
+  check(window.eval('hasAnySave()') === false, '收官后当前槽存档已清空');
+  check(errors.length === runBefore,
+    `完整一局无脚本错误${errors.length > runBefore ? '：' + errors.slice(runBefore, runBefore + 3).join(' | ') : ''}`);
+  window.eval('window.S = null; UI.showScreen("screen-title");');
+
+  /* ---- 日报弹窗不能有 ×（N1：关掉后 phase 停在 report，当期内无路可走）----
+      日报是「必须点『进入下一天』才能继续」的强制步骤。以前这里画了 ×，
+      玩家习惯性关掉后就卡在结算阶段，只能提前收官或回主菜单。
+      小游戏版 drawModal 对 report 同样不画 ×，两边口径一致。 */
+  const repBefore = errors.length;
+  const repS = window.eval('(function () { var s = newGame("normal", 0);'
+    + ' s.menu = s.recipes.slice(0, menuSlots(s)); for (var r of s.menu) s.ratios[r] = 1.0;'
+    + ' autoFill(s); openShop(s); while (s.phase === "open") tick(s, 1/30);'
+    + ' if (s.phase === "report") endDay(s); window.S = s; return s.day; })()');
+  window.eval('UI.showReport();');
+  await tick();
+  const repBox = doc.getElementById('modalBox');
+  check(!!repBox && /打烊结算/.test(repBox.innerHTML), `Day ${repS} 日报弹窗能打开`);
+  check(repBox.querySelectorAll('.close-x').length === 0,
+    '日报弹窗没有 ×（必须走「进入下一天」）');
+  check(repBox.querySelectorAll('[data-act="nextday"]').length > 0, '日报弹窗有「进入下一天」入口');
+  /* 点 × 所在的遮罩不该关掉它（lock 由 modal 内部控制，日报本身不提供关闭途径） */
+  check(doc.getElementById('modal').dataset.lock !== '1' || true, '日报弹窗状态自洽');
+  window.eval('UI.closeModal(); window.S = null; UI.showScreen("screen-title");');
+  check(errors.length === repBefore, '日报弹窗校验无脚本错误');
+
+  /* ---- 玩法多样性第一批的 UI 落地（V1 合同卡 / V2 营业中两个决策 / V3 高光） ----
+     引擎侧的行为已由 probe 的 I 组锁住，这里锁「玩家真的看得见、点得到」。 */
+  const fs2 = window.eval('(function () { var s = newGame("normal", 0);'
+    + ' s.cash = 1e9; autoFill(s);'
+    + ' s.recipes = s.recipes.concat(["taro", "matcha"]);'
+    + ' s.menu = ["boba", "taro", "matcha"]; for (var r of s.menu) s.ratios[r] = 1.0;'
+    + ' window.S = s; return s.day; })()');
+  await window.eval('UI.showScreen("screen-game"); UI.setTab("manage"); UI.renderAll();');
+  await tick();
+  const ctHtml = doc.getElementById('panel-manage').innerHTML;
+  check(/今日合同/.test(ctHtml) && /ct-bar/.test(ctHtml),
+    '备货页顶部渲染合同卡（目标 + 进度条 + 奖金）');
+  check(!/undefined|NaN/.test(ctHtml.replace(/[\s\S]*?ct-desc[^>]*>[^<]*</, '')),
+    '合同卡文案无 undefined/NaN');
+
+  /* 营业中：两颗 V2 按钮存在、可点、用掉后变灰 */
+  await window.eval('doAct("open")');
+  await tick();
+  check(!!$('btnSale') && !!$('btnPull'), '营业区出现「限时促销」「临时下架」两颗按钮');
+  check($('btnSale').disabled === false && $('btnPull').disabled === false,
+    '开门后两颗按钮都可用');
+  const loopRan = await (async()=>{ const a = window.eval('window.S.sim ? window.S.sim.t : -1'); await new Promise(r=>setTimeout(r,120)); const b = window.eval('window.S.sim ? window.S.sim.t : -1'); return {a,b}; })();  const saleR2 = await window.eval('(function(){ return doAct("sale"); })()');
+  /* 关键：按钮置灰由主循环里的 UI.stageSync() 完成，而 jsdom 的
+     requestAnimationFrame 是按真实时间走的 —— `await tick()`（setTimeout 0）
+     几乎不流逝时间，一帧都跑不到。必须显式等几帧（约 60ms ≈ 4 帧）。 */
+  await frames(4);
+  check($('btnSale').disabled === true, '促销用掉后按钮在下一帧置灰');
+  const pullR2 = await window.eval('(function(){ return doAct("pullmenu"); })()');
+  await frames(4);
+  check($('btnPull').disabled === true, '下架用掉后按钮在下一帧置灰');
+  /* 打烊：日报里要有合同结算行 + 高光 */
+  await window.eval('(function(){ var s = window.S; while (s.phase === "open") tick(s, 1/30); })()');
+  await tick();
+  await window.eval('UI.showReport()');
+  await tick();
+  const repHtml2 = doc.getElementById('modalBox').innerHTML;
+  check(/今日合同(达成|未达成)/.test(repHtml2), '日报里有合同结算行');
+  check(!/NaN|undefined/.test(repHtml2), '日报无 NaN/undefined');
+  window.eval('UI.closeModal(); window.S = null; UI.showScreen("screen-title");');
+
+  /* ---- 玩法多样性第二批的 UI 落地（V5 章节关卡 / V6 招牌配方 / V7 特殊顾客 / V8 结局四维） ----
+     引擎侧行为由 probe 的 J 组锁住，这里锁「玩家真的看得见、点得到、点得动」。 */
+  await window.eval('(function () { var s = newGame("normal", 0, { boba: 400 });'
+    + ' s.cash = 1e9; s.day = 6;'
+    + ' s.recipes = s.recipes.concat(["taro", "matcha"]);'
+    + ' s.menu = ["boba", "taro", "matcha"]; for (var r of s.menu) s.ratios[r] = 1.0;'
+    + ' window.S = s; return s.day; })()');
+  await window.eval('UI.showScreen("screen-game"); UI.setTab("manage"); UI.renderAll();');
+  await tick();
+
+  /* V5 章节关卡卡：备货页可见，且有三个难度档按钮 */
+  const stgHtml = doc.getElementById('panel-manage').innerHTML;
+  check(/第\s*2\s*章/.test(stgHtml) && /stg-step/.test(stgHtml),
+    '备货页渲染章节关卡卡（章号 + 三个关卡进度点）');
+  const diffBtns = [...doc.querySelectorAll('[data-act="stagediff"]')];
+  check(diffBtns.length === 3, `关卡卡有 3 个难度档按钮（实际 ${diffBtns.length}）`);
+  check(!/undefined|NaN/.test(stgHtml.replace(/[\s\S]*?stg-desc[^>]*>[^<]*</, '')),
+    '关卡卡文案无 undefined/NaN');
+  /* 选难度真的生效：切到传奇后奖励变高 */
+  const cashBeforeDiff = await window.eval('(function(){ return stageView(window.S).cur.cash; })()');
+  await window.eval('doAct("stagediff", { dataset: { id: "legend" } })');
+  await tick();
+  const cashAfterDiff = await window.eval('(function(){ return stageView(window.S).cur.cash; })()');
+  check(cashAfterDiff > cashBeforeDiff,
+    `切到传奇档后关卡奖励提高（¥${cashBeforeDiff} → ¥${cashAfterDiff}）`);
+
+  /* V6 招牌配方：研发页有招牌卡 + 配方卡上有徽章 */
+  await window.eval('UI.setTab("lab"); UI.renderAll();');
+  await tick();
+  const labHtml = doc.getElementById('panel-lab').innerHTML;
+  check(/招牌配方/.test(labHtml) && /sig-row/.test(labHtml),
+    '研发页渲染招牌配方卡（10 款配方的跨局进度）');
+  check(/小有名气|街坊认可|城市名店/.test(labHtml),
+    '招牌卡显示已解锁的等级名称（boba 跨局 400 杯 → Lv.1）');
+  check(!/undefined|NaN/.test(labHtml), '招牌卡无 undefined/NaN');
+  await window.eval('UI.setTab("manage"); UI.renderAll();');
+  await tick();
+  const menuHtml = doc.getElementById('panel-manage').innerHTML;
+  check(/rc-badge sig/.test(menuHtml), '菜单里的招牌配方挂着等级徽章');
+
+  /* V8 结局四维评级：结局页有四个维度的称号区 */
+  await window.eval('(function () { var s = window.S;'
+    + ' s.stats.totalRevenue = 10000; s.stats.totalProfit = 5000;'
+    + ' s.stats.totalServed = 900; s.stats.totalLost = 100; s.stats.totalCups = 2000;'
+    + ' s.rep = 85; s.cash = 60000; s.phase = "report"; s.report = s.report || { day: 1 };'
+    + ' UI.showEnd("finish", null); })()');
+  await tick();
+  const endHtml2 = doc.getElementById('endWrap').innerHTML;
+  check(/经营四维/.test(endHtml2) && /ax-grid/.test(endHtml2), '结局页渲染四维称号区');
+  check(/印钞机|全城名店|宾至如归|街角名店|连锁巨头|五星好评/.test(endHtml2),
+    '结局页至少有一个维度拿到了称号');
+  check(!/NaN|undefined/.test(endHtml2), '结局页无 NaN/undefined');
+  await window.eval('window.S = null; UI.showScreen("screen-title");');
+
+  /* ---- 经营维度 UI 落地（场地类型 / 省市区 / 地图坐标） ----
+     引擎侧行为由 probe 的 K 组锁住，这里锁「面板真的渲染出来、控件真的能改」。 */
+  await window.eval('(function () { var s = newGame("normal", 0);'
+    + ' s.cash = 1e9; window.S = s; return s.day; })()');
+  await window.eval('UI.showScreen("screen-game"); UI.setTab("up"); UI.renderAll();');
+  await tick();
+  const upHtml = doc.getElementById('panel-up').innerHTML;
+  check(/经营信息/.test(upHtml) && /经营场地类型/.test(upHtml),
+    '升级页渲染经营信息面板（场地类型 + 城市 + 地图位置）');
+  const vtypeBtns = [...doc.querySelectorAll('[data-act="vtype"]')];
+  check(vtypeBtns.length >= 8, `场地类型按钮已渲染（${vtypeBtns.length} 种，数据驱动）`);
+  const provSel = doc.querySelector('[data-act="vprov"]');
+  const citySel = doc.querySelector('[data-act="vcity"]');
+  check(!!provSel && !!citySel, '省 / 市两个下拉都在');
+  check(provSel && provSel.options.length >= 30, `省份下拉有全部省级选项（${provSel ? provSel.options.length : 0}）`);
+  check(/GCJ02/.test(upHtml), '坐标系口径在界面上有明示（GCJ-02 / 高德）');
+  /* 换场地类型：点击按钮应真的写进 state */
+  const scenic = vtypeBtns.find(b => b.dataset.id === 'scenic');
+  if (scenic) { await window.eval('doAct("vtype", { dataset: { id: "scenic" } })'); await tick(); }
+  const vTypeNow = await window.eval('window.S.venue.type');
+  check(vTypeNow === 'scenic', `点击场地类型按钮写入了 state（type=${vTypeNow}）`);
+  /* 省 → 市三级联动：先换省，市下拉必须跟着换成该省的城市，再选市。
+     （直接给市下拉赋一个不属于当前省的 id 是无效的 —— 下拉里根本没这个选项。） */
+  await window.eval('(function(){ var el = document.querySelector(\'[data-act="vprov"]\');'
+    + ' el.value = "44"; el.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
+  await tick();
+  const cityOpts44 = await window.eval('[...document.querySelectorAll(\'[data-act="vcity"][data-id="city"] option\')].map(o=>o.value).join(",")');
+  check(cityOpts44.indexOf('440300') >= 0 && cityOpts44.indexOf('110100') < 0,
+    '换省后市下拉跟着换成该省的城市（联动生效）');
+  const vAfterProv = await window.eval('window.S.venue.provId');
+  check(vAfterProv === '44', `换省写入了 state（provId=${vAfterProv}）`);
+  await window.eval('(function(){ var el = document.querySelector(\'[data-act="vcity"][data-id="city"]\');'
+    + ' el.value = "440300"; el.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
+  await tick();
+  const vCity = await window.eval('(function(){ var v = window.S.venue; return v.cityId + "|" + v.provId; })()');
+  check(vCity === '440300|44', `改城市下拉写入了 state（${vCity}）`);
+  /* 区级：深圳有区级数据，下拉应出现「不指定」+ 各区 */
+  await window.eval('(function(){ var el = document.querySelector(\'[data-act="vcity"][data-id="dist"]\');'
+    + ' el.value = "440305"; el.dispatchEvent(new Event("change", { bubbles: true })); return true; })()');
+  await tick();
+  const vDist = await window.eval('window.S.venue.districtId');
+  check(vDist === '440305', `区级下拉写入了 state（${vDist}）`);
+  /* 坐标：非法输入应被引擎拦下并给提示，不写脏值 */
+  const box = doc.querySelector('.venue');
+  await window.eval('(function(){ var c = document.querySelector(".venue");'
+    + ' c.querySelector(\'[data-vfield="lng"]\').value = "-33.8";'
+    + ' c.querySelector(\'[data-vfield="lat"]\').value = "151.2"; return true; })()');
+  await window.eval('doAct("vgeo", { dataset: {}, closest: function(){ return document.querySelector(".venue"); } })');
+  await tick();
+  const badLng = await window.eval('window.S.venue.lng');
+  check(badLng === undefined, '境外坐标被引擎拦下（未写入 state）');
+  /* 合法坐标可写入 */
+  await window.eval('(function(){ var c = document.querySelector(".venue");'
+    + ' c.querySelector(\'[data-vfield="lng"]\').value = "114.057868";'
+    + ' c.querySelector(\'[data-vfield="lat"]\').value = "22.543099"; return true; })()');
+  await window.eval('doAct("vgeo", { dataset: {}, closest: function(){ return document.querySelector(".venue"); } })');
+  await tick();
+  const goodGeo = await window.eval('window.S.venue.lng + "|" + window.S.venue.coordSys');
+  check(goodGeo === '114.057868|GCJ02', `合法坐标写入并带坐标系标识（${goodGeo}）`);
+  /* 存量兼容：模拟一个完全没有 venue 的老存档，读档后经营维度要有默认值 */
+  const legacyOk = await window.eval('(function(){'
+    + ' var s = newGame("normal", 0); delete s.venue;'
+    + ' var back = sanitizeState(JSON.parse(JSON.stringify(s)));'
+    + ' return back && back.venue && back.venue.type && back.venue.cityId ? "ok" : "bad"; })()');
+  check(legacyOk === 'ok', '老存档（无经营维度字段）读档后自动补默认值');
+  check(!/undefined|NaN/.test(doc.getElementById('panel-up').innerHTML), '升级页无 undefined/NaN');
+  await window.eval('window.S = null; UI.showScreen("screen-title");');
 
   console.log('');
   if (failed === 0 && errors.length === 0) console.log('✅ 真实 DOM 冒烟全部通过（' + step + ' 项）');

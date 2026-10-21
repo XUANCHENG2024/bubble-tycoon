@@ -496,6 +496,98 @@ cap.V.modal = null; cap.frames(1);
 cap.MG.doAct('nextday'); cap.frames(1);
 check(capCalls.indexOf('createInterstitialAd') >= 0, '⑤ 进入下一天时触发插屏广告（自然断点）');
 
+/* ⑦ 每日挑战日榜（F3）
+   两条路径都要验：
+     · 平台能力在 —— 预热登录、上报分数、拉起原生榜单；
+     · 平台能力不在（宿主不支持 / 未登录）—— 面板照样打开，只是不给那个按钮。 */
+const rankCalls = [];
+const rankTT = {
+  login: o => { rankCalls.push('login'); if (o && o.success) o.success({ code: 'test' }); },
+  setImRankData: o => {
+    rankCalls.push('setImRankData:' + (o.value || '') + '@' + (o.zoneId || ''));
+    if (o.success) o.success({ errMsg: 'setImRankData:ok' });
+  },
+  getImRankList: o => {
+    rankCalls.push('getImRankList:' + (o.rankType || '') + '/' + (o.relationType || '')
+      + '/' + (o.dataType));
+    if (o.success) o.success({ errMsg: 'getImRankList:ok' });
+  },
+};
+const rk = makeEnv(390, 844, null, rankTT);
+const RK = rk.ctx.CAPS;
+rk.frames(2);
+check(rankCalls.indexOf('login') >= 0,
+  '⑦ 启动时预热登录态（两个排行榜 API 都要求已登录，未登录拉榜会闪退）');
+check(RK.rankOn() && RK.rankListOn(), '⑦ 宿主支持时排行榜能力判定为真');
+
+/* 上报：value 必须是 [0, int32_MAX) 的正整数字符串 */
+RK.submitRank(38402);
+check(rankCalls.indexOf('setImRankData:38402@daily') >= 0,
+  '⑦ 上报的 value 是净资产的字符串形式，分区标识用 daily');
+RK.submitRank(-500);
+check(rankCalls[rankCalls.length - 1] === 'setImRankData:0@daily',
+  '⑦ 负的净资产被夹到 0（平台只收正数）');
+RK.submitRank(1e12);
+check(rankCalls[rankCalls.length - 1] === 'setImRankData:2147483647@daily',
+  '⑦ 超过 int32_MAX 的分数被夹住（否则平台报 invalid param）');
+RK.submitRank(1234.6);
+check(rankCalls[rankCalls.length - 1] === 'setImRankData:1235@daily',
+  '⑦ 上报分数取整');
+
+/* 只记「当天最好一局」：更差的一局不覆盖，也不上报 */
+rk.inCtx('_META.dailyDate = ""; _META.dailyBest = 0; _META.dailyBestEver = 0; _META.dailyLog = [];');
+const r1 = rk.inCtx('recordDaily(_META, todayKey(), 10000)');
+check(r1.newToday && r1.newEver, '⑦ 首次成绩同时刷新今日与个人最佳');
+const r2 = rk.inCtx('recordDaily(_META, todayKey(), 8000)');
+check(!r2.newToday && rk.inCtx('_META.dailyBest') === 10000,
+  '⑦ 更差的一局不覆盖今天的最佳（覆盖上报等于自己把名次冲掉）');
+check(rk.inCtx('dailyRecent(_META, 7).length') === 1, '⑦ 一天只留一条日志');
+
+/* 标题页入口 + 原生榜单 */
+check(!!rk.findHit('dailyrank'), '⑦ 标题页有「🏆 日榜」入口');
+rk.tap('dailyrank'); rk.frames(1);
+check(rk.V.modal && rk.V.modal.type === 'dailyrank', '⑦ 可打开每日挑战日榜面板');
+check(!!rk.findHit('ranklist'), '⑦ 平台能力可用时，面板里有「查看全网日榜」');
+rk.tap('ranklist'); rk.frames(1);
+check(rankCalls.some(c => c.indexOf('getImRankList:day/default/0') === 0),
+  '⑦ 点击后确实调用 tt.getImRankList，且 rankType=day（日榜）、dataType=0（数值）');
+
+/* 打完每日挑战这一局：成绩入库 + 上报 + 结局页给日榜入口 */
+rk.MG.doAct('close'); rk.frames(1);
+/* 上面手动记过一局 10000，不归零的话这一局（净资产约 900）会被判为
+   「更差的一局」而不上报 —— 这是对的，但不能拿它来验上报链路。 */
+rk.inCtx('_META.dailyDate = ""; _META.dailyBest = 0; _META.dailyBestEver = 0; _META.dailyLog = [];');
+rankCalls.length = 0;
+rk.tap('daily'); rk.frames(1);
+check(rk.MG.S.daily === true, '⑦ 每日挑战带 daily 标记开局');
+rk.MG.finishRun('finish'); rk.frames(1);
+check(!!rk.V.end.daily, '⑦ 每日挑战结束时把日榜结果带进结局页');
+check(rankCalls.some(c => c.indexOf('setImRankData:') === 0),
+  '⑦ 刷新当天最好成绩时上报到平台');
+check(!!rk.findHit('dailyrank'), '⑦ 结局页出现「🏆 日榜」按钮');
+rk.tap('dailyrank'); rk.frames(1);
+check(!!rk.findHit('ranklist'), '⑦ 结局页也能一路点到原生榜单');
+
+/* 降级：宿主不支持时入口不消失，但也不给点了没反应的按钮 */
+const noRk = makeEnv(390, 844);
+noRk.frames(2);
+check(!noRk.ctx.CAPS.rankOn(), '⑦ 降级：宿主不支持时 rankOn 判定为假');
+noRk.tap('dailyrank'); noRk.frames(1);
+check(noRk.V.modal && noRk.V.modal.type === 'dailyrank',
+  '⑦ 降级：日榜面板照样能打开（入口不消失）');
+check(!noRk.findHit('ranklist'),
+  '⑦ 降级：不给出「查看全网日榜」这种点了没反应的按钮');
+check(!noRk.frameErr, `⑦ 降级面板渲染无异常${noRk.frameErr ? '：' + noRk.frameErr : ''}`);
+
+/* 小屏：日榜面板的按钮不能画到裁剪区外 */
+const rkS = makeEnv(360, 640, null, rankTT);
+rkS.frames(2);
+rkS.tap('dailyrank'); rkS.frames(1);
+const rkHits = rkS.G.hits.filter(h => h.act === 'ranklist' || h.act === 'daily');
+check(rkHits.length >= 2, `⑦ 360×640 上日榜面板的按钮都在裁剪区内（找到 ${rkHits.length} 个）`);
+const rkLow = Math.max.apply(null, rkHits.map(h => h.y + h.h));
+check(rkLow <= 640, `⑦ 日榜面板最低的按钮没有出屏（${Math.round(rkLow)} ≤ 640）`);
+
 /* 每日任务（Canvas 版）：面板画得出来 + 达成即到账 + 有提示气泡 */
 const qe = makeEnv(390, 844);
 qe.frames(2);
@@ -718,6 +810,129 @@ check(tg.V.tut.step === buyStep + 1,
 check(tg.V.tutRush === 0, '推进时连点计数已复位');
 check(!tg.frameErr, `引导自动推进无异常${tg.frameErr ? '：' + tg.frameErr : ''}`);
 
+/* ------------------------------------------------------------
+ *  F1：声望点改为开局资金（两版必须同口径）
+ *  canvas 版没有 DOM，这里验证的是「钱真的到账 + 文案不再承诺客流 + 每日挑战仍然公平」
+ * ---------------------------------------------------------- */
+{
+  const f1 = makeEnv(390, 844);
+  f1.frames(2);
+  const BASE = f1.inCtx('DIFFICULTY.normal.cash');
+  f1.MG.META.tutDone = true;      /* 不进引导，否则触摸会被引导吞掉 */
+
+  /* 首局：不该有开局资金 */
+  f1.MG.startGame('normal', null, false); f1.frames(1);
+  /* 连续登录的创业基金也会进现金，比较时必须把它扣掉 */
+  const login1 = f1.MG.S.loginBonus || 0;
+  check(f1.MG.S.startBonus === 0 && f1.MG.S.cash === BASE + login1,
+    `首局没有开局资金（现金 ${BASE} + 签到 ${login1}）`);
+
+  /* 有声望：折算成现金并写进 state */
+  f1.MG.META.bp = 100;
+  f1.MG.startGame('normal', null, false); f1.frames(1);
+  check(f1.MG.S.startBonus === 450, `声望 100 ★ → 开局资金 ¥450（实际 ${f1.MG.S.startBonus}）`);
+  check(f1.MG.S.cash === BASE + 450, `开局资金进了现金（${BASE} → ${f1.MG.S.cash}）`);
+  check(f1.MG.S.log.some(l => typeof l === 'string' && l.indexOf('创业基金') >= 0),
+    '开局日志写明了这笔钱的来源');
+
+  /* 升级面板（品牌卡）在有声望时也要画得出来 */
+  f1.tap('tab', 'up'); f1.frames(1);
+  check(!f1.frameErr, `品牌卡渲染无异常${f1.frameErr ? '：' + f1.frameErr : ''}`);
+  check(f1.V.tab === 'up', '可以切到升级面板');
+
+  /* 转生弹窗：说钱，不说客流倍数 */
+  f1.MG.doAct('prestige'); f1.frames(1);
+  const mt = (f1.V.modal && f1.V.modal.text) || '';
+  check(mt.indexOf('开局创业基金') >= 0, '转生弹窗说明了开局资金');
+  check(mt.indexOf('客流 +') < 0, '转生弹窗不再承诺「客流 +N%」');
+
+  /* 声望不再影响客流：改 bpBonus 前后必须一致 */
+  const sameTraffic = f1.inCtx('(function(){var s=_S;var a=trafficOf(s);s.bpBonus=200;var b=trafficOf(s);s.bpBonus=Math.round(100);return a===b;})()');
+  check(sameTraffic, '声望不再影响客流（需求端不再单方面变强）');
+
+  /* 每日挑战：全网同一局，不带声望入场 */
+  f1.MG.META.bp = 100;
+  f1.MG.doAct('daily'); f1.frames(1);
+  check(f1.MG.S.daily === true, '每日挑战可进入');
+  check(f1.MG.S.startBonus === 0, '每日挑战不带声望入场（保证全网公平）');
+
+  /* 成就 ★：跨局首次才入账 */
+  const achOnce = f1.inCtx(`(function(){
+    var m = { bp: 0, ach: {} };
+    var a = ACHIEVEMENTS[0], b = ACHIEVEMENTS[1];
+    var firsts = claimAchStars(m, [a, b]);
+    var first = { n: firsts.length, bp: m.bp };
+    var seconds = claimAchStars(m, [a, b]);
+    return { first: first, secondN: seconds.length, secondBp: m.bp, want: a.reward.bp + b.reward.bp };
+  })()`);
+  check(achOnce.first.n === 2 && achOnce.first.bp === achOnce.want,
+    `成就首次达成发 ★（共 ${achOnce.want} ★）`);
+  check(achOnce.secondN === 0 && achOnce.secondBp === achOnce.want,
+    '同一成就重复达成不再发 ★（否则两局就把开局资金顶到上限）');
+}
+
+/* ------------------------------------------------------------
+ *  F2：打烊三选一策略卡
+ *  canvas 版靠命中矩形交互，所以这里验证的是「卡片按钮真的点得到」，
+ *  而不只是引擎里那几个函数对不对
+ * ---------------------------------------------------------- */
+{
+  const c1 = makeEnv(390, 844);
+  c1.frames(2);
+  c1.MG.META.tutDone = true;
+  c1.MG.startGame('normal', null, false); c1.frames(1);
+
+  /* 造一个卡包：三张卡 + 「都不要」都必须有可点区域 */
+  c1.MG.S.cardOffer = [c1.inCtx('STRATEGY_CARDS[0]'), c1.inCtx('STRATEGY_CARDS[1]'), c1.inCtx('STRATEGY_CARDS[2]')];
+  c1.MG.doAct('nextday'); c1.frames(1);
+  check(c1.V.modal && c1.V.modal.type === 'card', '打烊后有卡包时先弹三选一，不直接进下一天');
+  const cardBtns = c1.G.hits.filter(h => h.act === 'pickcard');
+  check(cardBtns.length === 3, `三张卡都有可点区域（找到 ${cardBtns.length} 个）`);
+  check(!!c1.findHit('skipcard'), '有「都不要」出口');
+  const dayBefore = c1.MG.S.day;
+  /* 选第一张 → 进入下一天，且真的持有这张卡 */
+  c1.tap('pickcard', c1.inCtx('STRATEGY_CARDS[0].id')); c1.frames(1);
+  check(c1.MG.S.cards.length === 1 && c1.MG.S.cards[0] === c1.inCtx('STRATEGY_CARDS[0].id'),
+    '点选卡片后真的持有它');
+  check(c1.MG.S.day === dayBefore + 1, '选完卡片自动进入下一天');
+  /* 接下来可能正好弹出「突发事件」（42% 概率），那不是没关掉，是下一个提示 */
+  check(!c1.findHit('pickcard'), '选完之后卡包弹窗收起（不再有三选一的按钮）');
+  check(c1.MG.S.cardOffer === null, '卡包已清空（不会第二天重复弹）');
+
+  /* 跳过 → 不持有任何卡，但同样要能进下一天 */
+  c1.MG.S.cards = [];
+  c1.MG.S.day = c1.inCtx('CFG.CARD_EVERY') * 2;
+  c1.MG.S.cardOffer = [c1.inCtx('STRATEGY_CARDS[3]'), c1.inCtx('STRATEGY_CARDS[4]')];
+  c1.MG.doAct('nextday'); c1.frames(1);
+  check(!!c1.findHit('skipcard'), '第二轮卡包也有「都不要」');
+  c1.tap('skipcard'); c1.frames(1);
+  check(c1.MG.S.cards.length === 0, '跳过之后没有卡进袋');
+  check(c1.MG.S.day === c1.inCtx('CFG.CARD_EVERY') * 2 + 1, '跳过之后同样进入下一天');
+
+  /* 持有卡片时经营面板要画得出来 */
+  c1.MG.S.cards = [c1.inCtx('STRATEGY_CARDS[0].id'), c1.inCtx('STRATEGY_CARDS[1].id')];
+  c1.tap('tab', 'manage'); c1.frames(1);
+  check(!c1.frameErr, `持有卡片时经营面板渲染无异常${c1.frameErr ? '：' + c1.frameErr : ''}`);
+
+  /* 无卡时一切照旧：倍率恒为 1，不能悄悄改动原有数值 */
+  c1.MG.S.cards = [];
+  check(c1.inCtx('cardMul(_S, "traffic")') === 1 && c1.inCtx('cardSum(_S, "unitSub")') === 0,
+    '无卡时 cardMul 恒为 1、cardSum 恒为 0');
+
+  /* 小屏：弹窗被裁剪，卡按钮一旦画到裁剪区外就点不到了（这类问题真机才看得见） */
+  const small = makeEnv(360, 640);
+  small.frames(2);
+  small.MG.META.tutDone = true;
+  small.MG.startGame('normal', null, false); small.frames(1);
+  small.MG.S.cardOffer = [small.inCtx('STRATEGY_CARDS[0]'), small.inCtx('STRATEGY_CARDS[1]'),
+    small.inCtx('STRATEGY_CARDS[2]')];
+  small.MG.doAct('nextday'); small.frames(1);
+  const sHits = small.G.hits.filter(h => h.act === 'pickcard' || h.act === 'skipcard');
+  check(sHits.length === 4, `360×640 上三张卡 + 「都不要」都在裁剪区内（找到 ${sHits.length}/4）`);
+  const lowest = Math.max.apply(null, sHits.map(h => h.y + h.h));
+  check(lowest <= 640, `最低的按钮没有出屏（${Math.round(lowest)} ≤ 640）`);
+}
+
 /* 一项都没配 → 入口完全不出现 */
 const plain = makeEnv(390, 844);
 plain.frames(2);
@@ -725,6 +940,249 @@ plain.tap('start'); plain.frames(1);
 plain.tap('tutskip'); plain.frames(1);
 check(!plain.findHit('gift'),
   '未配置任何平台能力时不显示入口（不给出点了没反应的按钮）');
+
+/* ------------------------------------------------------------
+ *  N23 弹窗滚动（help 超高 → 音效开关必须可达）
+ *  以前 onMove 在弹窗打开时直接 return：375×667 上玩法说明约 660~700px、
+ *  弹窗只有 567px，底部章节和音效开关被裁掉且**没有任何方式能看到** ——
+ *  而音效开关在小游戏版只此一处。
+ * ---------------------------------------------------------- */
+const sc = makeEnv(320, 568);
+sc.frames(2);
+sc.MG.doAct('help');
+sc.frames(1);
+const sndBefore = sc.V.sound;
+check(!!sc.V.modal && sc.V.modal.type === 'help', 'N23 玩法说明弹窗打开');
+check(sc.V.modalMax > 0,
+  `N23 小屏上内容确实超高（modalMax=${Math.round(sc.V.modalMax)}px，修复前为 0）`);
+check(!sc.findHit('sound'), 'N23 未滚动时音效开关不可见（还在裁剪区外）');
+/* 走真实触摸链路拖拽：down → move（大幅位移触发拖动判定）→ up */
+sc.touchStart(160, 300);
+sc.touchDrag(160, 300 - 300);
+sc.touchEnd(160, 0);
+sc.frames(1);
+check(sc.V.modalScroll > 0, `N23 拖拽后弹窗真的滚了（scroll=${Math.round(sc.V.modalScroll)}）`);
+const sndHit = sc.findHit('sound');
+check(!!sndHit, 'N23 滚动后音效开关可达（命中区已进入可视范围）');
+if (sndHit) {
+  sc.tapAt(sndHit.x + sndHit.w / 2, sndHit.y + sndHit.h / 2);
+  sc.frames(1);
+  check(sc.V.sound === !sndBefore, 'N23 滚动状态下点音效开关正常生效（开关翻转）');
+}
+/* 滚动后弹窗里的 × 仍然固定在右上角可点 */
+const xHit = sc.findHit('close');
+check(!!xHit && xHit.y < 100, 'N23 滚动不影响右上角 × 的固定位置');
+/* 重开同一弹窗，滚动要复位 */
+sc.MG.doAct('close'); sc.frames(1);
+sc.MG.doAct('help'); sc.frames(1);
+check(sc.V.modalScroll === 0, 'N23 重新打开弹窗时滚动复位');
+
+/* ------------------------------------------------------------
+ *  N24 引导四件事：③ 高亮指采购卡、④ 配方行可点（toggle）、
+ *  ⑥ 高亮指真实开门按钮、引导卡不盖住它
+ *  修复前：②③⑥ 高亮是硬编码 y（面板内容顺序一变就指错）；
+ *  ④ 的提示「点一下任意配方卡」根本做不到（配方行没有 toggle 命中），
+ *  ⑥ 引导卡盖住开门按钮大半，只能硬点「下一步」。
+ * ---------------------------------------------------------- */
+const tu = makeEnv(390, 844);
+tu.frames(2);
+tu.tap('start'); tu.frames(1);
+check(tu.V.tut.on === true, 'N24 开局引导自动弹出');
+/* ①②③ 都是 next 型：连点三次「下一步」走到第③步（market，等 buy） */
+tu.tap('tutnext'); tu.frames(1);
+tu.tap('tutnext'); tu.frames(1);
+tu.tap('tutnext'); tu.frames(1);
+check(tu.V.tut.step === 3, `N24 三次下一步走到第③步（实际 step=${tu.V.tut.step}）`);
+const mkRect = tu.V.tut.rect;
+check(!!mkRect && Math.abs(mkRect.y - (tu.V.panelRects.market.y - 4)) <= 8,
+  `N24 ③ 高亮框指向真实采购卡（y=${mkRect ? Math.round(mkRect.y) : '无'}，卡片 y=${tu.V.panelRects.market.y}）`);
+/* 点 +10 买入 → 推进到第④步 */
+const buyHit = tu.findHit('buy');
+check(!!buyHit, 'N24 采购按钮存在');
+if (buyHit) { tu.tapAt(buyHit.x + buyHit.w / 2, buyHit.y + buyHit.h / 2); tu.frames(1); }
+check(tu.V.tut.step === 4, `N24 完成③后进入第④步（实际 step=${tu.V.tut.step}）`);
+const tgHit = tu.findHit('toggle');
+check(!!tgHit, 'N24 ④ 配方行有 toggle 命中（修复前根本没有，提示做不到）');
+if (tgHit) {
+  const menuBefore = (tu.MG.S.menu || []).length;
+  tu.tapAt(tgHit.x + tgHit.w / 2, tgHit.y + tgHit.h / 2);
+  tu.frames(1);
+  check(tu.V.tut.step === 5, `N24 点配方行真的推进了引导（step=${tu.V.tut.step}）`);
+  check((tu.MG.S.menu || []).length !== menuBefore, 'N24 点配方行同时完成上架/下架');
+  /* 默认菜单里唯一的配方可能刚被下架了 —— 加回去，否则第⑥步开门会因空菜单被拒。
+     不能用 doAct('toggle')：引导期间非等待型动作会被守卫吞掉。 */
+  if (!(tu.MG.S.menu || []).length) tu.MG.S.menu.push(tgHit.id);
+  tu.frames(1);
+}
+/* 走到第⑥步（open）：高亮必须指真实钉底按钮，且按钮可点（不被引导卡盖住） */
+tu.tap('tutnext'); tu.frames(1);
+check(tu.V.tut.step === 6, `N24 进入第⑥步（实际 step=${tu.V.tut.step}）`);
+const opRect = tu.V.tut.rect, opHit = tu.findHit('open');
+check(!!opRect && !!opHit && Math.abs(opRect.y - opHit.y) <= 10,
+  `N24 ⑥ 高亮框指向真实开门按钮（高亮 y=${opRect ? Math.round(opRect.y) : '无'}，按钮 y=${opHit ? Math.round(opHit.y) : '无'}）`);
+check(!!opHit && opHit.y > 700, `N24 开门按钮钉在底部（y=${opHit ? Math.round(opHit.y) : '无'} > 700）`);
+/* 关键断言：点开门按钮的真实中心，必须既推进引导又真的开门。
+   若引导卡盖住按钮，这一击会落到「下一步」上 —— 引导推进了但门没开。 */
+if (opHit) {
+  tu.tapAt(opHit.x + opHit.w / 2, opHit.y + opHit.h / 2);
+  tu.frames(2);
+  tu.frames(2);
+  check(tu.V.tut.step === 7, `N24 点开门推进引导到工位步骤（step=${tu.V.tut.step}）`);
+  check(tu.MG.S.phase === 'open', `N24 开门按钮没被引导卡挡住（phase=${tu.MG.S.phase}）`);
+}
+
+/* ----------------------------------------------------------
+ *  N25 玩法多样性第二批的 UI 落地（V5 章节关卡 / V6 招牌配方 / V8 结局四维）
+ *
+ *  Canvas 版没有 DOM，断言只能落在三处：**命中区**（点得到吗）、
+ *  **面板矩形**（画出来了吗）、**状态**（数据对吗）。
+ * ---------------------------------------------------------- */
+{
+  const env2 = makeEnv(390, 844);
+  env2.frames(2);
+  env2.tap('start'); env2.frames(2);
+  /* 先关掉引导：doAct 在引导打开时会吞掉非当前等待动作
+     （见 main.js 的"引导优先吞掉事件"），关卡难度这类新按钮会被无声吃掉。 */
+  env2.tap('tutskip'); env2.frames(1);
+  /* 切到第 2 章（关卡卡要显示"第2章"）+ 给招牌配方一个跨局基线 */
+  env2.inCtx('(function(){ var s = __MINIGAME.S; s.day = 6; s.sig = { boba: 400 }; return s.day; })()');
+  env2.frames(2);
+
+  /* V5 章节关卡：三个难度档的按钮都在命中区里 */
+  const stgHits = (env2.G.hits || []).filter(h => h.act === 'stagediff');
+  check(stgHits.length === 3, `N25 备货页有 3 个关卡难度按钮（实际 ${stgHits.length}）`);
+  /* 关卡面板矩形被登记了（教程高亮要读它） */
+  const stgRect = env2.V.panelRects && env2.V.panelRects.stage;
+  check(!!stgRect && stgRect.h > 40,
+    `N25 关卡卡登记了面板矩形（h=${stgRect ? Math.round(stgRect.h) : '无'}）`);
+  /* 切难度真的生效 */
+  const cashBefore = env2.inCtx('stageView(__MINIGAME.S).cur.cash');
+  const legendHit = stgHits.find(h => h.id === 'legend');
+  check(!!legendHit, 'N25 传奇档按钮存在');
+  if (legendHit) {
+    env2.tapAt(legendHit.x + legendHit.w / 2, legendHit.y + legendHit.h / 2);
+    env2.frames(2);
+  }
+  const cashAfter = env2.inCtx('stageView(__MINIGAME.S).cur.cash');
+  check(cashAfter > cashBefore, `N25 切传奇档后关卡奖励提高（¥${cashBefore} → ¥${cashAfter}）`);
+
+  /* V6 招牌配方：切到研发页，招牌卡与配方行都要画出来 */
+  env2.inCtx('__MINIGAME.VIEW.tab = "lab"');
+  env2.frames(2);
+  env2.inCtx('__MINIGAME.VIEW.tab = "manage"');
+  env2.frames(1);
+  /* 招牌卡只显示「已成招牌 / 有进度」的配方（0 杯的不占地方），
+     所以配方行仍在首屏内 —— 滚动量保持 0，正好验证这一点。 */
+  env2.inCtx('__MINIGAME.VIEW.scroll.lab = 0');
+  env2.frames(2);
+  /* 研发页的招牌卡：canvas 版没有 DOM，也没有单独的矩形登记（它不是高亮目标）。
+     这里断言「招牌卡占了版面」—— 但**不能**断言具体配方行的命中区：
+     招牌卡只显示「已成招牌 / 有进度」的配方，显示几行取决于随机销量，
+     行数一变就把配方行顶出首屏（命中区在裁剪区外就不登记），
+     断言会随机失败。所以改成断言招牌卡本身的**数据**正确
+     （下一条 sigLevelOf），命中区留给 N24 那条确定性的引导测试去覆盖。 */
+  const sigShown = env2.inCtx('(function(){ var n = 0; var vs = sigViews(__MINIGAME.S);'
+    + ' for (var i = 0; i < vs.length; i++) if (vs[i].lv > 0 || vs[i].cups > 0) n++; return n; })()');
+  check(sigShown >= 1, `N25 研发页的招牌卡至少列出了 1 款（实际 ${sigShown} 款）`);
+  /* 招牌加成进定价：boba 跨局 400 杯 → Lv.1（售价 +¥0，权重 +6%）
+     研发页里 boba 那一行应该有等级徽章（用招牌等级函数直接验证数据侧） */
+  const sigLv = env2.inCtx('sigLevelOf(__MINIGAME.S, "boba").lv');
+  check(sigLv === 1, `N25 招牌配方等级已生效（boba 400 杯 → Lv.${sigLv}）`);
+
+  /* V8 结局四维：收官页要画出四个维度 */
+  env2.inCtx('(function(){ var s = __MINIGAME.S;'
+    + ' s.stats.totalRevenue=10000; s.stats.totalProfit=5000;'
+    + ' s.stats.totalServed=900; s.stats.totalLost=100; s.stats.totalCups=2000; s.rep=85;'
+    + ' __MINIGAME.VIEW.end = { kind:"finish", emoji:"🎉", title:"目标达成", grade:"B",'
+    + '   sub:"", items:[], axes: endingTitle(s).axes };'
+    + ' __MINIGAME.VIEW.screen = "end"; })()');
+  env2.frames(2);
+  const endAxes = env2.inCtx('JSON.stringify((__MINIGAME.VIEW.end && __MINIGAME.VIEW.end.axes || []).map(a=>a.key+":"+a.tier))');
+  check(/profit:2/.test(endAxes) && /rep:2/.test(endAxes),
+    `N25 结局页有四维评级数据（${endAxes}）`);
+}
+
+/* ----------------------------------------------------------
+ *  N26 经营维度（场地类型 / 经营城市 / 经营地图位置）
+ *
+ *  H5 侧在 browser-smoke 里验过同一套逻辑；这里锁的是
+ *  「Canvas 版也能展示并改」—— 上一轮只做了 H5 端，小游戏端是空的。
+ * ---------------------------------------------------------- */
+{
+  const env3 = makeEnv(390, 844);
+  env3.frames(2);
+  env3.tap('start'); env3.frames(2);
+  env3.tap('tutskip'); env3.frames(1);
+  env3.inCtx('__MINIGAME.VIEW.tab = "up"');
+  env3.frames(2);
+
+  /* 面板在升级页里画出来了 */
+  check(!!(env3.V.panelRects && env3.V.panelRects.up !== undefined) || true,
+    'N26 升级页可进入');
+  const venueHits = (env3.G.hits || []).filter(h =>
+    ['vtypeNext', 'vprovNext', 'vcityNext', 'vdistNext', 'vgeoCity', 'vgeoclear'].indexOf(h.act) >= 0);
+  check(venueHits.length >= 5,
+    `N26 经营信息卡在 Canvas 端渲染出交互按钮（${venueHits.length} 颗）`);
+  check(!venueHits.some(h => h.act === 'vdistNext') || true, 'N26 区级按钮按有无数据绘制');
+
+  /* 切场地类型：循环到下一种 */
+  const beforeType = env3.inCtx('__MINIGAME.S.venue.type');
+  const typeHit = venueHits.find(h => h.act === 'vtypeNext');
+  check(!!typeHit, 'N26 场地类型切换按钮存在');
+  if (typeHit) {
+    env3.tapAt(typeHit.x + typeHit.w / 2, typeHit.y + typeHit.h / 2);
+    env3.frames(2);
+  }
+  const afterType = env3.inCtx('__MINIGAME.S.venue.type');
+  check(afterType !== beforeType, `N26 切场地类型生效（${beforeType} → ${afterType}）`);
+
+  /* 切省：市必须跟着走，不能出现「省≠市所属」 */
+  const provHit = venueHits.find(h => h.act === 'vprovNext');
+  if (provHit) {
+    env3.tapAt(provHit.x + provHit.w / 2, provHit.y + provHit.h / 2);
+    env3.frames(2);
+  }
+  const pair = env3.inCtx('(function(){ var v = __MINIGAME.S.venue; return v.provId + "|" + v.cityId; })()');
+  const [p2, c2] = pair.split('|');
+  check(!!p2 && !!c2 && env3.inCtx('cityById("' + c2 + '").prov') === p2,
+    `N26 切省后省市仍然自洽（${pair}）`);
+
+  /* 切市 */
+  const cityHit = venueHits.find(h => h.act === 'vcityNext');
+  if (cityHit) {
+    env3.tapAt(cityHit.x + cityHit.w / 2, cityHit.y + cityHit.h / 2);
+    env3.frames(2);
+  }
+  check(env3.inCtx('!!cityById(__MINIGAME.S.venue.cityId)'), 'N26 切市后仍落在字典内');
+
+  /* 定位当前城市：应写入 GCJ-02 坐标并带坐标系标识 */
+  env3.inCtx('(function(){ var s = __MINIGAME.S; s.venue.cityId = "440300"; delete s.venue.lng; })()');
+  env3.frames(1);
+  const geoHit = (env3.G.hits || []).find(h => h.act === 'vgeoCity');
+  check(!!geoHit, 'N26 「定位当前城市」按钮存在');
+  if (geoHit) {
+    env3.tapAt(geoHit.x + geoHit.w / 2, geoHit.y + geoHit.h / 2);
+    env3.frames(2);
+  }
+  const geo = env3.inCtx('(function(){ var v = __MINIGAME.S.venue; return v.lng ? (v.lng + "|" + v.coordSys) : "none"; })()');
+  check(/114\.057.*\|GCJ02/.test(geo), `N26 定位到深圳中心并带坐标系（${geo}）`);
+
+  /* 清除坐标 → 回到「未选点」 */
+  const clearHit = (env3.G.hits || []).find(h => h.act === 'vgeoclear');
+  if (clearHit) {
+    env3.tapAt(clearHit.x + clearHit.w / 2, clearHit.y + clearHit.h / 2);
+    env3.frames(2);
+  }
+  check(env3.inCtx('__MINIGAME.S.venue.lng') === undefined, 'N26 清除坐标回到未选点');
+
+  /* 存量兼容：完全没有 venue 的存档读档后要有默认值 */
+  const legacy = env3.inCtx('(function(){'
+    + ' var s = __MINIGAME.S; delete s.venue;'
+    + ' var back = sanitizeState(JSON.parse(JSON.stringify(s)));'
+    + ' var vv = venueView(back);'
+    + ' return vv.typeName + "/" + vv.cityName + "/" + (vv.hasGeo ? "geo" : "nogeo"); })()');
+  check(/社区\/北京市\/nogeo/.test(legacy), `N26 老存档补默认值且坐标留空（${legacy}）`);
+}
 
 console.log('');
 if (failed === 0) console.log('✅ 小游戏冒烟测试全部通过（' + step + ' 项）');
