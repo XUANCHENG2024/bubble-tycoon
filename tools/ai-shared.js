@@ -139,15 +139,56 @@ function playSharedAI(E, diff, bp, sig, opt) {
       if (shortCapacity) {
         const sc = E.upgradeCost(s, 'speed');
         if (sc != null && s.cash > sc * 1.6) { E.doUpgrade(s, 'speed'); did = true; }
-        else if (s.staff.length < 6 && s.candidates.length && s.cash > s.candidates[0].fee * 1.6) { E.hireStaff(s, 0); did = true; }
+        else if (s.staff.length < Math.max(6, (s.shops || 1) * 3) && s.candidates.length
+          && s.cash > s.candidates[0].fee * 1.6) {
+          /* 总店招人上限随分店数放大：开3 家店要 9 人才够分，
+             写死 6 会让 AI 永远派不出人手（这正是分店空转的原因）。 */
+          E.hireStaff(s, 0, 1); did = true;
+        }
         else {
           const tc = E.upgradeCost(s, 'training');
           if (tc != null && s.cash > tc * 1.8) { E.doUpgrade(s, 'training'); did = true; }
         }
       }
+      /* V11：店长与分店用工。
+         ★ 这段 AI 逻辑不是"顺手加的"，而是**平衡的必需品**：
+           分店不再白送工位、空店没有客流加成之后，
+           「开了店却没人」会让 AI 的净资产直接崩掉
+           （实测 normal 破产率从 0/24 飙到 7/16）。
+           AI 必须学会：开店 → 招店长 → 派人过去 → 让店真的开张。
+           玩家的操作顺序也是这样，这保证 sim 测的是玩家真会走的路。 */
+      /* ★ 顺序很要紧：分店的用工要**先于**其他投资决策处理。
+         开了店却让它空着，等于白付每天的店租（SHOP_UPKEEP 100/天），
+         一天就是 ¥100+ 起。晚一天处理，AI 的净资产就先掉一截。 */
+      /* ① 给空着的分店配人手（先派驻，再招店长 —— 没人的店招店长也白搭） */
+      for (let b = 2; b <= (s.shops || 1); b++) {
+        if (E.staffOfBranch(s, b).length > 0) continue;
+        const cands = (s.candidates || []).filter(c => c);
+        if (!cands.length) { E.refreshCandidates(s, true); continue; }
+        if (s.cash > cands[0].fee * 1.5) { E.hireStaff(s, 0, b); did = true; break; }
+      }
+      /* ② 分店有人了就招店长（店长给的是该店的运营加成） */
+      if (!did && E.managerSlotsLeft(s) > 0 && s.cash > 2500) {
+        for (let b = 2; b <= (s.shops || 1); b++) {
+          if (E.managerOfBranch(s, b)) continue;
+          const list = (s.mgrCand && s.mgrCand[b]) || [];
+          if (!list.length) { E.refreshManagerCandidates(s, b, true); break; }
+          /* 挑能力值最高的：AI 是"最优策略"参照组，不该乱选 */
+          let best = 0;
+          for (let i = 1; i < list.length; i++) if (list[i].skill > list[best].skill) best = i;
+          const r = E.hireManager(s, b, best);
+          if (r.ok) { did = true; break; }
+        }
+      }
       if (!did && s.cash > 1200) {
         const sc2 = E.shopCost(s);
-        if (sc2 != null && s.cash > sc2 * 1.5) { E.openShopBranch(s); did = true; }
+        /*★ 开店预算必须把「配人手的钱」算进去。
+           V11 起分店不再白送工位：开完店若没人派驻，
+           每天净付 SHOP_UPKEEP（¥100）却零产出 —— 纯亏损。
+           只留 1.5 倍开店费的话，剩下的钱不够招人，
+           于是 AI 开出一堆空店（实测破产率从 0/24 升到 5~6/24）。
+           这里要求「开店费 × 2.4」，其中约一半留作首笔招聘与店长费用。 */
+        if (sc2 != null && s.cash > sc2 * 2.4) { E.openShopBranch(s); did = true; }
       }
       if (!did) for (const id of ['decor', 'menu', 'storage', 'auto']) {
         const c = E.upgradeCost(s, id);

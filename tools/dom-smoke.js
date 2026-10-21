@@ -690,7 +690,11 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
 /* 30. F1：声望点改为开局资金 + 成就 ★ 一次性入账 */
 {
   /* --- 折算曲线：√ 增长 + 封顶 --- */
-  const cases = [[0, 0], [-5, 0], [1, 45], [4, 90], [25, 225], [100, 450], [400, 900], [9000, 900]];
+  /* V10 重标定后 rate=30（见 data.js 的 BP_START_RATE 注释）：
+     成就 ★ 总量涨到 239，若不改rate，满星玩家会在 239★ 时拿到 ¥695 启动资金，
+     比150★ 时代的 ¥550 高出 26%，等于给老玩家一次无声的数值增强。
+     新曲线：100★ → ¥300，239★（满星）→ ¥463。 */
+  const cases = [[0, 0], [-5, 0], [1, 30], [4, 60], [25, 150], [100, 300], [400, 600], [9000, 900], [239, 463]];
   for (const [bp, want] of cases) {
     const got = E.prestigeStartCash(bp);
     if (got !== want) throw new Error(`prestigeStartCash(${bp}) = ${got}，期望 ${want}`);
@@ -700,8 +704,8 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
 
   /* --- 开局资金真的落进现金，且能被 UI 读到 --- */
   const rich = E.newGame('normal', 100);
-  if (rich.startBonus !== 450) throw new Error('startBonus 没有落进 state：' + rich.startBonus);
-  if (rich.cash !== E.DIFFICULTY.normal.cash + 450) throw new Error('开局资金没有加进现金：' + rich.cash);
+  if (rich.startBonus !== 300) throw new Error('startBonus 没有落进 state：' + rich.startBonus);
+  if (rich.cash !== E.DIFFICULTY.normal.cash + 300) throw new Error('开局资金没有加进现金：' + rich.cash);
   if (!rich.log.some(l => typeof l === 'string' && l.indexOf('创业基金') >= 0)) {
     throw new Error('日志里没有说明这笔钱从哪来');
   }
@@ -742,9 +746,12 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
   E.claimAchStars(meta, null); E.claimAchStars(meta, [null, undefined, { }]);
   if (meta.bp !== before) throw new Error('脏列表改动了声望');
   if (!Array.isArray(E.claimAchStars(undefined, undefined))) throw new Error('claimAchStars 必须始终返回数组');
-  /* 32 条成就的 ★ 总量是长期目标的上限，写死在这里防止有人手滑改坏了平衡 */
+  /* 成就 ★ 总量是长期目标的上限，写死在这里防止有人手滑改坏了平衡。
+     V10 新增 12 条城市/成就食谱成就后由 150 涨到 239，
+     已同步把 BP_START_RATE 由 45 降到 30 重新标定资金曲线（见 data.js 注释）。
+     ★ 数字改动时必须连带重标 rate，否则新玩家中期会莫名多出几百块启动资金。 */
   const totalBp = E.ACHIEVEMENTS.reduce((n, a) => n + (a.reward && a.reward.bp || 0), 0);
-  if (totalBp !== 150) throw new Error('成就 ★ 总量变了（现在 ' + totalBp + '），开局资金曲线需要重新标定');
+  if (totalBp !== 239) throw new Error('成就 ★ 总量变了（现在 ' + totalBp + '），需同步重标 BP_START_RATE');
   if (meta.maxBpEarned !== meta.bp) throw new Error('maxBpEarned 没有跟着涨');
 
   /* --- 存档清洗：startBonus 不能被人改存档凭空放大 --- */
@@ -756,7 +763,7 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
   if (clean3.startBonus !== 0) throw new Error('负数 startBonus 没有被归零');
   /* 存档往返保留 */
   E.setSlot(0); E.saveGame(rich);
-  if (E.loadGame(0).startBonus !== 450) throw new Error('startBonus 没有随存档保留');
+  if (E.loadGame(0).startBonus !== 300) throw new Error('startBonus 没有随存档保留');
 
   /* --- 两版文案都渲染得出来 --- */
   E.window.S = rich; E.window.META = meta;
@@ -764,7 +771,7 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
   const up = E.document.getElementById('panel-up').innerHTML;
   checkHTML('升级面板(品牌声望)', up);
   if (up.indexOf('声望点永久生效') < 0) throw new Error('品牌面板丢了说明文案');
-  if (up.indexOf('+¥450') < 0) {
+  if (up.indexOf('+¥300') < 0) {
     const i = up.indexOf('声望点永久生效');
     throw new Error('品牌面板没有显示本局到账的开局资金：' + JSON.stringify(up.slice(i, i + 260)));
   }

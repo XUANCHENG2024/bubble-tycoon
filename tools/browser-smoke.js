@@ -349,8 +349,9 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
   const withBonus = $('metaBox').textContent || '';
   check(noBonus.replace(/\s/g, '').indexOf('开局创业基金¥0') >= 0,
     '标题页显示开局创业基金（声望 0 时为 ¥0）');
-  check(withBonus.replace(/\s/g, '').indexOf('¥450') >= 0,
-    '声望 100 ★ 时标题页显示 ¥450 开局资金');
+  /* V10 重标定后 100 ★ → ¥300（BP_START_RATE 由 45 降到 30，见 data.js 注释） */
+  check(withBonus.replace(/\s/g, '').indexOf('¥300') >= 0,
+    '声望 100 ★ 时标题页显示 ¥300 开局资金（V10 重标定后）');
   /* 成就面板的说明文案要写明「跨局首次才给 ★」 */
   window.eval('UI.setTab("ach"); UI.renderAll();');
   check((doc.getElementById('panel-ach').textContent || '').indexOf('跨局首次') >= 0,
@@ -764,15 +765,78 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
   const wsLabHtml = doc.getElementById('panel-lab').innerHTML;
   check(/cui-group/.test(wsLabHtml), '研发页按菜系分组渲染');
   check(!/🔒\s*需建工坊/.test(wsLabHtml), '研发页未建线不再显示锁图标（那是硬约束的措辞）');
-  /* 无工坊时高端配方依然可研发（这条同时验证 UI 与引擎一致） */
+  /* 无工坊时研发树能逐级走通（这条同时验证 UI 与引擎一致）
+     ★ V10：口径变了 —— 有了研发树前置（stage3 需要先研 stage2），
+       再问"tier3 能不能直接研"必然失败，那不是工坊门槛。
+       正确口径是按stage 升序逐个研，看能不能全程走通。 */
   const t3Ok = await window.eval('(function(){'
     + ' var s = newGame("normal", 0); s.cash = 9999999; s.workshops = {};'
     + ' for (var i = 0; i < ING.length; i++) s.inv[ING[i].id] = 9999;'
-    + ' var bad = RECIPES.filter(function(r){ return r.tier >= 3 && r.research'
-    + '   && !canResearch(s, r.id).ok; });'
-    + ' return bad.length + "/" + RECIPES.filter(function(r){ return r.tier >= 3 && r.research; }).length;'
+    + ' var nodes = RESEARCH_TREE.filter(function(n){ return !n.city; })'
+    + '   .slice().sort(function(a, b){ return a.stage - b.stage; });'
+    + ' var total = 0, done = 0, stopped = null;'
+    + ' for (var j = 0; j < nodes.length; j++) {'
+    + '   var r = recipeById(nodes[j].recipe);'
+    + '   if (!r || !r.research) continue;'
+    + '   total++;'
+    + '   if (s.recipes.indexOf(nodes[j].recipe) >= 0) continue;'
+    + '   var cr = canResearch(s, nodes[j].recipe);'
+    + '   if (!cr.ok) { stopped = r.name + ":" + cr.msg; break; }'
+    + '   doResearch(s, nodes[j].recipe); done++;'
+    + ' }'
+    + ' return done + "/" + total + (stopped ? " 停@" + stopped : "");'
     + ' })()');
-  check(t3Ok === '0/7', `无工坊时 7 款高端配方全部仍可研发（工坊是加成不是门票，实际 ${t3Ok}）`);
+  check(t3Ok.split(' ')[0].split('/')[0] === t3Ok.split(' ')[0].split('/')[1],
+    `无工坊时通用研发树可逐级走通（工坊是加成不是门票，实际 ${t3Ok}）`);
+
+  /* ---- V11 店长与分店编制 ---- */
+  /* 开一家分店 → 店长名额 +1 且**立刻**出现候选人。
+     这条守的是因果链：玩家点完开店就该看到可招的人。
+     若要等次日刷新，因果就断了，玩家会以为白开了一家店。 */
+  const mgr1 = await window.eval('(function(){'
+    + ' window.S.cash = 300000;'
+    + ' var before = managerSlotsLeft(window.S);'
+    + ' openShopBranch(window.S);'
+    + ' var after = managerSlotsLeft(window.S);'
+    + ' var cands = (window.S.mgrCand[window.S.shops] || []).length;'
+    + ' return before + "/" + after + "/" + cands; })()');
+  const m1 = mgr1.split('/');
+  check(m1[0] === '0' && m1[1] === '1' && Number(m1[2]) >= 2,
+    `开分店后名额 0→1 且立刻出现 ${m1[2]} 位候选人（${mgr1}）`);
+
+  const mgr2 = await window.eval('(function(){'
+    + ' var r = hireManager(window.S, window.S.shops, 0);'
+    + ' if (!r.ok) return "fail:" + r.msg;'
+    + ' UI.setTab("manage"); UI.renderAll();'
+    + ' var m = managerOfBranch(window.S, window.S.shops);'
+    + ' return m.name + "|" + managerBonus(window.S, m.branch).ops.toFixed(3); })()');
+  /* ★ 断言要按**语义**而不是按数值区间。
+     候选店长是 Math.random() 抽的（Lv.1~5 + 不同特性），
+     ops 加成跨度约 1.03~1.32 —— 写死任何区间都是 flaky 测试。
+     实测踩过：正则匹配 `1\.0[1-9]` 时，三次跑里有两次抽到 Lv.3+ 而误报。
+     flaky 比没测试更糟：它训练人忽略红色。
+     这里只断言真正的命题：「抽到任何一档店长，加成都 > 1」。 */
+  const mgrOps = parseFloat(String(mgr2).split('|')[1]);
+  check(/^[^|]+\|/.test(mgr2) && mgrOps > 1,
+    `店长招募成功且带来客流加成（${mgr2}，Lv.1~5 全档均 > 1）`);
+
+  const wsMgrHtml = doc.getElementById('panel-manage').innerHTML;
+  check(/店长与分店编制/.test(wsMgrHtml), '管理页有「店长与分店编制」区块');
+  check(/该店加成/.test(wsMgrHtml), '店长卡上写明该店拿到的加成');
+  check(/卸任/.test(wsMgrHtml), '店长卡有卸任按钮');
+  check(/总店/.test(wsMgrHtml) && /你亲自经营/.test(wsMgrHtml),
+    '面板同时展示总店编制（店长只管分店，玩家容易忘总店也要人）');
+  check(!/总店[^]{0,40}该店加成/.test(wsMgrHtml),
+    '总店没有被标注为享受店长加成（加成不外溢，UI 文案也要一致）');
+
+  const mgr3 = await window.eval('(function(){'
+    + ' var b = managerOfBranch(window.S, window.S.shops).branch;'
+    + ' refreshCandidates(window.S, true);'
+    + ' managerDaily(window.S);'
+    + ' var hired = window.S.staff.filter(function(st){ return st.hiredBy === "mgr"; });'
+    + ' return hired.length + "/" + staffOfBranch(window.S, b).length; })()');
+  check(/^[1-9]/.test(mgr3),
+    `店长自动补员生效且标记为店长招的（${mgr3}）`);
   /* 降本要真的落到扣料上（不是只改UI 显示的成本数字） */
   const cutReal = await window.eval('(function(){'
     + ' var r = RECIPES.filter(function(x){ return x.cuisine && x.req; })[0];'

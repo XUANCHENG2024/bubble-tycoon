@@ -14,7 +14,7 @@ ctx.globalThis = ctx;
 vm.createContext(ctx);
 const src = fs.readFileSync(path.join(root, 'js/data.js'), 'utf8') + '\n'
   + fs.readFileSync(path.join(root, 'js/engine.js'), 'utf8') + '\n'
-  + ';globalThis.__D = { CFG, ING, RECIPES, UPGRADES, TRAITS, EVENTS, ACHIEVEMENTS, DIFFICULTY, TAGS, SHOP_COSTS, num, SIGNATURE_TIERS, CUISINES, CRAFT_WORKSHOPS };';
+  + ';globalThis.__D = { CFG, ING, RECIPES, UPGRADES, TRAITS, EVENTS, ACHIEVEMENTS, DIFFICULTY, TAGS, SHOP_COSTS, num, SIGNATURE_TIERS, CUISINES, CRAFT_WORKSHOPS, MANAGER_RANKS, MANAGER_TRAITS, MANAGER_RANKS, MANAGER_TRAITS, MANAGER_COSTS, BRANCH_STAFF_CAP, staffOfBranch, managerOfBranch, managerSlotsLeft, managerCost, refreshManagerCandidates, hireManager, managerBonus, branchStaffCap, activeBranchCount };';
 vm.runInContext(src, ctx, { filename: 'bundle.js' });
 
 const E = ctx;

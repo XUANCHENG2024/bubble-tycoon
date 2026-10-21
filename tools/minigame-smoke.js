@@ -734,13 +734,17 @@ stE.frames(2);
 stE.tap('start'); stE.frames(1);
 stE.tap('tutskip'); stE.frames(1);
 stE.MG.S.cash = 300000;
-/* 直接造工位：8 名员工 + 4 家店 = 1 + 8 + 3 = 12 个出杯位 */
+/* 直接造工位：8 名员工 + 4 家店。
+   ★ V11 起工位数 = 1（老板）+ 员工数，**分店不再白送工位** ——
+     改造前是 `s.staff[(i-1) % pool]` 取模轮转，3 家店 2 个员工时
+     同一个人会同时在 3 家店"上班"，玩家白付 3 份店租只买到一个人的产能。
+     现在员工的 branch 字段决定他在哪家店干活，店长管的就是这些人。 */
 stE.inCtx('_S.staff = [];'
-  + 'for (var i=0;i<8;i++) _S.staff.push({ name:"员"+i, emoji:"🙂", skill:1, trait:null, wage:60, stamina:100 });'
+  + 'for (var i=0;i<8;i++) _S.staff.push({ name:"员"+i, emoji:"🙂", skill:1, trait:null, wage:60, stamina:100, branch:1 });'
   + '_S.shops = 4;');
 stE.MG.doAct('open'); stE.frames(1);
 const stn = stE.MG.S.sim.stations;
-check(stn.length === 12, `造出 ${stn.length} 个出杯位（1 老板 + 8 员工 + 3 分店）`);
+check(stn.length === 9, `造出 ${stn.length} 个出杯位（1 老板 + 8 员工，分店不额外加位）`);
 const firstScreen = (stE.G.hits || []).filter(h => h.act === 'rush').length;
 check(firstScreen >= 8, `自适应网格让首屏能点到 ${firstScreen} 个工位（旧写法固定 2 列 76 高）`);
 /* 逐个工位验证可达性：在 0 → stageMax 之间扫一遍，id 必须全部出现过 */
@@ -836,8 +840,8 @@ check(!tg.frameErr, `引导自动推进无异常${tg.frameErr ? '：' + tg.frame
   /* 有声望：折算成现金并写进 state */
   f1.MG.META.bp = 100;
   f1.MG.startGame('normal', null, false); f1.frames(1);
-  check(f1.MG.S.startBonus === 450, `声望 100 ★ → 开局资金 ¥450（实际 ${f1.MG.S.startBonus}）`);
-  check(f1.MG.S.cash === BASE + 450, `开局资金进了现金（${BASE} → ${f1.MG.S.cash}）`);
+  check(f1.MG.S.startBonus === 300, `声望 100 ★ → 开局资金 ¥300（实际 ${f1.MG.S.startBonus}）`);
+  check(f1.MG.S.cash === BASE + 300, `开局资金进了现金（${BASE} → ${f1.MG.S.cash}）`);
   check(f1.MG.S.log.some(l => typeof l === 'string' && l.indexOf('创业基金') >= 0),
     '开局日志写明了这笔钱的来源');
 
@@ -1225,15 +1229,75 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
   check(/成本/.test(wsText) && /加成/.test(wsText),
     'Canvas 工坊副标题说明了「成本下降」是主力收益');
 
+  /* ---- V10 对等：Canvas 研发页也要有城市标示与研发树 ----
+     ★ 这条守的是「两版功能对等」：
+       H5 端有 cityBar（城市 + 可用菜系）与研发树分组，
+       Canvas 端最初还是 V9 的「按菜系平铺」结构，
+       小游戏玩家既看不到自己在哪座城、也不知道研发阶段与前置 ——
+       功能上等于少了一半。 */
+  const labEnv = makeEnv(390, 844);
+  labEnv.frames(2);
+  labEnv.tap('start'); labEnv.frames(2);
+  labEnv.tap('tutskip'); labEnv.frames(1);
+  labEnv.MG.S.cash = 500000;
+  labEnv.inCtx('__MINIGAME.VIEW.tab = "lab"');
+  labEnv.frames(2);
+
+  drawnTexts.length = 0;
+  labEnv.frames(1);
+  const labText = drawnTexts.join(' ');
+  check(/>📍|📍/.test(labText), 'Canvas 研发页显示城市标示');
+  check(/本店可用菜系/.test(labText), 'Canvas 城市条写明可用菜系数');
+  check(/研发树/.test(labText), 'Canvas 研发页有「研发树」标题');
+  check(/通用配方/.test(labText), 'Canvas 研发树按城市/通用分组');
+  /* ★ 阶段与前置必须画出来 —— Canvas 没有 tooltip，
+     不画玩家就不知道为什么按钮点不动 */
+  check(/第 1 阶段|第 2 阶段|第 3 阶段/.test(labText),
+    'Canvas 研发树标出研发阶段');
+  check(/需先做|第 2 阶段/.test(labText), 'Canvas 提示前置依赖');
+
+  /* 研发按钮的命中区必须真的存在（Canvas 上被裁剪区吃掉的按钮点不到） */
+  const labHits = (labEnv.G.hits || []).filter(h => h.act === 'research');
+  /* ★ 必须真的有可点的按钮。
+     GFX.button 对 disabled 按钮**不登记命中区**，
+     所以「画出来了但点不到」会表现为这里 0 ——
+     实测就踩过：分组按字母序排，可研节点落在第 5 组之外，
+     玩家看到满屏灰按钮却一个都按不动。 */
+  check(labHits.length > 0, `Canvas 研发页渲染出 ${labHits.length} 个可点的研发按钮`);
+
+  /* 异地节点的文案要说清"要去哪座城" */
+  labEnv.inCtx('__MINIGAME.doAct("vcity", { id: "city", value: "110100" })');
+  drawnTexts.length = 0;
+  labEnv.frames(1);
+  const awayText = drawnTexts.join(' ');
+  check(!/需先建对应工坊/.test(awayText),
+    'Canvas 不再用「需先建工坊」这种硬约束措辞（工坊是加成不是门票）');
+
   /* 引擎行为（两版共享，测一次即可）：
-     工坊是加成不是门票 —— 无工坊时高端配方仍可研发 */
-  const t3 = env.inCtx('(function(){'
-    + ' var s = __MINIGAME.S; s.cash = 9999999; s.workshops = {};'
+     工坊是加成不是门票 —— 无工坊时研发树**能逐级推进**。
+     ★ V10：不能只看单点"能不能研" —— 研发树前置（stage3 需要先研 stage2）
+       本来就会挡住高端款，那不是工坊门槛。正确口径是逐级研发全程走通。
+     ★ 还要自建干净状态：前面的用例可能改过 __MINIGAME.S（比如把 recipes 清空）。 */
+  const t3Info = env.inCtx('(function(){'
+    + ' var s = newGame("normal", 0);'
+    + ' s.cash = 9999999; s.workshops = {};'
     + ' for (var i = 0; i < ING.length; i++) s.inv[ING[i].id] = 9999;'
-    + ' var all = RECIPES.filter(function(r){ return r.tier >= 3 && r.research; });'
-    + ' var bad = all.filter(function(r){ return !canResearch(s, r.id).ok; });'
-    + ' return bad.length + "/" + all.length; })()');
-  check(t3 === '0/7', `无工坊时 7 款高端配方仍可研发（实际 ${t3}）`);
+    + ' var nodes = RESEARCH_TREE.filter(function(n){ return !n.city; })'
+    + '   .slice().sort(function(a, b){ return a.stage - b.stage; });'
+    + ' var total = 0, done = 0, stopped = null;'
+    + ' for (var j = 0; j < nodes.length; j++) {'
+    + '   var r = recipeById(nodes[j].recipe);'
+    + '   if (!r || !r.research) continue;           /* 开局自带的不算待研 */'
+    + '   total++;'
+    + '   if (s.recipes.indexOf(nodes[j].recipe) >= 0) continue;'
+    + '   var cr = canResearch(s, nodes[j].recipe);'
+    + '   if (!cr.ok) { stopped = r.name + ":" + cr.msg; break; }'
+    + '   doResearch(s, nodes[j].recipe); done++;'
+    + ' }'
+    + ' return done + "/" + total + (stopped ? "|停@" + stopped : ""); })()');
+  const [ratio3, stopped] = t3Info.split('|');
+  check(ratio3.split('/')[0] === ratio3.split('/')[1],
+    `无工坊时通用研发树可逐级走通（${t3Info}）`);
 
   /* 降本要真实扣料（不是只改显示的成本） */
   const cut = env.inCtx('(function(){'

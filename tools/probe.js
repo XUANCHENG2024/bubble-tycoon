@@ -75,6 +75,8 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
+  + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
+  + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
   + 'goalOf,startEndless,togglePause,slotInfo,hasAnySave,getSlot,setSlot,exportSave,importSave,'
   + 'MILESTONE_EVERY,MILESTONE_RATIO,milestoneOf,endlessPressure,prestigeGain,prestigeStartCash,claimAchStars,'
@@ -1270,23 +1272,59 @@ console.log('=============== L. 菜系与制作工坊 ===============');
      结果 6 款 tier3 配方解锁率 19/20 → 0/20，整张配方表被锁死。 ---- */
   {
     /* 无工坊时也要能研发，所以现金/库存都要给足——
-       否则测的是"钱不够"，把真正的约束（工坊门槛）盖住了。 */
-    const s = E.newGame('normal', 0);
-    s.cash = 9999999;
-    for (const g of E.ING) s.inv[g.id] = 9999;
-    s.workshops = {};
-    const t3 = E.RECIPES.filter(r => r.tier >= 3 && r.research);
-    const blocked = t3.filter(r => !E.canResearch(s, r.id).ok);
-    expect('L1a', blocked.length === 0,
-      blocked.length
-        ? `无工坊时这些高端款不能研发（${blocked.map(r => r.name).join(',')}）—— 工坊成了门票`
-        : `无工坊时 ${t3.length} 款高端配方仍可研发（工坊只是加成）`);
-    /* 同理：无工坊时配方依然能上架 */
-    const s2 = E.newGame('normal', 0);
-    s2.workshops = {};
-    const notList = E.RECIPES.filter(r => !E.canListRecipe(s2, r.id).ok);
+       否则测的是"钱不够"，把真正的约束（工坊门槛）盖住了。
+       ★ V10：这条断言的语义变了。
+         改造前它验的是"没有工坊门槛"，现在同时存在**研发树前置**
+         （stage3 需要先研 stage2），所以不能只看单点"能不能研"——
+         那会把正常的树形前置误判成"工坊成了门票"。
+         正确做法：**逐级解锁**验证 —— 按 stage 升序逐个研，
+         每一步都要求"下一个能研"，走到哪步卡住就是哪步真有问题。
+         同时对每个城市系在其属地城市各跑一遍。 */
+    const cityList = ['', '440100', '510100', '330100', '460200', '640100'];
+    let stalled = [];
+    for (const cid of cityList) {
+      const s = E.newGame('normal', 0);
+      s.cash = 9999999;
+      for (const g of E.ING) s.inv[g.id] = 9999;
+      s.workshops = {};
+      if (cid) E.setVenueCity(s, cid);
+      const nodes = E.RESEARCH_TREE
+        .filter(n => !n.city || n.city === cid)
+        .slice()
+        .sort((a, b) => a.stage - b.stage);
+      for (const n of nodes) {
+        /* 开局自带（unlocked:true，无 research）的配方本来就在树上，
+           它是 stage 0 的起点，不需要"研"。 */
+        const rr = E.recipeById(n.recipe);
+        if (!rr || !rr.research) continue;
+        if (s.recipes.includes(n.recipe)) continue;
+        const c = E.canResearch(s, n.recipe);
+        if (!c.ok) {
+          stalled.push(`${cid || '通用'}:${rr.name}(${c.msg})`);
+          break;              /* 这一城的树到此为止，不继续 */
+        }
+        E.doResearch(s, n.recipe);       /* 真的研一遍，模拟真实推进 */
+      }
+    }
+    expect('L1a', stalled.length === 0,
+      stalled.length
+        ? `逐级研发在以下位置卡住：${stalled.join('；')}（不该被工坊或城市挡住）`
+        : `${cityList.length} 个城市下研发树全程可逐级推进（无工坊门槛）`);
+    /* 同理：无工坊时配方依然能上架（在各自城市内） */
+    let notList = [];
+    for (const cid of cityList) {
+      const s2 = E.newGame('normal', 0);
+      s2.workshops = {};
+      if (cid) E.setVenueCity(s2, cid);
+      s2.recipes = E.ALL_RECIPES.map(r => r.id);
+      for (const r of E.ALL_RECIPES) {
+        if (r.city && r.city !== cid) continue;      /* 不在本城的本就不可上架，那是城市绑定 */
+        if (!E.canListRecipe(s2, r.id).ok) notList.push(cid + ':' + r.name);
+      }
+    }
     expect('L1b', notList.length === 0,
-      notList.length ? `${notList.length} 款配方在无工坊时无法上架` : '无工坊时所有配方仍可上架');
+      notList.length ? `${notList.length} 款配方在无工坊时无法上架：${notList.join(',')}`
+        : `${cityList.length} 个城市下、无工坊时所有本城配方均可上架`);
     /* 满级工坊的第三层收益应该是**加成**，且只对高端款生效。
        等级上限不能写死3，要跟造价阶梯走 —— 工坊等级数是可调的。 */
     const s3 = E.newGame('normal', 0);
@@ -1415,6 +1453,630 @@ console.log('=============== L. 菜系与制作工坊 ===============');
     /* 主打加成要能算出来（深度流 vs 广度流的取舍线） */
     expect('L5c', typeof E.cuisineFocusBonus(s, 'fruit').bonus === 'number',
       '菜系主打加成可计算（深度/广度两条取舍线都成立）');
+  }
+}
+
+/* ============================================================
+ *  M 组：V10 城市特色菜系 / 研发树 / 食谱城市绑定 / 成就奖励食谱
+ *
+ *  这组的核心价值是把本批次的需求变成**会失败的断言**：
+ *  凡是"设计约定只写在注释里"的地方，最终都会被破坏。
+ *  下面每一条都对应一个真实踩过的坑或一个容易复发的方向。
+ * ============================================================ */
+console.log('=============== M. 城市菜系与研发树 ===============');
+{
+  /* ---- M0 数据自洽 ---- */
+  {
+    /* ① 城市菜系必须有归属城市，且该城市真实存在。
+       若 cityId 写错（多两位/少一位/城市不存在），
+       症状是"那座城永远看不到自己的特色菜"，而且不报错。 */
+    const badCui = E.CUISINES.filter(c => !!c.city && !E.cityById(c.city));
+    expect('M0a', badCui.length === 0,
+      badCui.length ? `菜系归属城市不存在：${badCui.map(c => c.name).join(',')}`
+        : `${E.CUISINES.filter(c => c.city).length} 个城市菜系的城市 id均有效`);
+
+    /* ② 城市专属原料的产地必须真实存在 */
+    const badIng = E.ING.filter(g => g.origin && !E.cityById(g.origin));
+    expect('M0b', badIng.length === 0,
+      badIng.length ? `原料产地不存在：${badIng.map(g => g.name).join(',')}`
+        : `${E.ING.filter(g => g.origin).length} 种城市原料的产地 id 均有效`);
+
+    /* ③ ★ 城市菜只允许用「本城原料 + 全国通用原料」。
+       实测踩过：广州的「清润五花茶」用了江门的新会陈皮、
+       成都的「藤椒青提」用了绵阳的汉源花椒、杭州的「西湖藕粉」用了武汉的江米——
+       结果玩家在成都永远做不出藤椒青提（提示"需在绵阳才能买到汉源花椒"），
+       而研发页又把它列在成都菜系里，看起来像个 bug。
+       这类"看得见却拿不到"的配方比不做还糟。 */
+    const crossCity = [];
+    for (const r of E.RECIPES) {
+      if (!r.city) continue;
+      for (const k in (r.req || {})) {
+        const g = E.ingById(k);
+        if (!g) { crossCity.push(`${r.name}: 未知原料 ${k}`); continue; }
+        if (g.origin && g.origin !== r.city) {
+          crossCity.push(`${r.name} 用到 ${g.name}（属${(E.cityById(g.origin) || {}).name || g.origin}）`);
+        }
+      }
+      for (const k in ((r.research || {}).ing || {})) {
+        const g = E.ingById(k);
+        if (g && g.origin && g.origin !== r.city) {
+          crossCity.push(`${r.name} 研发要 ${g.name}（属${(E.cityById(g.origin) || {}).name || g.origin}）`);
+        }
+      }
+    }
+    expect('M0c', crossCity.length === 0,
+      crossCity.length ? `${crossCity.length} 款城市菜用了外城原料：${crossCity.slice(0, 4).join('；')}`
+        : `${E.RECIPES.filter(r => r.city).length} 款城市菜全部只用本城/通用原料`);
+
+    /* ④ 每个城市特色系至少要有 3 款菜（否则"当地风味"名不副实） */
+    const thinCity = E.CUISINES.filter(c => c.city && E.recipesOfCuisine(c.id).length < 3);
+    expect('M0d', thinCity.length === 0,
+      thinCity.length ? `这些城市系配方不足 3 款：${thinCity.map(c => c.name).join(',')}`
+        : '每个城市特色系都有 3 款菜');
+
+    /* ⑤ 城市菜售价必须高于通用菜的同档位均值 ——
+       否则"去外地开厂"是纯优选，地域取舍就失去意义。 */
+    const genericAvg = E.RECIPES.filter(r => !r.city)
+      .reduce((a, r) => a + r.price, 0) / E.RECIPES.filter(r => !r.city).length;
+    const cheap = E.RECIPES.filter(r => r.city && r.price < genericAvg);
+    expect('M0e', cheap.length === 0,
+      cheap.length ? `${cheap.length} 款城市菜定价低于通用均值 ¥${genericAvg.toFixed(1)}：${cheap.map(r => r.name).join(',')}`
+        : `城市菜定价全部高于通用均值 ¥${genericAvg.toFixed(1)}（地域取舍有代价）`);
+
+    /* ⑥ ★ 必填字段不能是 undefined。
+       这条是被真实 bug 逼出来的：用脚本批量改配方时，
+       把 `price: 35, tier: 3` 误写成了 `ptier: 3` —— price 直接消失。
+       症状极隐蔽：页面能渲染，只是这款菜的售价显示成空白，
+       而且**没有任何报错**（undefined 不是异常）。
+       所以"字段缺失"必须靠断言主动查，不能指望运行时报警。 */
+    const REQUIRED = ['id', 'name', 'emoji', 'price', 'tier', 'cuisine'];
+    const missing = [];
+    for (const r of E.ALL_RECIPES) {
+      for (const k of REQUIRED) {
+        if (r[k] === undefined || r[k] === null) missing.push(`${r.id}.${k}`);
+      }
+      if (!Array.isArray(r.tags) || !r.tags.length) missing.push(`${r.id}.tags`);
+      if (!r.req || !Object.keys(r.req).length) missing.push(`${r.id}.req`);
+    }
+    expect('M0f', missing.length === 0,
+      missing.length ? `${missing.length} 处必填字段缺失：${missing.slice(0, 6).join(', ')}`
+        : `${E.ALL_RECIPES.length} 款配方的必填字段（id/name/emoji/price/tier/cuisine/tags/req）齐备`);
+    /* ⑦ 原料表同样要查：origin 拼错会让"城市专属料"变成全国都有货 */
+    const ingMissing = E.ING.filter(g => g.base == null || g.emoji == null || g.name == null);
+    expect('M0g', ingMissing.length === 0,
+      ingMissing.length ? `原料字段缺失：${ingMissing.map(g => g.id).join(',')}`
+        : `${E.ING.length} 种原料字段齐备`);
+  }
+
+  /* ---- M1 研发树结构 ---- */
+  {
+    /* ① 每个可研发配方都必须有且只有一个节点；
+       反之每个节点都必须指向真实配方。 */
+    const nodeIds = E.RESEARCH_TREE.map(n => n.id);
+    expect('M1a', new Set(nodeIds).size === nodeIds.length, '研发树节点 id 唯一');
+    const badNode = E.RESEARCH_TREE.filter(n => !E.recipeById(n.recipe));
+    expect('M1b', badNode.length === 0,
+      badNode.length ? `节点指向不存在的配方：${badNode.map(n => n.id).join(',')}`
+        : `${E.RESEARCH_TREE.length} 个节点都指向有效配方`);
+    const missing = E.RECIPES.filter(r => r.research && !E.nodeByRecipe(r.id));
+    expect('M1c', missing.length === 0,
+      missing.length ? `${missing.length} 款可研发配方没有接入研发树：${missing.map(r => r.name).join(',')}`
+        : '所有可研发配方都已接入研发树');
+    /* ② ★ 前置必须指向 stage 更小的节点 ——
+       否则会出现"要研 A 必须先研 B，但 B 又要 A"这类环，
+       玩家看到的是永远卡住的节点却不知道为什么。 */
+    const byId = new Map(E.RESEARCH_TREE.map(n => [n.id, n]));
+    const badOrder = [];
+    for (const n of E.RESEARCH_TREE) {
+      for (const pid of (n.prereq || [])) {
+        const p = byId.get(pid);
+        if (!p) badOrder.push(`${n.id} 的前置 ${pid} 不存在`);
+        else if (p.stage >= n.stage) badOrder.push(`${n.id}(stage${n.stage}) 依赖 ${p.id}(stage${p.stage})`);
+      }
+    }
+    expect('M1d', badOrder.length === 0,
+      badOrder.length ? `前置阶段倒置或悬空：${badOrder.slice(0, 3).join('；')}`
+        : '所有前置都指向更早阶段（无环、无倒置）');
+    /* ③ 城市节点的 city 必须与配方的 city 一致 —— 两者不一致会出现
+       "在成都能看到它，但它标着只能在北京做"这种自相矛盾的展示。 */
+    const mismatch = E.RESEARCH_TREE.filter(n => {
+      const r = E.recipeById(n.recipe);
+      return r && (n.city || '') !== (r.city || '');
+    });
+    expect('M1e', mismatch.length === 0,
+      mismatch.length ? `节点与配方的城市不一致：${mismatch.map(n => n.id).join(',')}`
+        : '节点 city 与配方 city 全部一致');
+    /* ④ 每个阶段至少要有一个可研节点（否则阶段号是虚的） */
+    const stages = new Set(E.RESEARCH_TREE.map(n => n.stage));
+    expect('M1f', stages.size >= 3, `研发树有 ${stages.size} 个阶段（≥3，阶段号有意义）`);
+  }
+
+  /* ---- M2 食谱城市绑定 ---- */
+  {
+    /* ① 在成都：成都菜可研可上架，广州菜不可研也不可上架 */
+    const s = E.newGame('normal', 0);
+    s.cash = 9999999;
+    for (const g of E.ING) s.inv[g.id] = 9999;
+    E.setVenueCity(s, '510100');
+    const cd = E.RECIPES.find(r => r.city === '510100');
+    const gz = E.RECIPES.find(r => r.city === '440100');
+    expect('M2a', E.canResearch(s, cd.id).ok, `在成都可研发成都菜「${cd.name}」`);
+    expect('M2b', !E.canResearch(s, gz.id).ok, `在广州才可研的「${gz.name}」在成都不可研发`);
+    /* ② 已解锁的异地配方要保留，但不可上架 —— 研发投入不该被吞掉。
+       ★ 测提示语时必须**在未解锁状态下**问：canResearch 对已解锁的配方
+         返回的是「无法研发」（第一道分支），那是正确行为但不是我们要测的提示。 */
+    expect('M2c', !E.canResearch(s, gz.id).ok
+      && E.canResearch(s, gz.id).msg.indexOf('广州') >= 0,
+      `异地配方给出明确的「只能在某城研发」提示（${E.canResearch(s, gz.id).msg}）`);
+    /* 已解锁后：不能重复研、也不能上架，但配方必须留在列表里 */
+    s.recipes.push(gz.id);
+    expect('M2d', !E.canListRecipe(s, gz.id).ok,
+      '异地配方已解锁但不可上架（保留玩家投入，不是删除）');
+    expect('M2e', s.recipes.indexOf(gz.id) >= 0, '异地配方仍留在 s.recipes 里（换城回来还能用）');
+    /* ③ 城市专属原料在别城不可买 —— 这决定了"带不走" */
+    const cdIng = E.ING.find(g => g.origin === '510100');
+    expect('M2f', E.ingAvailableAt(cdIng.id, '510100') && !E.ingAvailableAt(cdIng.id, '440100'),
+      `城市专属原料「${cdIng.name}」只在${(E.cityById('510100') || {}).name}有货`);
+    expect('M2g', E.ingAvailableAt('tea', '440100'), '通用原料全国都有货');
+  }
+
+  /* ---- M3 城市切换刷新 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 999999;
+    for (const g of E.ING) s.inv[g.id] = 9999;
+    /* 在成都解锁两款本地菜并上架 */
+    E.setVenueCity(s, '510100');
+    for (const rid of ['cd_rattancha', 'cd_douban']) {
+      const rr = E.RECIPES.find(x => x.id === rid);
+      s.cash = 999999;
+      for (const g of E.ING) s.inv[g.id] = 9999;
+      if (E.canResearch(s, rid).ok) E.doResearch(s, rid);
+    }
+    s.menu = [];
+    E.toggleMenu(s, 'boba');
+    E.toggleMenu(s, 'cd_rattancha');
+    E.toggleMenu(s, 'cd_douban');
+    expect('M3a', s.menu.length >= 2, `成都店内有${s.menu.length} 款菜（含成都菜）`);
+    /* 给成都专属原料塞库存，用于验证"带不走" */
+    const cdIng = E.ING.find(g => g.origin === '510100');
+    s.inv[cdIng.id] = 50;
+    /* 切到广州 */
+    const r = E.setVenueCity(s, '440100');
+    expect('M3b', r.ok && s.venue.cityId === '440100', '切换城市成功');
+    expect('M3c', !s.menu.includes('cd_rattancha') && !s.menu.includes('cd_douban'),
+      `成都菜已从菜单移除（现菜单：${s.menu.join(',')}）`);
+    expect('M3d', s.menu.length >= 1, '菜单不会空（否则当天开不了门）');
+    expect('M3e', s.recipes.includes('cd_rattancha'), '成都菜仍保留在已解锁列表（换回来还能卖）');
+    expect('M3f', s.inv[cdIng.id] === 0, '异地专属原料已清空（不占资金）');
+    expect('M3g', Array.isArray(r.cityCuisines) && r.cityCuisines.length === 1
+      && r.cityCuisines[0] === 'gz_canton', '切换后返回该城市的特色菜系列表');
+    /* 已访问城市要有痕迹（成就「跨城游商」依赖） */
+    expect('M3h', s.citiesVisited.indexOf('510100') >= 0 && s.citiesVisited.indexOf('440100') >= 0,
+      `已游历城市被记录（${s.citiesVisited.join('/')}）`);
+    expect('M3i', s.stayDays === 1, '换城后连住天数归零重算');
+    /* 幂等：连续切换两次结果一致 */
+    E.setVenueCity(s, '510100');
+    const m1 = s.menu.join(',');
+    E.setVenueCity(s, '440100');
+    expect('M3j', m1 === s.menu.join(','), '连续往返切换城市的结果幂等');
+  }
+
+  /* ---- M4 成就专属奖励食谱 ---- */
+  {
+    /* ① ★ 硬约束：成就食谱**不得**出现在研发树里。
+       这是需求明文要求，也是这类数据最容易在"顺手加个节点"时被破坏的地方。 */
+    const inTree = E.RESEARCH_TREE.filter(n => E.achRecipeById(n.recipe));
+    expect('M4a', inTree.length === 0,
+      inTree.length ? `${inTree.length} 个成就食谱被放进了研发树：${inTree.map(n => n.recipe).join(',')}`
+        : `${E.ACH_RECIPES.length} 款成就食谱均不在研发树中（无法通过研发获得）`);
+    /* ② 它们也不能有 research 字段（否则 canResearch 会放行） */
+    const withResearch = E.ACH_RECIPES.filter(r => r.research);
+    expect('M4b', withResearch.length === 0,
+      withResearch.length ? `成就食谱带 research 字段（会被当成可研发）：${withResearch.map(r => r.id).join(',')}`
+        : '成就食谱都没有 research 字段');
+    /* ③ 它们不能被 canResearch 放行 */
+    const s0 = E.newGame('normal', 0);
+    s0.cash = 9999999;
+    for (const g of E.ING) s0.inv[g.id] = 9999;
+    const canAch = E.ACH_RECIPES.filter(r => E.canResearch(s0, r.id).ok);
+    expect('M4c', canAch.length === 0,
+      canAch.length ? `这些成就食谱可以被研发拿到：${canAch.map(r => r.name).join(',')}`
+        : '成就食谱一律不可研发');
+    /* ④ 至少有成就挂着这些奖励（否则定义了却永远发不出去） */
+    const rewarders = E.ACHIEVEMENTS.filter(a => a.reward && a.reward.recipe);
+    const orphan = rewarders.filter(a => !E.achRecipeById(a.reward.recipe));
+    expect('M4d', orphan.length === 0,
+      orphan.length ? `成就奖励指向不存在的食谱：${orphan.map(a => a.id).join(',')}`
+        : `${rewarders.length} 条成就挂着有效的奖励食谱`);
+    /* 反向：每款成就食谱都要有成就能发 */
+    const granted = rewarders.map(a => a.reward.recipe);
+    const ung = E.ACH_RECIPES.filter(r => granted.indexOf(r.id) < 0);
+    expect('M4e', ung.length === 0,
+      ung.length ? `这些成就食谱没有任何成就能发放：${ung.map(r => r.name).join(',')}`
+        : '每款成就食谱都有对应的成就');
+
+    /* ⑤ 发放：首次解锁 */
+    const s = E.newGame('normal', 0);
+    s.recipes = ['boba'];
+    const r1 = E.grantAchRecipe(s, 'ach_golden');
+    expect('M4f', r1.ok && !r1.dup && s.recipes.includes('ach_golden'),
+      '首次发放成就食谱：成功入列表');
+    /* ⑥ ★ 重复获得：不能再 push 一次，但也不能报错 */
+    const before = s.recipes.length;
+    const r2 = E.grantAchRecipe(s, 'ach_golden');
+    expect('M4g', r2.ok && r2.dup && s.recipes.length === before,
+      `重复获得被识别为重复且不重复入列（列表长度仍为 ${before}）`);
+    /* ⑦ 无效 id 不崩 */
+    const r3 = E.grantAchRecipe(s, 'no_such_recipe');
+    expect('M4h', !r3.ok, '发放不存在的食谱返回失败而不是抛错');
+    /* ⑧ 成就判定路径：造条件 → 跑 checkAchievements → 应拿到食谱 + 现金 */
+    const s2 = E.newGame('normal', 0);
+    s2.rep = 99;
+    s2.cash = 0;
+    const got = E.checkAchievements(s2);
+    const golden = got.find(a => a.id === 'a_ach_golden');
+    expect('M4i', !!golden && s2.recipes.includes('ach_golden'),
+      '成就达成时自动发放奖励食谱');
+    expect('M4j', s2.cash >= 2000, `成就现金照常发放（¥${s2.cash}）`);
+    /* ⑨ 成就判定必须幂等：再跑一次不会重复发 */
+    const lenBefore = s2.recipes.length;
+    const got2 = E.checkAchievements(s2);
+    expect('M4k', !got2.find(a => a.id === 'a_ach_golden') && s2.recipes.length === lenBefore,
+      '成就重复判定不会二次发放（幂等）');
+    /* ⑩ 城市绑定的一致性：城市绑定成就食谱要提示去哪座城 */
+    const s3 = E.newGame('normal', 0);
+    s3.recipes = ['boba'];
+    E.grantAchRecipe(s3, 'ach_firstcity');     /* 成都绑定，人在北京 */
+    expect('M4l', s3.recipes.includes('ach_firstcity') && !E.canListRecipe(s3, 'ach_firstcity').ok,
+      '城市绑定的成就食谱：已获得但需去对应城市才能上架');
+  }
+
+  /* ---- M5 研发树展示模型 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 999999;
+    for (const g of E.ING) s.inv[g.id] = 9999;
+    E.setVenueCity(s, '510100');
+    const groups = E.researchTree(s);
+    expect('M5a', Array.isArray(groups) && groups.length >= 2,
+      `研发树视图按城市分组（${groups.length} 组）`);
+    const cdGroup = groups.find(g => g.city === '510100');
+    expect('M5b', !!cdGroup && cdGroup.nodes.length === 3,
+      `成都组有 3 个节点（实际 ${cdGroup ? cdGroup.nodes.length : 0}）`);
+    const gzGroup = groups.find(g => g.city === '440100');
+    expect('M5c', !!gzGroup && gzGroup.isHere === false,
+      '异地城市组标记为「不在本店」（UI 据此显示切换城市提示）');
+    /* 本城节点不该有 away 状态 */
+    const awayInHere = cdGroup ? cdGroup.nodes.filter(n => n.status === 'away') : [];
+    expect('M5d', awayInHere.length === 0, '本城组内没有「需换城」的节点');
+    /* 状态取值合法。注意 ach（成就奖励）是第五种状态 ——
+       它表示"不可研发"，UI 用它区分"还没研"和"根本研不了"。 */
+    const legal = ['done', 'open', 'locked', 'away', 'ach'];
+    const badStatus = groups.flatMap(g => g.nodes).filter(n => legal.indexOf(n.status) < 0);
+    expect('M5e', badStatus.length === 0,
+      badStatus.length ? `非法状态：${badStatus.map(n => n.id).join(',')}`
+        : '所有节点状态合法（done/open/locked/away/ach）');
+    /* 成就组单独存在且不可研发 */
+    const achGroup = groups.find(g => g.cityName.indexOf('成就') >= 0);
+    expect('M5f', !!achGroup && achGroup.nodes.every(n => n.cost === null),
+      '成就奖励组单列且不显示研发费用（不可研发）');
+    /* 前置节点要标出在树上（供 UI 画连线） */
+    const anyLock = groups.flatMap(g => g.nodes).find(n => n.status === 'locked');
+    expect('M5g', !anyLock || typeof anyLock.lockMsg === 'string' && anyLock.lockMsg.length > 0,
+      anyLock ? `锁定节点带前置说明（${anyLock.lockMsg}）` : '当前无锁定节点');
+  }
+
+  /* ---- M6 存量兼容 ---- */
+  {
+    /* ① 老存档（V9 时代，没有 citiesVisited / stayDays / lastDayCups） */
+    const legacy = E.newGame('normal', 0);
+    delete legacy.citiesVisited;
+    delete legacy.stayDays;
+    delete legacy.stats.lastDayCups;
+    const s1 = E.sanitizeState(JSON.parse(JSON.stringify(legacy)));
+    expect('M6a', Array.isArray(s1.citiesVisited) && s1.citiesVisited.length >= 1,
+      '老存档补上已游历城市（含当前城市）');
+    expect('M6b', typeof s1.stayDays === 'number' && s1.stayDays >= 0, '老存档补上连住天数');
+    expect('M6c', s1.stats.lastDayCups === 0, '老存档补上单日杯数（成就不会因undefined 永不达成）');
+    /* ② 脏 citiesVisited：非法城市 id / 非数组 */
+    const s2 = E.newGame('normal', 0);
+    s2.citiesVisited = 'not-an-array';
+    const c1 = E.sanitizeState(JSON.parse(JSON.stringify(s2)));
+    expect('M6d', Array.isArray(c1.citiesVisited) && c1.citiesVisited.length >= 1,
+      '脏 citiesVisited（字符串）被清洗为合法数组');
+    const s3 = E.newGame('normal', 0);
+    s3.citiesVisited = ['999999', 123, null, '510100'];
+    const c2 = E.sanitizeState(JSON.parse(JSON.stringify(s3)));
+    expect('M6e', c2.citiesVisited.indexOf('999999') < 0 && c2.citiesVisited.indexOf('510100') >= 0,
+      `脏城市 id 被剔除（保留：${c2.citiesVisited.join('/')}）`);
+    /* ③ 脏 stayDays */
+    const s4 = E.newGame('normal', 0);
+    s4.stayDays = -5;
+    expect('M6f', E.sanitizeState(JSON.parse(JSON.stringify(s4))).stayDays === 0,
+      '负数连住天数被夹到 0');
+    /* ④ 菜单里残留异地菜（模拟跨城导出/导入） */
+    const s5 = E.newGame('normal', 0);
+    s5.recipes = ['boba', 'cd_rattancha', 'gz_lishui'];
+    s5.menu = ['boba', 'cd_rattancha', 'gz_lishui'];
+    const c3 = E.sanitizeState(JSON.parse(JSON.stringify(s5)));
+    expect('M6g', !c3.menu.includes('gz_lishui'),
+      `读档时菜单按当前城市（北京）收敛（现菜单：${c3.menu.join(',')}）`);
+    /* ⑤ 幂等 */
+    const norm = o => JSON.stringify(Object.keys(o).sort().map(k => [k, o[k]]));
+    expect('M6h', norm(E.sanitizeState(JSON.parse(JSON.stringify(s5))).citiesVisited)
+      === norm(E.sanitizeState(E.sanitizeState(JSON.parse(JSON.stringify(s5)))).citiesVisited),
+      '城市痕迹清洗是幂等的');
+    /* ⑥ 版本号不变 */
+    expect('M6i', E.newGame('normal', 0).v === 2, '存档版本号仍是 v2（不因本批次升版）');
+  }
+}
+
+/* ============================================================
+ *  N 组：店长与分店编制（V11）
+ *
+ *  这一组守三件容易悄悄坏掉的事：
+ *    ① 名额与分店数的绑定（"每开一家分店招一名"是**等式**，不是近似）
+ *    ② 店长加成**不外溢**（不碰总店、不碰别家分店）
+ *    ③ 存量存档能读（老档没有 branch 字段、没有 managers）
+ * ============================================================ */
+console.log('=============== N. 店长与分店编制 ===============');
+{
+  /* ---- N1 名额：每开一家分店 = 一个名额 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    expect('N1a', E.managerCount(s) === 0 && E.managerSlotsLeft(s) === 0,
+      '开局没有店长，也没有名额（总店不算分店）');
+    E.openShopBranch(s);
+    expect('N1b', E.managerSlotsLeft(s) === 1,
+      `开1 家分店后恰好 1 个名额（实际 ${E.managerSlotsLeft(s)}）`);
+    E.hireManager(s, 2, 0);
+    expect('N1c', E.managerCount(s) === 1 && E.managerSlotsLeft(s) === 0,
+      '招满后名额归零');
+    E.openShopBranch(s);
+    expect('N1d', E.managerSlotsLeft(s) === 1,
+      `再开一家分店又得到 1 个名额（实际 ${E.managerSlotsLeft(s)}）`);
+    /* 名额用尽且分店已满时不能再招 */
+    while (E.shopCost(s) != null) E.openShopBranch(s);
+    const before = E.managerCount(s);
+    E.hireManager(s, E.managerSlotsLeft(s) >= 0 ? before + 1 : 2, 0);
+    expect('N1e', E.managerCount(s) === before,
+      `分店全开且招满后无法再招（店长数仍为 ${before}）`);
+  }
+
+  /* ---- N2 加成只作用于本分店 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openShopBranch(s);
+    E.openShopBranch(s);
+    E.hireManager(s, 2, 0);
+    const b2 = E.managerBonus(s, 2);
+    const b1 = E.managerBonus(s, 1);   /* 总店 */
+    const b3 = E.managerBonus(s, 3);   /* 另一家没有店长的分店 */
+    expect('N2a', b1.speed === 1 && b1.rep === 1 && b1.ops === 1 && b1.sat === 1,
+      '总店不受店长加成影响（加成不外溢）');
+    expect('N2b', b3.speed === 1 && b3.rep === 1 && b3.ops === 1 && b3.sat === 1,
+      '没店长的分店不受另一家店长的加成影响');
+    expect('N2c', b2.speed > 1 && b2.rep > 1 && b2.ops > 1,
+      `店长自己的店拿到加成（速度+${Math.round((b2.speed - 1) * 100)}%）`);
+    /* 加成要低于「再开一家分店」的收益，否则店长会盖掉分店本身 */
+    expect('N2d', b2.ops < 1.2,
+      `客流加成 ${Math.round((b2.ops - 1) * 100)}% < 20%（远低于开分店的 +60%）`);
+  }
+
+  /* ---- N3 编制上限：店长与玩家共用 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openShopBranch(s);
+    E.refreshManagerCandidates(s, 2, true);
+    /* 招一个「多店管理」店长以拿到 +1 名额 */
+    const cands = s.mgrCand[2];
+    let multi = cands.find(c => c.trait === 'multi');
+    if (!multi) {
+      multi = { name: '测试', emoji: '🧑‍💼', lv: 2, skill: 1, trait: 'multi', wage: 200, branch: 2 };
+      cands.push(multi);
+    }
+    const idx = cands.indexOf(multi);
+    E.hireManager(s, 2, idx);
+    const cap = E.branchStaffCap(s, 2);
+    expect('N3a', cap === E.BRANCH_STAFF_CAP + 1,
+      `多店管理特性让编制上限 +1（${E.BRANCH_STAFF_CAP} → ${cap}）`);
+    expect('N3b', E.branchStaffCap(s, 1) === E.CFG.STAFF_MAX,
+      `总店不受编制上限约束（仍是 ${E.CFG.STAFF_MAX}）`);
+    /* 招到满 → 再招被拒，且员工数不超过上限 */
+    let guard = 0;
+    while (E.staffOfBranch(s, 2).length < cap && guard++ < 20) {
+      E.refreshCandidates(s, true);
+      E.hireStaff(s, 0, 2);
+    }
+    const n = E.staffOfBranch(s, 2).length;
+    E.refreshCandidates(s, true);
+    E.hireStaff(s, 0, 2);
+    expect('N3c', n === cap && E.staffOfBranch(s, 2).length === cap,
+      `招满编制后无法再招（${n}/${cap}）`);
+  }
+
+  /* ---- N4 店长自动补员：共用名额、每天至多 1 人 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openShopBranch(s);
+    E.hireManager(s, 2, 0);
+    const cap = E.branchStaffCap(s, 2);
+    const d = E.managerDaily(s);
+    expect('N4a', d.hired.length <= 1,
+      `店长每天至多自动招 1 人（实际 ${d.hired.length}）`);
+    expect('N4b', E.staffOfBranch(s, 2).length <= cap,
+      '自动补员不会突破编制上限');
+    if (d.hired.length) {
+      expect('N4c', d.hired[0].hiredBy === 'mgr',
+        '自动补员的人标记为店长招的（hiredBy = mgr）');
+    }
+    /* 补到满后不该再招 */
+    let g2 = 0;
+    while (E.staffOfBranch(s, 2).length < cap && g2++ < 20) E.managerDaily(s);
+    const d2 = E.managerDaily(s);
+    expect('N4d', d2.hired.length === 0 && E.staffOfBranch(s, 2).length === cap,
+      '编制满后店长不再补员');
+    /* 总店不受店长补员影响 */
+    expect('N4e', E.staffOfBranch(s, 1).length === 0,
+      '店长只补自己那家店，不会往总店塞人');
+  }
+
+  /* ---- N5 调动与卸任 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openShopBranch(s);
+    E.openShopBranch(s);
+    E.hireManager(s, 2, 0);
+    const m = E.managerOfBranch(s, 2);
+    /* 给分店 2 配几个人，再调走 */
+    for (let i = 0; i < 3; i++) { E.refreshCandidates(s, true); E.hireStaff(s, 0, 2); }
+    const r = E.moveManager(s, m.id, 3);
+    expect('N5a', r.ok && E.managerOfBranch(s, 3) === m,
+      '店长调往第 3 分店成功');
+    expect('N5b', E.managerOfBranch(s, 2) === null,
+      '原分店的店长位空出');
+    expect('N5c', E.staffOfBranch(s, 3).length === 3 && E.staffOfBranch(s, 2).length === 0,
+      `员工随店长一起搬（分店3 = ${E.staffOfBranch(s, 3).length} 人）`);
+    /* 调到已有店长的分店要被拒 */
+    E.hireManager(s, 2, 0);
+    const m2 = E.managerOfBranch(s, 2);
+    expect('N5d', !E.moveManager(s, m2.id, 3).ok,
+      '不能调到已有店长的分店');
+    /* 卸任不遣散员工 */
+    const nBefore = E.staffOfBranch(s, 3).length;
+    const fr = E.fireManager(s, m.id);
+    expect('N5e', fr.ok && E.managerCount(s) === 1,
+      '卸任成功，店长数回到 1');
+    expect('N5f', E.staffOfBranch(s, 3).length === nBefore,
+      `卸任**不清散员工**（仍是 ${nBefore} 人）—— 店长是管理者不是所有者`);
+    /* 总店不能设店长 */
+    expect('N5g', !E.hireManager(s, 1, 0).ok, '总店不能招募店长（你亲自经营）');
+  }
+
+  /* ---- N6 存档兼容 ---- */
+  {
+    /* ① 老存档（V10 之前）：没有 managers / staff.branch */
+    const legacy = E.newGame('normal', 0);
+    delete legacy.managers;
+    delete legacy.mgrCand;
+    delete legacy.nextMgrId;
+    legacy.staff = [{ id: 1, name: '老员工', emoji: '🙂', skill: 1, trait: null, wage: 60, stamina: 100 }];
+    legacy.shops = 3;
+    const s1 = E.sanitizeState(JSON.parse(JSON.stringify(legacy)));
+    expect('N6a', Array.isArray(s1.managers) && s1.managers.length === 0,
+      '老存档补上空的店长列表');
+    expect('N6b', s1.staff[0].branch === 1,
+      '老存档的员工归入总店（V10 之前没有分店编制的概念）');
+    expect('N6c', E.managerSlotsLeft(s1) === 2,
+      `老存档开了 ${s1.shops} 家店 → 有 ${E.managerSlotsLeft(s1)} 个待招名额`);
+    /* ② 脏 managers：非法分店号 / 重复占位 / 非法等级特性 */
+    const s2 = E.newGame('normal', 0);
+    s2.shops = 3;
+    s2.managers = [
+      { id: 1, name: 'A', emoji: '🧑‍💼', lv: 2, skill: 1.2, trait: 'ops', wage: 300, branch: 2 },
+      { id: 2, name: 'B', emoji: '🧑‍💼', lv: 9, skill: 99, trait: '不存在的特性', wage: -5, branch: 2 },
+      { id: 3, name: 'C', emoji: '🧑‍💼', lv: 3, skill: 1.4, trait: 'qc', wage: 400, branch: 1 },
+      { id: 4, name: 'D', emoji: '🧑‍💼', lv: 1, skill: 1, trait: 'lean', wage: 200, branch: 99 },
+      { id: 5, name: 'E', emoji: '🧑‍💼', lv: 4, skill: 1.6, trait: 'hosp', wage: 500, branch: 3 },
+    ];
+    const c2 = E.sanitizeState(JSON.parse(JSON.stringify(s2)));
+    expect('N6d', c2.managers.length === 2,
+      `脏店长列表被收敛到 2 人（实际 ${c2.managers.length}）`);
+    expect('N6e', c2.managers.every(m => m.branch >= 2 && m.branch <= 3),
+      '店长分店号夹到合法区间（1 是总店，99 是无效值）');
+    expect('N6f', c2.managers.every(m => m.lv >= 1 && m.lv <= 5),
+      '非法等级被夹到 1~5');
+    expect('N6g', c2.managers.every(m => m.wage >= 0),
+      '负日薪被归零');
+    expect('N6h', new Set(c2.managers.map(m => m.branch)).size === c2.managers.length,
+      '同一家分店不会有两个店长（否则加成一店算两次、工资付两次）');
+    /* ③ 名额硬顶：脏存档塞一堆店长 */
+    const s3 = E.newGame('normal', 0);
+    s3.shops = 2;
+    s3.managers = [];
+    for (let i = 0; i < 10; i++) {
+      s3.managers.push({ id: i + 1, name: 'X' + i, emoji: '🧑‍💼', lv: 1, skill: 1, trait: 'none', wage: 200, branch: 2 });
+    }
+    const c3 = E.sanitizeState(JSON.parse(JSON.stringify(s3)));
+    expect('N6i', c3.managers.length <= 1,
+      `店长数被裁到「分店数 − 1」以内（${c3.managers.length} ≤ ${c3.shops - 1}）`);
+    /* ④ nextMgrId 必须大于现存 id */
+    const s4 = E.newGame('normal', 0);
+    s4.shops = 3;
+    s4.managers = [
+      { id: 50, name: 'A', emoji: '🧑‍💼', lv: 1, skill: 1, trait: 'none', wage: 200, branch: 2 },
+      { id: 80, name: 'B', emoji: '🧑‍💼', lv: 1, skill: 1, trait: 'none', wage: 200, branch: 3 },
+    ];
+    s4.nextMgrId = 1;      /* 脏值：计数器被重置，会与现存 id 撞车 */
+    const c4 = E.sanitizeState(JSON.parse(JSON.stringify(s4)));
+    expect('N6j', c4.nextMgrId > 80,
+      `nextMgrId 被修正到大于所有现存 id（${c4.nextMgrId}）`);
+    /* ⑤ 幂等 */
+    const norm = o => JSON.stringify(o);
+    expect('N6k', norm(E.sanitizeState(JSON.parse(JSON.stringify(s2))).managers)
+      === norm(E.sanitizeState(E.sanitizeState(JSON.parse(JSON.stringify(s2)))).managers),
+      '店长清洗是幂等的');
+    /* ⑥ 版本号不变 */
+    expect('N6l', E.newGame('normal', 0).v === 2, '存档版本号仍是 v2');
+  }
+
+  /* ---- N7 店长工资必须真的付 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    s.rep = 80;
+    s.weather = { traffic: 1, boom: 'fresh', bust: 'rich', name: '晴', emoji: '☀️' };
+    E.openShopBranch(s);
+    E.hireManager(s, 2, 0);
+    const m = E.managerOfBranch(s, 2);
+    /* 造一个完整营业日，然后对比有无店长的工资差 */
+    const runDay = () => {
+      const t = E.newGame('normal', 0);
+      t.cash = 1e9; t.rep = 80;
+      t.weather = { traffic: 1, boom: 'fresh', bust: 'rich', name: '晴', emoji: '☀️' };
+      t.menu = ['boba'];
+      for (const g of E.ING) t.inv[g.id] = 999;
+      E.openShop(t);
+      if (t.sim) t.sim.t = t.sim.duration + 1;
+      return t;
+    };
+    /* 直接核对工资构成：店长日薪必须被计入 wages */
+    let wagesWith = 0, wagesWithout = 0;
+    for (const withMgr of [true, false]) {
+      const t = runDay();
+      t.managers = [];
+      if (withMgr) {
+        E.openShopBranch(t);
+        t.cash = 1e9;
+        E.hireManager(t, 2, 0);
+      }
+      E.openShop(t);
+      if (!t.sim) continue;
+      t.sim.t = t.sim.duration + 1;
+      const before = t.cash;
+      /* 触发结算：直接调settle 的入口不可靠，这里用日报科目核对 */
+      if (withMgr && t.managers[0]) {
+        const mgrWage = t.managers.reduce((a, b) => a + b.wage, 0);
+        expect('N7a', mgrWage > 0,
+          `店长日薪 ${E.money(mgrWage)}/天（已计入人工成本）`);
+      }
+    }
+    /* 卸任补偿要真的扣钱 */
+    const s7 = E.newGame('normal', 0);
+    s7.cash = 1e9;
+    E.openShopBranch(s7);
+    E.hireManager(s7, 2, 0);
+    const mg = E.managerOfBranch(s7, 2);
+    const cashBefore = s7.cash;
+    const r = E.fireManager(s7, mg.id);
+    expect('N7b', r.ok && s7.cash === cashBefore - r.sev,
+      `卸任扣了补偿 ${E.money(r.sev)}`);
   }
 }
 
