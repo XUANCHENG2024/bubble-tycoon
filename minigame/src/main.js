@@ -611,6 +611,119 @@ function doAct(act, id, extra) {
     return;
   }
   /* ---------- V11 店长 ---------- */
+  /* ---------- V12 Canvas 端输入（无平台输入框，自绘） ---------- */
+  if (act === 'numpad-key') {
+    var mk = VIEW.modal;
+    if (mk && mk.type === 'numpad') {
+      if (mk.digits.length < 9) mk.digits += String(id);
+    }
+    return;
+  }
+  if (act === 'numpad-del') {
+    var md = VIEW.modal;
+    if (md && md.type === 'numpad') md.digits = md.digits.slice(0, -1);
+    return;
+  }
+  if (act === 'numpad-quick') {
+    var mq = VIEW.modal;
+    if (mq && mq.type === 'numpad') mq.digits = String(id);
+    return;
+  }
+  if (act === 'numpad-ok') {
+    var mo = VIEW.modal;
+    if (mo && mo.type === 'numpad') {
+      var amt = parseFloat(mo.digits || '0');
+      var okNum = isFinite(amt) && amt >= (mo.min || 1) && amt <= (mo.max == null ? Infinity : mo.max);
+      VIEW.modal = null;
+      if (!okNum) { toast('金额无效'); return; }
+      if (mo.act === 'sfund') {
+        var fr3 = fundStore(s, mo.branch, amt);
+        if (fr3.ok) { beep('tap'); toast('💰 已注资 ' + money(fr3.amount)); }
+        else toast(fr3.msg);
+      } else if (mo.act === 'sdraw') {
+        var wr3 = withdrawStore(s, mo.branch, amt);
+        if (wr3.ok) { beep('tap'); toast('💵 已提现 ' + money(wr3.amount)); }
+        else toast(wr3.msg);
+      }
+    }
+    return;
+  }
+  if (act === 'rename-prev' || act === 'rename-next') {
+    var mr3 = VIEW.modal;
+    if (mr3 && mr3.type === 'rename' && mr3.pool.length) {
+      var d = act === 'rename-next' ? 1 : -1;
+      mr3.idx = (mr3.idx + d + mr3.pool.length) % mr3.pool.length;
+    }
+    return;
+  }
+  if (act === 'rename-ok') {
+    var mro = VIEW.modal;
+    if (mro && mro.type === 'rename') {
+      var nm = mro.pool[mro.idx] || '';
+      VIEW.modal = null;
+      var rr3 = renameStore(s, mro.branch, nm);
+      if (rr3.ok) { beep('tap'); toast('✏️ 店名已更新'); }
+      else toast(rr3.msg);
+    }
+    return;
+  }
+  if (act === 'sclose') {
+    var stc = storeByBranch(s, +id);
+    if (!stc) { toast('店铺不存在'); return; }
+    if (stc.branch === 1) { toast('总店不能关闭'); return; }
+    var feeC = Math.round(stc.expense * 0.35);
+    var staffC = staffOfBranch(s, stc.branch).length;
+    /* Canvas 无 confirm —— 用「确认弹窗」代替（MODALS 里加一个通用的）。
+       二次确认是必须的：这个操作不可逆（店没了、员工遣散、店费沉没）。*/
+    VIEW.modal = {
+      type: 'confirm',
+      title: '关闭「' + stc.name + '」？',
+      lines: ['不退开店费', '清退费 ' + money(feeC), staffC + ' 名员工将被遣散', '此操作不可撤销'],
+      act: 'sclose-ok', branch: stc.branch,
+    };
+    return;
+  }
+  if (act === 'sclose-ok') {
+    var mco = VIEW.modal;
+    VIEW.modal = null;
+    if (mco && mco.type === 'confirm') {
+      var cr3 = closeStore(s, mco.branch);
+      if (cr3.ok) { beep('tap'); toast('🏚️ 店铺已关闭（遣散 ' + cr3.staffOut + ' 人）'); }
+      else toast(cr3.msg);
+    }
+    return;
+  }
+  if (act === 'sfund' || act === 'sdraw' || act === 'srename') {
+    var st14 = storeByBranch(s, +id);
+    if (!st14) { toast('店铺不存在'); return; }
+    if (act === 'srename') {
+      /* 改名用候选循环：Canvas 没有中文输入法，
+         触屏上「轮候选」是唯一可行形态（与本项目既有的城市切换同款思路）。*/
+      var pool = [];
+      var city15 = cityById(st14.cityId);
+      var base15 = city15 ? city15.name.replace(/[市省]/g, '') : '新';
+      for (var si = 0; si < STORE_SUFFIX.length; si++) {
+        var nm2 = base15 + STORE_SUFFIX[si];
+        if (pool.indexOf(nm2) < 0) pool.push(nm2);
+      }
+      pool.push(st14.name);
+      openRenameModal({ title: '店铺名称', branch: st14.branch, pool: pool });
+      return;
+    }
+    if (act === 'sfund') {
+      openNumpad({
+        title: '向「' + st14.name + '」注资', branch: st14.branch, act: 'sfund',
+        hint: '总部现金 ' + money(s.cash), max: Math.floor(s.cash), min: 1,
+      });
+      return;
+    }
+    openNumpad({
+      title: '从「' + st14.name + '」提现', branch: st14.branch, act: 'sdraw',
+      hint: '店铺现金 ' + money(st14.cash), max: Math.floor(st14.cash), min: 1,
+    });
+    return;
+  }
+
   /* ---------- V12 店铺系统 ---------- */
   if (act === 'sopen') {
     var sc = shopCost(s);

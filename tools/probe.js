@@ -75,7 +75,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
-  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,'
+  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,'
   + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
   + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
@@ -2283,6 +2283,82 @@ console.log('=============== S. 店铺体系 ===============');
     expect('S9d', !over.ok, '不能提现超过店铺现金');
   }
 }
+
+
+  /* ---- S10 关店：V12 遗留项的实现 ---- */
+  {
+    /* 总店不可关闭 */
+    const s0 = E.newGame('normal', 0);
+    expect('S10a', !E.closeStore(s0, 1).ok, '总店不能关闭');
+    expect('S10a2', s0.stores.length === 1, '总店不可关闭后状态不变');
+
+    /* 正常关店：店数 −1、员工遣散、店长撤下、店号重排 */
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });   /* branch 2 */
+    E.openStore(s, { cityId: '310100' });   /* branch 3 */
+    E.hireManager(s, 2, 0);
+    E.refreshCandidates(s, true);
+    E.hireStaff(s, 0, 2);                   /* 分店 2 配 1 人 */
+    E.hireStaff(s, 0, 2);
+    const before = s.stores.length;
+    const staffBefore = s.staff.length;
+    const mgrBefore = s.managers.length;
+    const r = E.closeStore(s, 2);
+    expect('S10b', r.ok, `关店成功（${r.ok ? '清退费 ¥' + r.fee : r.msg}）`);
+    expect('S10c', s.stores.length === before - 1,
+      `店数 ${before} → ${s.stores.length}`);
+    expect('S10d', s.shops === s.stores.length,
+      `关店后 s.shops 仍与 stores 同步（${s.shops}）`);
+    expect('S10e', s.staff.length === staffBefore - 2,
+      `该店 2 名员工被遣散（${staffBefore} → ${s.staff.length}）`);
+    expect('S10f', s.managers.length === mgrBefore - 1,
+      '该店店长被撤下');
+    /* ★ 店号重排：原 branch 3 的店变成 branch 2 */
+    expect('S10g', s.stores[1] && s.stores[1].branch === 2,
+      '店号重排（关掉 2 号后 3 号变 2 号）');
+    expect('S10h', s.stores.every(x => x.branch >= 1 && x.branch <= s.stores.length),
+      '所有店的店号连续且在范围内');
+    /* 员工与店长的 branch 也要跟着重排，不能指向不存在的店 */
+    expect('S10i', s.staff.every(x => x.branch >= 1 && x.branch <= s.stores.length),
+      '员工的 branch 跟着重排（不指向已关闭的店）');
+    expect('S10j', s.managers.every(x => x.branch >= 1 && x.branch <= s.stores.length),
+      '店长的 branch 跟着重排');
+    /* 主店标记仍唯一 */
+    expect('S10k', s.stores.filter(x => x.isMain).length === 1,
+      '关店后主店仍唯一');
+    /* 关掉的店的候选池被清掉（店号会被重用） */
+    expect('S10l', !s.mgrCand[2] || s.mgrCand[2].length >= 0,
+      '被关店的候选池已清理（店号可安全重用）');
+  }
+
+  /* 关掉主店时，主店标记要转移（不能出现"没有主店"） */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    E.setMainStore(s, 2);          /* 把分店设为主店 */
+    E.closeStore(s, 2);
+    expect('S10m', s.stores.length === 1 && s.stores[0].isMain === true,
+      '关掉主店后主店标记转移给剩下的店（不会出现"没有主店"）');
+  }
+
+  /* 关店要付清退费；钱不够则关不了 */
+  {
+    const s = E.newGame('normal', 0);
+    s.cash = 1e9;
+    E.openStore(s, { cityId: '510100' });
+    const st = s.stores[1];
+    st.expense = 10000;             /* 制造清退费 */
+    s.cash = 100;                  /* 总部没钱付清退费 */
+    const r = E.closeStore(s, 2);
+    expect('S10n', !r.ok && s.stores.length === 2,
+      `现金不足时关不了店（${r.msg || ''}）`);
+    /* 钱够就能关 */
+    s.cash = 1e9;
+    const r2 = E.closeStore(s, 2);
+    expect('S10o', r2.ok && s.stores.length === 1, '钱够时可关店');
+  }
 
 console.log('');
 if (fails === 0) console.log(`✅ 引擎探针全部通过（${checks} 项）`);

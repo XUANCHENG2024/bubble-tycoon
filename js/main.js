@@ -552,6 +552,23 @@ function doAct(act, el) {
       else UI.toast(r.msg, 'err');
       break;
     }
+    case 'sclose': {
+      /* 关店：不可撤销，且要付清退费 —— 所以必须二次确认。
+         ★ 二次确认不是"怕玩家手滑"，而是这个操作**不可逆**：
+           店没了、员工遣散、店费沉没。误触一次就是真损失。*/
+      const st = storeByBranch(s, +br);
+      if (!st) { UI.toast('店铺不存在', 'err'); break; }
+      if (st.branch === 1) { UI.toast('总店不能关闭', 'err'); break; }
+      const fee = Math.round(st.expense * 0.35);
+      const staffN = staffOfBranch(s, st.branch).length;
+      if (!confirm(`确定关闭「${st.name}」？\n\n· 不退还开店费\n· 清退费 ${money(fee)}\n· ${staffN} 名员工将被遣散\n\n此操作不可撤销。`)) break;
+      const r = closeStore(s, +br);
+      if (r.ok) {
+        UI.toast(`🏚️「${st.name}」已关闭（遣散 ${r.staffOut} 人）`, 'gold');
+        SFX.click();
+      } else UI.toast(r.msg, 'err');
+      break;
+    }
     case 'sdraw': {
       const st = storeByBranch(s, +br);
       const amt = prompt(`从「${st ? st.name : ''}」提现多少？（店铺现金 ${money(st ? st.cash : 0)}）`, '1000');

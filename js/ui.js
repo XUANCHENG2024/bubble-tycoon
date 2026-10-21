@@ -448,6 +448,7 @@ function storesPanelHtml(s) {
         <button class="btn btn-xs" data-act="sfund" data-b="${st.branch}">💰 注资</button>
         <button class="btn btn-xs" data-act="sdraw" data-b="${st.branch}">💵 提现</button>
         <button class="btn btn-xs" data-act="srename" data-b="${st.branch}">✏️ 改名</button>
+        ${!isMain ? `<button class="btn btn-xs btn-danger" data-act="sclose" data-b="${st.branch}">🏚️ 关店</button>` : ''}
       </div>
     </div>`;
   }

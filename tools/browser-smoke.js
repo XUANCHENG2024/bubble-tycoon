@@ -231,6 +231,9 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     managedStoresDaily, activeBranchCount, branchStaffCap, staffOfBranch,
     managerSlotsLeft, managerCount, refreshCandidates, hireStaff,
     citiesOfProvince, PROVINCES, VENUE_TYPES, VENUE_DEFAULT, CITY_DEFAULT,
+    /* V12 遗留：关店 */
+    closeStore, syncShopCount, makeStore, defaultStoreName,
+    storeById, playerStores, syncStoreManagers, venueTrafficMul,
   };`);
   const T = window.__T;
 
@@ -930,6 +933,36 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     check(p[0] === String(window.S.stores.length) && p[1] === String(window.S.stores.length),
       `V12 存档往返：店数与派生量一致（${r}）`);
     check(p[3] === '总店' && p[4] === 'true', 'V12 存档保留店名与主店标记');
+  }
+
+  /* ---- V12 遗留：关店（两版对等）---- */
+  {
+    const s = window.S;
+    s.cash = 300000;
+    /* 先开一家分店（关店按钮只在非总店上出现） */
+    window.eval('window.__S12.openStore(window.S, { cityId: "510100" })');
+    window.UI.setTab('rival'); window.UI.renderAll();
+    const html = doc.getElementById('panel-rival').innerHTML;
+    check(/关店/.test(html), 'V12 店铺卡有关店按钮（非总店）');
+    /* 总店不该有关店按钮 */
+    const totalHtml = html.split('总店')[1] || '';
+    check(!/关店/.test(totalHtml.split('</div>')[0] || ''),
+      'V12 总店没有关店按钮（总店不可关闭）');
+    /* 关闭：店数 −1、员工遣散、店号重排 */
+    const r = window.eval(`(function(){
+      var s = window.S;
+      var b = s.stores[s.stores.length - 1].branch;
+      s.stores[s.stores.length - 1].expense = 1000;
+      var before = s.stores.length;
+      var r = window.__S12.closeStore(s, b);
+      return [r.ok ? 1 : 0, before, s.stores.length,
+              s.shops, s.stores.every(function(x){ return x.branch >= 1 && x.branch <= s.stores.length; })].join('/');
+    })()`);
+    const p = String(r).split('/');
+    check(p[0] === '1' && Number(p[2]) === Number(p[1]) - 1,
+      `V12 关店后店数 ${p[1]} → ${p[2]}`);
+    check(p[3] === p[2], `V12 关店后 s.shops 仍同步（${p[3]}）`);
+    check(p[4] === 'true', 'V12 关店后店号连续无洞');
   }
 
   /* ---- V11 店长与分店编制 ---- */

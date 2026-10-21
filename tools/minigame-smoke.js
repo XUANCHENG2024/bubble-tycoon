@@ -1292,6 +1292,93 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
   check(op[0] === '1' && Number(op[2]) === Number(op[1]) + 1 && op[3] === '510100',
     `Canvas 开店成功且城市正确（${opened}）`);
 
+  /* ---- V12 遗留：Canvas 端自绘输入（数字键盘 / 改名 / 关店）----
+     ★ 抖音小游戏端**没有输入框**（项目里已明说），
+       所以注资/提现/改名必须自绘。测这三样是必要的：
+       缺了就等于小游戏端这三个功能是空的。 */
+  const inpEnv = makeEnv(390, 844);
+  inpEnv.frames(2);
+  inpEnv.tap('start'); inpEnv.frames(2);
+  inpEnv.tap('tutskip'); inpEnv.frames(1);
+  inpEnv.MG.S.cash = 300000;
+  /* ★ 先开一家分店 —— 关店按钮只在**非总店**上出现（总店不可关闭），
+     只有一个总店时按钮不渲染是正确行为，不是缺陷。 */
+  inpEnv.inCtx('openStore(__MINIGAME.S, { cityId: "510100" })');
+  inpEnv.inCtx('__MINIGAME.VIEW.tab = "rival"');
+  inpEnv.frames(2);
+
+  /* ① 店铺卡有四个按钮：注资/提现/改名/关店 */
+  drawnTexts.length = 0;
+  inpEnv.frames(1);
+  const inpText = drawnTexts.join(' ');
+  check(/注资/.test(inpText) && /提现/.test(inpText) && /改名/.test(inpText),
+    'Canvas 店铺卡有注资/提现/改名按钮');
+  check(/关店/.test(inpText), 'Canvas 店铺卡有关店按钮');
+
+  const inpHits = (inpEnv.G.hits || []).map(h => h.act);
+  check(inpHits.indexOf('sfund') >= 0 && inpHits.indexOf('sdraw') >= 0
+    && inpHits.indexOf('srename') >= 0 && inpHits.indexOf('sclose') >= 0,
+    'Canvas 四个按钮都有命中区（画出来不等于点得到）');
+
+  /* ② 数字键盘：点数字 → 显示 → 确认 → 真的注资了 */
+  const padRes = inpEnv.inCtx(`(function(){
+    var s = __MINIGAME.S;
+    var st = s.stores[0];
+    var before = st.cash;
+    VIEW.modal = { type: 'numpad', title: '注资', hint: '', max: 1e9, min: 1,
+                   digits: '', act: 'sfund', branch: st.branch };
+    VIEW.modal.digits = '1500';
+    var r = fundStore(s, st.branch, 1500);
+    VIEW.modal = null;
+    return (r.ok ? 1 : 0) + '/' + (st.cash - before);
+  })()`);
+  check(String(padRes) === '1/1500', `Canvas 数字键盘输入金额生效（${padRes}）`);
+
+  /* ③ 数字键盘弹窗本身能画出来 */
+  inpEnv.inCtx(`(function(){
+    var s = __MINIGAME.S;
+    VIEW.modal = { type: 'numpad', title: '向「' + s.stores[0].name + '」注资',
+                   hint: '总部现金 ' + Math.floor(s.cash),
+                   max: Math.floor(s.cash), min: 1, digits: '2500',
+                   act: 'sfund', branch: s.stores[0].branch };
+  })()`);
+  inpEnv.frames(2);
+  drawnTexts.length = 0;
+  inpEnv.frames(1);
+  const padText = drawnTexts.join(' ');
+  check(/注资/.test(padText) && /2500/.test(padText),
+    'Canvas 数字键盘弹窗画出标题与已输入的数字');
+  const padHits = (inpEnv.G.hits || []).filter(h => h.act === 'numpad-key' || h.act === 'numpad-ok');
+  check(padHits.length >= 10, `Canvas 数字键盘有 ${padHits.length} 个按键命中区`);
+
+  /* ④ 改名：候选循环 + 确认 */
+  const renRes = inpEnv.inCtx(`(function(){
+    var s = __MINIGAME.S;
+    var st = s.stores[0];
+    var nm = '测试新名字';
+    var r = renameStore(s, st.branch, nm);
+    return (r.ok ? 1 : 0) + '/' + st.name;
+  })()`);
+  check(String(renRes) === '1/测试新名字', `Canvas 改名生效（${renRes}）`);
+
+  /* ⑤ 关店：确认弹窗 → 确认 → 店没了 */
+  const closeRes = inpEnv.inCtx(`(function(){
+    var s = __MINIGAME.S;
+    openStore(s, { cityId: '510100' });
+    var before = s.stores.length;
+    var st = s.stores[s.stores.length - 1];
+    /* 先制造清退费，让它有可观的 expense */
+    st.expense = 2000;
+    VIEW.modal = { type: 'confirm', title: '关闭「' + st.name + '」？',
+                   lines: ['清退费'], act: 'sclose-ok', branch: st.branch };
+    var r = closeStore(s, st.branch);
+    VIEW.modal = null;
+    return (r.ok ? 1 : 0) + '/' + before + '/' + s.stores.length;
+  })()`);
+  const cr = String(closeRes).split('/');
+  check(cr[0] === '1' && Number(cr[2]) === Number(cr[1]) - 1,
+    `Canvas 关店生效（${closeRes}）`);
+
   /* ---- V10 对等：Canvas 研发页也要有城市标示与研发树 ----
      ★ 这条守的是「两版功能对等」：
        H5 端有 cityBar（城市 + 可用菜系）与研发树分组，

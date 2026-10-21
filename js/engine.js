@@ -1389,7 +1389,100 @@ function fireManager(s, id) {
   return { ok: true, sev };
 }
 
-/** 跨分店调动：店长换一家店管（员工随他一起搬） */
+/**
+ * 关闭一家分店（V12 遗留项的实现）。
+ *
+ * ★ 关店与「卸任店长」是**不同的两件事**，规则不能混：
+ *   卸任 = 店长离开但店还在 → 员工留下（他们是总公司的，不是店长的）
+ *   关店 = 店没了         → 员工必须遣散（没有店就没有工位）
+ *   混为一谈会造成「关店后员工凭空消失」或「关店后员工还在无主的店里」。
+ *
+ * ★ 费用设计：**不退店费，还要付清退费**。
+ *   已经投进去的装修、库存、招人成本是沉没成本 ——
+ *   若关店能全额退款，玩家就会「开了又关」来试城市，
+ *   那不是经营决策，是无成本试错。
+ *   退费按「该店累计支出」的一部分收取，让玩家觉得"关店很疼"，
+ *   但不至于血本无归到不敢关。
+ *
+ * ★ 店长：撤下且**不给补偿** —— 店是玩家的，
+ *   店长领的是"有店可管"的薪酬，店没了这份工作就没了。
+ *
+ * ★ 店号重排：关掉 3 号店后 4 号变 3 号（玩家预期如此）。
+ *   重排后必须同步 staff.branch / manager.branch / mgrCand 的键，
+ *   否则员工会"归属一家不存在的店"。
+ *
+ * @param {number} branch 要关的店号（1 = 总店，不允许关闭）
+ */
+function closeStore(s, branch) {
+  const st = storeByBranch(s, branch);
+  if (!st) return { ok: false, msg: '店铺不存在' };
+  /* ★ 总店不可关闭 —— 它是经营的根。 */
+  if (st.branch === 1) return { ok: false, msg: '总店不能关闭' };
+  if (s.stores.length <= 1) return { ok: false, msg: '至少要保留总店' };
+
+  /* --- 费用：清退费按该店累计支出的一定比例 --- */
+  const fee = Math.round(st.expense * 0.35);
+  if (s.cash < fee) {
+    return { ok: false, msg: `现金不足以支付清退费 ${money(fee)}` };
+  }
+  s.cash -= fee;
+
+  /* --- 遣散该店员工（他们没有别的地方可去）--- */
+  const staff = staffOfBranch(s, branch);
+  let sevTotal = 0;
+  for (const stf of staff) {
+    sevTotal += Math.round(num(stf.wage, 0) * 2);
+  }
+  /* 遣散费从该店自己的现金里出（不够的部分由总部兜底） */
+  const fromStore = Math.min(st.cash, sevTotal);
+  st.cash -= fromStore;
+  s.cash -= (sevTotal - fromStore);
+  s.staff = s.staff.filter(stf => stf.branch !== branch);
+
+  /* --- 撤下该店店长（不给补偿）--- */
+  const mgr = managerOfBranch(s, branch);
+  if (mgr) {
+    s.managers.splice(s.managers.indexOf(mgr), 1);
+  }
+
+  /* --- 移除该店 --- */
+  s.stores.splice(s.stores.indexOf(st), 1);
+  /* 该店的候选池一并清掉（店号会被重用） */
+  delete s.mgrCand[branch];
+
+  /* --- 店号重排：后面的店往前移 --- */
+  for (const st2 of s.stores) {
+    if (st2.branch > branch) st2.branch -= 1;
+  }
+  for (const stf of s.staff) {
+    if (stf.branch > branch) stf.branch -= 1;
+  }
+  for (const m of s.managers) {
+    if (m.branch > branch) m.branch -= 1;
+  }
+  /* 候选池的键也要跟着挪（它是按店号存的） */
+  const candOld = s.mgrCand;
+  s.mgrCand = {};
+  for (const k in candOld) {
+    const bk = int(k, 0);
+    if (bk === branch) continue;               /* 被关掉的店：丢弃 */
+    s.mgrCand[bk > branch ? bk - 1 : bk] = candOld[k];
+  }
+  /* ★ 主店被关时：主店标记必须转给剩下的某一家（总店优先）——
+     否则会出现「没有主店」的状态。 */
+  if (st.isMain) {
+    const newMain = s.stores.find(x => x.branch === 1) || s.stores[0];
+    if (newMain) newMain.isMain = true;
+  }
+  syncShopCount(s);
+  syncStoreManagers(s);
+
+  pushLog(s, `🏚️ 关闭了「${st.name}」（清退费 ${money(fee)}，遣散 ${staff.length} 人）`);
+  return { ok: true, fee, staffOut: staff.length, managerOut: !!mgr };
+}
+
+/**
+ * 跨分店调动：店长换一家店管（员工随他一起搬） */
 function moveManager(s, id, toBranch) {
   const m = managerById(s, id);
   if (!m) return { ok: false, msg: '店长不存在' };

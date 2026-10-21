@@ -1238,7 +1238,7 @@ function panelStores(ctx, x, y, w, s) {
     var mg = storeManager(s, st);
     var staffN = staffOfBranch(s, st.branch).length;
     var rpt = st.lastReport;
-    var h = 92;
+    var h = 118;
     GFX.card(ctx, x, y, w, h);
     /* 店名 + 主店/托管标记 */
     text(ctx, st.emoji + ' ' + st.name, x + 10, y + 8,
@@ -1271,8 +1271,12 @@ function panelStores(ctx, x, y, w, s) {
     if (rptTxt) {
       text(ctx, rptTxt, x + 10, y + 72, { size: 9, color: T.txt3, maxW: w - 20 });
     }
-    /* 操作按钮：接管/托管、任命、注资/提现 */
-    var by = y + h - 22;
+    /* 操作按钮：两行
+       第一行：经营控制（接管/托管、任命/撤下店长、设为主店）
+       第二行：资金与设置（注资、提现、改名、关店）
+       ★ Canvas 上按钮一多就挤 —— 分两行，每行 3~4 个，
+         高度从 92 涨到 118。 */
+    var by = y + h - 48;
     var bw = (w - 26) / 3;
     if (mg) {
       GFX.button(ctx, x + 8, by, bw, 20, st.auto ? '我来接管' : '交给店长', {
@@ -1289,6 +1293,23 @@ function panelStores(ctx, x, y, w, s) {
     GFX.button(ctx, x + 8 + (bw + 5) * 2, by, bw, 20, st.isMain ? '主店' : '设为主店', {
       kind: 'ghost', act: 'smain', id: st.branch, disabled: st.isMain, size: 9, r: 7,
     });
+    var by2 = by + 26;
+    var bw2 = (w - 26) / 4;
+    GFX.button(ctx, x + 8, by2, bw2, 20, '💰注资', {
+      kind: 'ghost', act: 'sfund', id: st.branch, size: 9, r: 7,
+    });
+    GFX.button(ctx, x + 8 + bw2 + 4, by2, bw2, 20, '💵提现', {
+      kind: 'ghost', act: 'sdraw', id: st.branch, size: 9, r: 7,
+    });
+    GFX.button(ctx, x + 8 + (bw2 + 4) * 2, by2, bw2, 20, '改名', {
+      kind: 'ghost', act: 'srename', id: st.branch, size: 9, r: 7,
+    });
+    /* 关店只在非总店时出现（总店不可关闭） */
+    if (!st.isMain) {
+      GFX.button(ctx, x + 8 + (bw2 + 4) * 3, by2, bw2, 20, '关店', {
+        kind: 'ghost', act: 'sclose', id: st.branch, size: 9, r: 7,
+      });
+    }
     y += h + 8;
   }
 
@@ -1616,6 +1637,126 @@ function drawDeltas(ctx, x, y, label, items) {
 }
 
 /* 经营报表 */
+/* ============================================================
+ *  Canvas 端输入（V12）
+ *
+ *  抖音小游戏端没有输入框，所以：
+ *  · 金额 → 自绘数字键盘（0-9 / 退格 / 确认 / 取消）
+ *  · 文本 → 候选循环（店名从池子里轮）
+ * ============================================================ */
+
+/** 打开数字键盘弹窗。返回 {type:'numpad', ...} */
+function openNumpad(opts) {
+  VIEW.modal = {
+    type: 'numpad',
+    title: opts.title || '输入金额',
+    hint: opts.hint || '',
+    max: opts.max == null ? Infinity : opts.max,
+    min: opts.min == null ? 1 : opts.min,
+    digits: '',
+    act: opts.act,          /* 确认时回调：amount */
+    branch: opts.branch,
+  };
+}
+
+/** 数字键盘弹窗绘制 */
+MODALS.numpad = function (ctx, b, m) {
+  var y = b.y + 26;
+  text(ctx, m.title, b.x + 16, y, { size: FS.lg, weight: 800, color: T.txt });
+  y += 24;
+  if (m.hint) {
+    text(ctx, m.hint, b.x + 16, y, { size: FS.xs, color: T.txt3, maxW: b.w - 32 });
+    y += 16;
+  }
+  /* 输入框 */
+  GFX.card(ctx, b.x + 16, y, b.w - 32, 40);
+  var shown = m.digits === '' ? '0' : m.digits;
+  text(ctx, '¥' + shown, b.x + 28, y + 10, { size: FS.xl, weight: 800, color: T.amber });
+  if (m.digits === '') {
+    text(ctx, '请输入', b.x + b.w - 28, y + 14, { size: FS.xs, align: 'right', color: T.txt3 });
+  }
+  y += 52;
+
+  /* 键盘：3 列 × 4 行（1-9 / 退格 0 确认） */
+  var keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'del', '0', 'ok'];
+  var kw = (b.w - 32 - 16) / 3, kh = 40;
+  for (var i = 0; i < keys.length; i++) {
+    var col = i % 3, row = (i / 3) | 0;
+    var kx = b.x + 16 + col * (kw + 8), ky = y + row * (kh + 8);
+    var k = keys[i];
+    var label = k === 'del' ? '⌫' : (k === 'ok' ? '确定' : k);
+    GFX.cardBtn(ctx, kx, ky, kw, kh, [{ t: label, size: k === 'ok' ? FS.md : FS.lg }],
+      { act: k === 'ok' ? 'numpad-ok' : (k === 'del' ? 'numpad-del' : 'numpad-key'),
+        id: k, r: 10, hitPad: 3 });
+  }
+  y += 4 * (kh + 8) + 4;
+  /* 快捷金额 */
+  var qw = (b.w - 32 - 16) / 4;
+  var quick = [500, 1000, 2000, 5000];
+  for (var q = 0; q < quick.length; q++) {
+    GFX.cardBtn(ctx, b.x + 16 + q * (qw + 8), y, qw, 28, [{ t: '' + quick[q], size: FS.sm }],
+      { act: 'numpad-quick', id: String(quick[q]), r: 9 });
+  }
+  y += 36;
+  GFX.cardBtn(ctx, b.x + 16, y, b.w - 32, 30, [{ t: '取消', size: FS.md }],
+    { act: 'close', r: 10 });
+  return y + 40;
+};
+
+/** 打开改名弹窗（候选循环） */
+function openRenameModal(opts) {
+  VIEW.modal = {
+    type: 'rename',
+    title: opts.title || '修改名称',
+    branch: opts.branch,
+    pool: opts.pool || [],
+    idx: 0,
+  };
+}
+
+MODALS.rename = function (ctx, b, m) {
+  var y = b.y + 26;
+  text(ctx, m.title, b.x + 16, y, { size: FS.lg, weight: 800, color: T.txt });
+  y += 30;
+  var cur = m.pool[m.idx] || '';
+  GFX.card(ctx, b.x + 16, y, b.w - 32, 44);
+  text(ctx, cur, b.x + b.w / 2, y + 12, { size: FS.xl, weight: 800, align: 'center', color: T.txt });
+  y += 54;
+  text(ctx, '◀ 点下方按钮切换候选 ▶', b.x + b.w / 2, y,
+    { size: FS.xs, align: 'center', color: T.txt3 });
+  y += 24;
+  var bw = (b.w - 32 - 8) / 2;
+  GFX.cardBtn(ctx, b.x + 16, y, bw, 34, [{ t: '◀ 上一个', size: FS.md }],
+    { act: 'rename-prev', r: 10 });
+  GFX.cardBtn(ctx, b.x + 16 + bw + 8, y, bw, 34, [{ t: '下一个 ▶', size: FS.md }],
+    { act: 'rename-next', r: 10 });
+  y += 44;
+  GFX.cardBtn(ctx, b.x + 16, y, b.w - 32, 34, [{ t: '确定', size: FS.md }],
+    { act: 'rename-ok', r: 10 });
+  y += 40;
+  GFX.cardBtn(ctx, b.x + 16, y, b.w - 32, 28, [{ t: '取消', size: FS.sm }],
+    { act: 'close', r: 9 });
+  return y + 38;
+};
+
+/** 通用确认弹窗（Canvas 没有 confirm()） */
+MODALS.confirm = function (ctx, b, m) {
+  var y = b.y + 30;
+  text(ctx, m.title, b.x + 16, y, { size: FS.lg, weight: 800, color: T.txt, maxW: b.w - 32 });
+  y += 26;
+  for (var i = 0; i < (m.lines || []).length; i++) {
+    text(ctx, '· ' + m.lines[i], b.x + 16, y, { size: FS.sm, color: T.txt2, maxW: b.w - 32 });
+    y += 18;
+  }
+  y += 10;
+  var bw = (b.w - 32 - 8) / 2;
+  GFX.cardBtn(ctx, b.x + 16, y, bw, 32, [{ t: '取消', size: FS.md }],
+    { act: 'close', r: 10 });
+  GFX.cardBtn(ctx, b.x + 16 + bw + 8, y, bw, 32, [{ t: '确定', size: FS.md }],
+    { act: m.act || 'confirm-ok', r: 10 });
+  return y + 42;
+};
+
 MODALS.report = function (ctx, b, m) {
   var s = S();
   var x = b.x + 14, w = b.w - 28;
