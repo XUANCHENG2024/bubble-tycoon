@@ -8,6 +8,8 @@
  *
  * 用法：node tools/diag-ui.js [宽度]
  */
+const fs = require('fs'), path = require('path');
+const root = path.join(__dirname, '..');
 const { buildH5Env, visibleText } = require('./h5-env');
 
 const WIDTHS = (process.argv[2] || '320,360,390,430').split(',').map(Number);
@@ -95,6 +97,53 @@ function fs_read() {
   return require('fs').readFileSync(require('path').join(__dirname, '..', 'styles.css'), 'utf8');
 }
 
+console.log('\n=============== 字号令牌两版一致性 ===============');
+{
+  /* ★ 守住「两版字号对齐」这条不变量。
+     之前 H5 最小 10px、Canvas 最小 8.5px，跨版本切换字号会跳变。
+     令牌化之后两版共用同一套分档，但**约定靠注释维持不住** ——
+     有人只改一版、或把某个档位调到 11.5，就悄悄漂了。
+     所以这条断言直接比两边的数值。*/
+  const css = fs_read();
+  const cssTok = {};
+  for (const m of css.matchAll(/--fs-(\w+):\s*([0-9.]+)px/g)) cssTok[m[1]] = parseFloat(m[2]);
+  const mgSrc = require('fs').readFileSync(path.join(root, 'minigame', 'src', 'gfx.js'), 'utf8');
+  const mgBlock = mgSrc.match(/var FS = \{([^}]*)\}/);
+  const mgTok = {};
+  if (mgBlock) {
+    for (const m of mgBlock[1].matchAll(/(\w+):\s*([0-9.]+)/g)) mgTok[m[1]] = parseFloat(m[2]);
+  }
+  const keys = Object.keys(cssTok);
+  const mismatch = keys.filter(k => mgTok[k] !== cssTok[k]);
+  if (!mgBlock) console.log('  ✘ Canvas 端找不到 FS 常量');
+  else if (mismatch.length) {
+    console.log(`  ✘ 两版字号令牌不一致：${mismatch.map(k => `${k} H5=${cssTok[k]} Canvas=${mgTok[k]}`).join('；')}`);
+  } else {
+    console.log(`  ✔ 两版字号令牌完全一致：${keys.map(k => `${k}=${cssTok[k]}`).join(' · ')}`);
+  }
+  /* ★ 抓「var(--fs-xs)px」这类非法值。
+     CSS 里 var() 后面接 px 是**非法声明**，浏览器不报错、直接忽略它 ——
+     于是字号静默回落成继承值，页面照常渲染，只是那一处字号不对。
+     批量替换字面量时最容易产生（把 '10px' 换成 'var(--fs-xs)' 漏掉 px 后缀），
+     实测踩过：42 处。 */
+  const badVar = [];
+  for (const f of ['js/ui.js', 'styles.css']) {
+    const src = fs.readFileSync(path.join(root, f), 'utf8');
+    const m = src.match(/var\(--[a-z0-9-]+\)\s*px/g);
+    if (m) badVar.push(`${f}: ${m.length} 处 ${m[0]}`);
+  }
+  console.log(badVar.length === 0
+    ? '  ✔ 无「var(--x)px」这类非法声明（CSS 会静默忽略，不报错）'
+    : `  ✘ 存在非法声明：${badVar.join('；')}`);
+
+  /* H5 端不该再有 <10px 的正文（展示级 Logo 特例除外） */
+  const tiny = Array.from(css.matchAll(/font-size:\s*([0-9.]+)px/g))
+    .map(m => parseFloat(m[1])).filter(v => v < 10);
+  console.log(tiny.length === 0
+    ? '  ✔ H5 端无小于 10px 的字号'
+    : `  ✘ H5 端仍有 ${tiny.length} 处小于 10px：${[...new Set(tiny)].join(', ')}`);
+}
+
 console.log('\n=============== 响应式断点 ===============');
 {
   const css = fs_read();
@@ -121,3 +170,8 @@ console.log('\n=============== 触控目标尺寸 ===============');
   console.log('  参考：Apple HIG 建议最小 44×44pt，微信小程序建议 44px；');
   console.log('        低于 32px 在中低端机上误触率明显上升。');
 }
+
+/* ★ 必须显式退出：jsdom 的 window 会保持事件循环，
+   Node 不会自然结束（表现为跑完了却卡住不退，exit code 变成 SIGTERM）。
+   其他测试工具都有这一行。 */
+process.exit(0);

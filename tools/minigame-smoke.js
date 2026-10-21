@@ -1229,6 +1229,34 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
   check(/成本/.test(wsText) && /加成/.test(wsText),
     'Canvas 工坊副标题说明了「成本下降」是主力收益');
 
+  /* ---- V11 对等：Canvas Tab 栏要有文字标签 ----
+     ★ H5 端 Tab 是「🧋 经营」，Canvas 端原来只有纯 emoji ——
+       同一功能在两版可发现性不同，新玩家在 Canvas 端
+       不知道 🧪 是"研发"、🏙️ 是"商圈"。 */
+  const tabEnv = makeEnv(390, 844);
+  tabEnv.frames(2);
+  tabEnv.tap('start'); tabEnv.frames(2);
+  tabEnv.tap('tutskip'); tabEnv.frames(1);
+  drawnTexts.length = 0;
+  tabEnv.frames(1);
+  const tabText = drawnTexts.join(' ');
+  const tabNames = ['经营', '研发', '升级', '员工', '商圈', '成就'];
+  const missingTabs = tabNames.filter(n => tabText.indexOf(n) < 0);
+  check(missingTabs.length === 0,
+    `Canvas Tab 栏显示文字标签（缺：${missingTabs.join('、') || '无'}）`);
+
+  /* Tab 命中区不能因为加文字而错位 */
+  const tabHits = (tabEnv.G.hits || []).filter(h => h.act === 'tab');
+  check(tabHits.length === 6, `Canvas Tab 有 ${tabHits.length} 个命中区（应为 6）`);
+  /* ★ 命中区必须落在可视区内 —— 加了第二行文字后，
+     若 Tab 栏高度不够，文字会被画到裁剪区外（看得见但点不到，
+     或者反过来：命中区在、字被裁掉）。
+     这里比对命中区底部与 Tab 栏高度 L.tabH。*/
+  const tabBottom = Math.max.apply(null, tabHits.map(h => h.y + h.h));
+  const expectBottom = tabEnv.inCtx('layoutOf(390, 844).bodyY');
+  check(tabBottom <= expectBottom + 1,
+    `Tab 命中区在 Tab 栏内（底部 ${Math.round(tabBottom)} ≤ bodyY ${expectBottom}）`);
+
   /* ---- V10 对等：Canvas 研发页也要有城市标示与研发树 ----
      ★ 这条守的是「两版功能对等」：
        H5 端有 cityBar（城市 + 可用菜系）与研发树分组，

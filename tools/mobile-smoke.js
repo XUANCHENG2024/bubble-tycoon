@@ -202,7 +202,26 @@ function fakeShareCanvas(doc) {
     ['定义 safe-area 变量（避让灵动岛 / Home 键）', /--sat:\s*env\(safe-area-inset-top/.test(css)],
     ['.stage 底部留安全区（暂停按钮不被压）', /\.stage\s*\{[^}]*var\(--sab\)/s.test(css)],
     ['.hud 顶部留安全区（HUD 不被灵动岛压）', /\.hud\s*\{[^}]*var\(--sat\)/s.test(css)],
-    ['.code-box 字号 16px（防 iOS 聚焦缩放）', /\.code-box\s*\{[^}]*font-size:\s*16px/s.test(css)],
+    /* ★ 断言要锁「**最终计算值**」而不是「写法」——
+         这条以前是正则匹配 `font-size:\s*16px`，
+         字号令牌化后写法变成 `var(--fs-xl)`，正则就匹配不上了。
+         但**需求没变**：iOS Safari 对 font-size < 16px 的输入框
+         会强制放大整个页面且失焦不缩回，所以实际值必须 ≥16px。
+         现在把 var() 解析成数值再比 —— 写法可换，约束不变。 */
+    ['.code-box 字号 ≥16px（防 iOS 聚焦缩放）', (() => {
+      const block = css.match(/\.code-box\s*\{([^}]*)\}/s);
+      if (!block) return false;
+      const m = block[1].match(/font-size:\s*([^;]+)/);
+      if (!m) return false;
+      let v = m[1].trim();
+      const vm = v.match(/var\(--fs-(\w+)\)/);
+      if (vm) {
+        const tok = css.match(new RegExp('--fs-' + vm[1] + ':\\s*([0-9.]+)px'));
+        if (!tok) return false;
+        v = tok[1] + 'px';
+      }
+      return parseFloat(v) >= 16;
+    })()],
     ['移动端关闭 backdrop-filter（降 GPU 开销）', /\.modal-mask\s*\{\s*-webkit-backdrop-filter:\s*none/s.test(css)],
     ['触摸目标 ≥44px', /min-height:\s*44px/.test(css)],
     ['-webkit-overflow-scrolling 惯性滚动', /-webkit-overflow-scrolling:\s*touch/.test(css)],

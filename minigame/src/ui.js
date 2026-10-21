@@ -81,20 +81,20 @@ function drawTitle(ctx, L) {
   text(ctx, '奶茶星球', W / 2, y, { size: 26, weight: 900, align: 'center', color: T.txt });
   y += 30;
   text(ctx, 'BUBBLE TYCOON · 30 天街头奶茶帝国', W / 2, y,
-    { size: 11, align: 'center', color: T.txt3 });
+    { size: FS.sm, align: 'center', color: T.txt3 });
   y += 26;
 
   /* 难度三选一 */
-  text(ctx, '选择难度', W / 2, y, { size: 11, align: 'center', color: T.txt3 });
+  text(ctx, '选择难度', W / 2, y, { size: FS.sm, align: 'center', color: T.txt3 });
   y += 18;
   var cw = (w - 16) / 3, ch = 72;
   var ds = Object.keys(DIFFICULTY).map(function (k) { return DIFFICULTY[k]; });
   for (var i = 0; i < ds.length; i++) {
     var d = ds[i];
     GFX.cardBtn(ctx, x + i * (cw + 8), y, cw, ch, [
-      { t: d.emoji, size: 20 },
-      { t: d.name, size: 12, weight: 800 },
-      { t: money(d.goal), size: 10, color: T.amber },
+      { t: d.emoji, size: FS.display },
+      { t: d.name, size: FS.md, weight: 800 },
+      { t: money(d.goal), size: FS.xs, color: T.amber },
     ], { act: 'diff', id: d.key, on: VIEW.diff === d.key, pressed: isPressed('diff', d.key), center: true });
   }
   y += ch + 14;
@@ -102,7 +102,7 @@ function drawTitle(ctx, L) {
   /* 主按钮 */
   var bw = (w - 10) / 2;
   GFX.button(ctx, x, y, w, 46, '🚀 开始营业',
-    { kind: 'primary', act: 'start', size: 15, pressed: isPressed('start') });
+    { kind: 'primary', act: 'start', size: FS.lg, pressed: isPressed('start') });
   y += 54;
   /* 原来读 VIEW.dailyPlayed，但这个字段全项目从未被赋值，永远 falsy，
      昨天打过的成绩也就永远显示不出来。直接按 META 判断。 */
@@ -112,17 +112,17 @@ function drawTitle(ctx, L) {
        标题页在小屏上没有第 5 个按钮的位置（下面那行已经是四等分了）。 */
     var bwT = (w - 16) / 3;
     GFX.button(ctx, x, y, bwT, 40, '💾 继续存档',
-      { kind: 'ghost', act: 'continue', size: 10.5, pressed: isPressed('continue') });
+      { kind: 'ghost', act: 'continue', size: FS.sm, pressed: isPressed('continue') });
     GFX.button(ctx, x + bwT + 8, y, bwT, 40, '📅 每日挑战',
-      { kind: 'amber', act: 'daily', size: 10.5, pressed: isPressed('daily') });
+      { kind: 'amber', act: 'daily', size: FS.sm, pressed: isPressed('daily') });
     /* 打过就把今天的成绩顶到按钮上，不用点进去也知道自己今天多少分 */
     GFX.button(ctx, x + (bwT + 8) * 2, y, bwT, 40, played ? '🏆 ' + money(m.dailyBest) : '🏆 日榜',
-      { kind: 'ghost', act: 'dailyrank', size: 10.5, pressed: isPressed('dailyrank') });
+      { kind: 'ghost', act: 'dailyrank', size: FS.sm, pressed: isPressed('dailyrank') });
   } else {
     GFX.button(ctx, x, y, bw, 40, played ? '📅 今日 · 最佳 ' + money(m.dailyBest) : '📅 每日挑战',
-      { kind: 'amber', act: 'daily', size: 11, pressed: isPressed('daily') });
+      { kind: 'amber', act: 'daily', size: FS.sm, pressed: isPressed('daily') });
     GFX.button(ctx, x + bw + 10, y, bw, 40, '🏆 日榜',
-      { kind: 'ghost', act: 'dailyrank', size: 11, pressed: isPressed('dailyrank') });
+      { kind: 'ghost', act: 'dailyrank', size: FS.sm, pressed: isPressed('dailyrank') });
   }
   y += 48;
 
@@ -134,25 +134,25 @@ function drawTitle(ctx, L) {
   var bw3 = (w - 24) / 4;
   GFX.button(ctx, x, y, bw3, 38,
     !lg.claimed ? '🔥 签到 ' + money(lg.next) : '🎁 已签',
-    { kind: lg.claimed ? 'ghost' : 'amber', act: 'login', size: 10, disabled: !!lg.claimed, pressed: isPressed('login') });
-  GFX.button(ctx, x + bw3 + 8, y, bw3, 38, '📖 玩法说明', { kind: 'ghost', act: 'help', size: 10, pressed: isPressed('help') });
-  GFX.button(ctx, x + (bw3 + 8) * 2, y, bw3, 38, '📥 导入', { kind: 'ghost', act: 'import', size: 10, pressed: isPressed('import') });
-  GFX.button(ctx, x + (bw3 + 8) * 3, y, bw3, 38, '📤 导出', { kind: 'ghost', act: 'export', size: 10, pressed: isPressed('export') });
+    { kind: lg.claimed ? 'ghost' : 'amber', act: 'login', size: FS.xs, disabled: !!lg.claimed, pressed: isPressed('login') });
+  GFX.button(ctx, x + bw3 + 8, y, bw3, 38, '📖 玩法说明', { kind: 'ghost', act: 'help', size: FS.xs, pressed: isPressed('help') });
+  GFX.button(ctx, x + (bw3 + 8) * 2, y, bw3, 38, '📥 导入', { kind: 'ghost', act: 'import', size: FS.xs, pressed: isPressed('import') });
+  GFX.button(ctx, x + (bw3 + 8) * 3, y, bw3, 38, '📤 导出', { kind: 'ghost', act: 'export', size: FS.xs, pressed: isPressed('export') });
   y += 46;
 
   /* 存档槽 */
-  text(ctx, '💾 存档槽', x, y, { size: 11, color: T.txt3 });
+  text(ctx, '💾 存档槽', x, y, { size: FS.sm, color: T.txt3 });
   y += 16;
   var sw = (w - 16) / 3;
   for (var k = 0; k < CFG.SAVE_SLOTS; k++) {
     var info = slotInfo(k);
     var lines = info
       ? [
-        { t: '槽 ' + (k + 1) + (getSlot() === k ? ' ✓' : ''), size: 11, weight: 800 },
-        { t: 'Day ' + info.day + (info.endless ? ' ♾' : ''), size: 10, color: T.txt2 },
-        { t: money(info.worth), size: 10, color: T.amber },
+        { t: '槽 ' + (k + 1) + (getSlot() === k ? ' ✓' : ''), size: FS.sm, weight: 800 },
+        { t: 'Day ' + info.day + (info.endless ? ' ♾' : ''), size: FS.xs, color: T.txt2 },
+        { t: money(info.worth), size: FS.xs, color: T.amber },
       ]
-      : [{ t: '槽 ' + (k + 1), size: 11, weight: 800 }, { t: '空', size: 10, color: T.txt3 }];
+      : [{ t: '槽 ' + (k + 1), size: FS.sm, weight: 800 }, { t: '空', size: FS.xs, color: T.txt3 }];
     GFX.cardBtn(ctx, x + k * (sw + 8), y, sw, 54, lines,
       { act: 'slot', id: String(k), on: getSlot() === k, pressed: isPressed('slot', String(k)) });
   }
@@ -161,16 +161,16 @@ function drawTitle(ctx, L) {
   /* 元信息 */
   text(ctx, '🌟 声望 ' + m.bp + ' ★（开局基金 ' + money(prestigeStartCash(m.bp)) + '）   🏆 最高 '
     + money(m.best.normal || 0) + '   🎮 已玩 ' + m.runs + ' 局',
-    W / 2, y, { size: 10.5, align: 'center', color: T.txt2 });
+    W / 2, y, { size: FS.sm, align: 'center', color: T.txt2 });
   y += 17;
   text(ctx, lg.claimed
     ? '🔥 连登 ' + lg.streak + ' 天 · 明日 ' + money(lg.next) + (lg.pending > 0 ? '（' + money(lg.pending) + ' 开局到账）' : '')
     : '🔥 连登 ' + lg.streak + ' 天 · 今天还没签到',
-    W / 2, y, { size: 10.5, align: 'center', color: lg.claimed ? T.amber : T.txt3 });
+    W / 2, y, { size: FS.sm, align: 'center', color: lg.claimed ? T.amber : T.txt3 });
   y += 18;
   if (!STORAGE_OK) {
     text(ctx, '⚠️ 存储不可用，本局进度无法保存', W / 2, y,
-      { size: 10.5, align: 'center', color: T.red });
+      { size: FS.sm, align: 'center', color: T.red });
     y += 16;
   }
   /* 本机战绩榜：平台级排行榜要开放数据域 + 云存储（有服务端），
@@ -179,7 +179,7 @@ function drawTitle(ctx, L) {
   var top = (m.runsTop || []).filter(Boolean);
   if (top.length) {
     y += 4;
-    text(ctx, '🏅 本机战绩榜', W / 2, y, { size: 10, align: 'center', color: T.txt3 });
+    text(ctx, '🏅 本机战绩榜', W / 2, y, { size: FS.xs, align: 'center', color: T.txt3 });
     y += 15;
     var room = Math.floor((H - 32 - y) / 15);
     var showN = Math.max(0, Math.min(top.length, Math.min(3, room)));
@@ -190,15 +190,15 @@ function drawTitle(ctx, L) {
         : (tr.endless ? '♾️ 第 ' + num(tr.milestone) + ' 阶'
           : (num(tr.worth) >= num(td.goal, Infinity) ? '🎯 达标' : '未达标'));
       text(ctx, ['🥇', '🥈', '🥉'][ti] + ' ' + money(num(tr.worth)), x, y,
-        { size: 10.5, color: T.amber });
+        { size: FS.sm, color: T.amber });
       text(ctx, td.emoji + td.name + ' · Day ' + num(tr.day) + ' · ' + tres,
-        x + w, y, { size: 10, align: 'right', color: T.txt3, maxW: w * 0.6 });
+        x + w, y, { size: FS.xs, align: 'right', color: T.txt3, maxW: w * 0.6 });
       y += 15;
     }
   }
   ctx.textAlign = 'left';
   if (y < H - 26) {
-    text(ctx, '💡 ' + VIEW.tip, W / 2, H - 24, { size: 10.5, align: 'center', color: T.txt3, maxW: W - 40 });
+    text(ctx, '💡 ' + VIEW.tip, W / 2, H - 24, { size: FS.sm, align: 'center', color: T.txt3, maxW: W - 40 });
   }
 }
 
@@ -247,7 +247,7 @@ function drawHUD(ctx, L, s) {
   var bx = W - 16 - bs;
   for (var i = 0; i < icons.length; i++) {
     GFX.fillRR(ctx, bx, iy, bs, bs, 9, T.card2, T.line);
-    text(ctx, icons[i].t, bx + bs / 2, iy + (bs - 15) / 2, { size: 15, align: 'center' });
+    text(ctx, icons[i].t, bx + bs / 2, iy + (bs - 15) / 2, { size: FS.lg, align: 'center' });
     /* 命中比视觉外扩 3px（间隙 6px，正好不与相邻图标重叠）：
        26~28px 的图标是存档/回主页/说明/报表四个常用入口，太小了点不准。 */
     GFX.addHit(bx - 3, iy - 3, bs + 6, bs + 6, icons[i].act, null, null);
@@ -260,24 +260,36 @@ function drawHUD(ctx, L, s) {
   var share = num(rivalShare(s));
   var gt = '目标 ' + money(goal) + ' · ' + Math.round(num(netWorth(s)) / goal * 100) + '%'
     + (share >= 0.15 ? ' · 🦑对手抢 ' + Math.round(share * 100) + '%' : '');
-  text(ctx, gt, 16, y + 12, { size: 10, color: T.txt3, maxW: barW });
+  text(ctx, gt, 16, y + 12, { size: FS.xs, color: T.txt3, maxW: barW });
 }
 
 function drawTabs(ctx, L) {
   var W = L.W, y = L.hudH, h = L.tabH;
+  /* ★ 与 H5 端对齐：H5 的 Tab 是「🧋 经营」这种 emoji + 文字，
+     Canvas 端原来只有纯 emoji，导致同一功能在两版可发现性不同 ——
+     新玩家在 Canvas 端不知道 🧪 是"研发"、🏙️ 是"商圈"。
+     390px 屏下每个 tab 宽约 65px，「emoji(14) + 文字(11) ≈ 42px」放得下；
+     极窄屏（<340px）时文字会自动省略号截断，不会溢出。*/
   var tabs = [
-    { k: 'manage', t: '🧋' }, { k: 'lab', t: '🧪' }, { k: 'up', t: '⬆️' },
-    { k: 'staff', t: '👥' }, { k: 'rival', t: '🏙️' }, { k: 'ach', t: '🏅' },
+    { k: 'manage', t: '🧋', n: '经营' }, { k: 'lab', t: '🧪', n: '研发' },
+    { k: 'up', t: '⬆️', n: '升级' }, { k: 'staff', t: '👥', n: '员工' },
+    { k: 'rival', t: '🏙️', n: '商圈' }, { k: 'ach', t: '🏅', n: '成就' },
   ];
   var w = W / tabs.length;
   for (var i = 0; i < tabs.length; i++) {
     var on = VIEW.tab === tabs[i].k;
-    text(ctx, tabs[i].t, i * w + w / 2, y + 6, { size: 15, align: 'center' });
+    var t = tabs[i];
+    /* emoji 与文字分两行：挤在一行时宽度不够，
+       分两行后 emoji 12px + 文字 10px 稳稳落在 65px 内。*/
+    text(ctx, t.t, i * w + w / 2, y + 4, { size: FS.md, align: 'center' });
+    text(ctx, t.n, i * w + w / 2, y + 21, {
+      size: FS.xs, align: 'center', color: on ? T.pink : T.txt3, maxW: w - 6,
+    });
     if (on) {
       ctx.fillStyle = T.pink;
       ctx.fillRect(i * w + w * 0.3, y + h - 3, w * 0.4, 2.5);
     }
-    GFX.addHit(i * w, y, w, h, 'tab', tabs[i].k, null);
+    GFX.addHit(i * w, y, w, h, 'tab', t.k, null);
   }
 }
 
@@ -306,7 +318,7 @@ function drawPanelArea(ctx, L, s) {
        bodyY+340，指到采购卡去了）。 */
     (VIEW.panelRects = VIEW.panelRects || {}).open = { x: x, y: by + 6, w: w, h: 44 };
     GFX.button(ctx, x, by + 6, w, 44, '🚪 开门营业',
-      { kind: 'primary', act: 'open', size: 15, pressed: isPressed('open') });
+      { kind: 'primary', act: 'open', size: FS.lg, pressed: isPressed('open') });
   }
 }
 
@@ -325,14 +337,14 @@ function panelManagers(ctx, x, y, w, s) {
   var hasMgr = managerCount(s) > 0 || shops > 1;
 
   GFX.card(ctx, x, y, w, 30);
-  text(ctx, '🎩 店长与分店编制', x + 10, y + 8, { size: 11.5, weight: 800, color: T.txt });
+  text(ctx, '🎩 店长与分店编制', x + 10, y + 8, { size: FS.md, weight: 800, color: T.txt });
   text(ctx, managerCount(s) + '/' + (shops - 1) + ' 名店长' + (left > 0 ? ' · 还可招 ' + left + ' 名' : ''),
-    x + w - 10, y + 9, { size: 10, align: 'right', color: T.txt3 });
+    x + w - 10, y + 9, { size: FS.xs, align: 'right', color: T.txt3 });
   y += 38;
 
   if (shops <= 1) {
     text(ctx, '只有总店（你亲自经营）。开设第一家分店后即可招募店长。',
-      x + 6, y + 2, { size: 10, color: T.txt3, maxW: w - 12 });
+      x + 6, y + 2, { size: FS.xs, color: T.txt3, maxW: w - 12 });
     return y + 22;
   }
 
@@ -348,24 +360,24 @@ function panelManagers(ctx, x, y, w, s) {
 
     GFX.card(ctx, x, y, w, ch + 26);
     /* 分店标题行 */
-    text(ctx, '🏪 第' + b + ' 分店', x + 10, y + 8, { size: 11, weight: 800, color: T.txt });
-    text(ctx, '编制 ' + staffN + '/' + cap, x + 96, y + 9, { size: 10, color: T.cyan });
+    text(ctx, '🏪 第' + b + ' 分店', x + 10, y + 8, { size: FS.sm, weight: 800, color: T.txt });
+    text(ctx, '编制 ' + staffN + '/' + cap, x + 96, y + 9, { size: FS.xs, color: T.cyan });
     text(ctx, mg ? ('店长 ' + mg.emoji + ' ' + mg.name) : '无店长',
-      x + w - 10, y + 9, { size: 10, align: 'right', color: mg ? T.amber : T.txt3 });
+      x + w - 10, y + 9, { size: FS.xs, align: 'right', color: mg ? T.amber : T.txt3 });
     y += 26;
 
     if (mg) {
       var tr = managerTrait(mg);
       var mb = managerBonus(s, b);
       text(ctx, mg.emoji + ' ' + mg.name + '  Lv.' + mg.lv + ' ' + managerRank(mg.lv).name,
-        x + 10, y + 4, { size: 11, weight: 700, color: T.txt });
+        x + 10, y + 4, { size: FS.sm, weight: 700, color: T.txt });
       text(ctx, '日薪' + money(mg.wage) + ' · 能力' + Number(mg.skill).toFixed(2),
-        x + w - 10, y + 5, { size: 10, align: 'right', color: T.txt2 });
+        x + w - 10, y + 5, { size: FS.xs, align: 'right', color: T.txt2 });
       text(ctx, tr.emoji + ' ' + tr.name + ' · ' + tr.desc,
-        x + 10, y + 20, { size: 10, color: T.txt3, maxW: w - 20 });
+        x + 10, y + 20, { size: FS.xs, color: T.txt3, maxW: w - 20 });
       text(ctx, '该店加成：客流+' + Math.round((mb.ops - 1) * 100) + '% · 速度+'
         + Math.round((mb.speed - 1) * 100) + '% · 口碑+' + Math.round((mb.rep - 1) * 100) + '%',
-        x + 10, y + 34, { size: 10, color: T.cyan, maxW: w - 20 });
+        x + 10, y + 34, { size: FS.xs, color: T.cyan, maxW: w - 20 });
       /* 卸任 / 调动按钮 */
       var bw2 = 84, bh2 = 22, by = y + 48;
       /* 调动目标：其他没店长的分店 */
@@ -375,44 +387,44 @@ function panelManagers(ctx, x, y, w, s) {
       }
       if (moveTo) {
         GFX.button(ctx, x + 10, by, bw2, bh2, '调到第' + moveTo + '店',
-          { kind: 'ghost', act: 'mmove', id: mg.id, extra: moveTo, size: 10, r: 7 });
+          { kind: 'ghost', act: 'mmove', id: mg.id, extra: moveTo, size: FS.xs, r: 7 });
       }
       GFX.button(ctx, x + w - 10 - bw2, by, bw2, bh2, '卸任',
-        { kind: 'ghost', act: 'mfire', id: mg.id, size: 10, r: 7 });
+        { kind: 'ghost', act: 'mfire', id: mg.id, size: FS.xs, r: 7 });
       y += 74;
     } else if (cands.length) {
       for (var i = 0; i < cands.length; i++) {
         var c = cands[i];
         var ctr = managerTrait(c);
         text(ctx, c.emoji + ' ' + c.name + '  Lv.' + c.lv + ' ' + managerRank(c.lv).name,
-          x + 10, y + 4, { size: 10.5, weight: 700, color: T.txt });
+          x + 10, y + 4, { size: FS.sm, weight: 700, color: T.txt });
         text(ctx, '日薪' + money(c.wage),
-          x + w - 10, y + 5, { size: 10, align: 'right', color: T.txt2 });
+          x + w - 10, y + 5, { size: FS.xs, align: 'right', color: T.txt2 });
         text(ctx, ctr.emoji + ' ' + ctr.name + ' · 能力' + Number(c.skill).toFixed(2),
-          x + 10, y + 18, { size: 10, color: T.txt3, maxW: w - 120 });
+          x + 10, y + 18, { size: FS.xs, color: T.txt3, maxW: w - 120 });
         GFX.button(ctx, x + 10, y + 30, w - 20, 20,
           s.cash >= fee ? ('招募 · ' + money(fee)) : ('现金不足（' + money(fee) + '）'),
           { kind: s.cash >= fee ? 'primary' : 'ghost', act: 'mhire', id: b, extra: i,
-            disabled: s.cash < fee, size: 10, r: 7 });
+            disabled: s.cash < fee, size: FS.xs, r: 7 });
         y += 52;
       }
       /* 付费刷新：免费刷会让玩家无限刷出金牌店长 */
       var rc = managerRerollCost(s, b);
       GFX.button(ctx, x + 10, y, 118, 20, '🔄 刷新（' + money(rc) + '）',
-        { kind: 'ghost', act: 'mcand', id: b, disabled: s.cash < rc, size: 10, r: 7 });
+        { kind: 'ghost', act: 'mcand', id: b, disabled: s.cash < rc, size: FS.xs, r: 7 });
       y += 26;
     } else {
-      text(ctx, '暂无候选人（次日刷新）', x + 6, y + 2, { size: 10, color: T.txt3 });
+      text(ctx, '暂无候选人（次日刷新）', x + 6, y + 2, { size: FS.xs, color: T.txt3 });
       y += 22;
     }
   }
 
   /* 总店编制也要画出来 —— 店长只管分店，玩家容易忘总店也要人 */
   GFX.card(ctx, x, y, w, 26);
-  text(ctx, '🏠 总店', x + 10, y + 7, { size: 10.5, weight: 800, color: T.txt });
+  text(ctx, '🏠 总店', x + 10, y + 7, { size: FS.sm, weight: 800, color: T.txt });
   text(ctx, '编制 ' + staffOfBranch(s, 1).length + '/' + branchStaffCap(s, 1),
-    x + 72, y + 8, { size: 10, color: T.cyan });
-  text(ctx, '你亲自经营', x + w - 10, y + 8, { size: 10, align: 'right', color: T.txt3 });
+    x + 72, y + 8, { size: FS.xs, color: T.cyan });
+  text(ctx, '你亲自经营', x + w - 10, y + 8, { size: FS.xs, align: 'right', color: T.txt3 });
   return y + 34;
 }
 
@@ -428,22 +440,22 @@ function panelManage(ctx, x, y, w, s) {
     var sh = 66;
     (VIEW.panelRects = VIEW.panelRects || {}).stage = { x: x, y: y, w: w, h: sh };
     GFX.fillRR(ctx, x, y, w, sh, 12, 'rgba(139,92,255,.13)', 'rgba(139,92,255,.45)');
-    text(ctx, '🏔️ 第' + sv.chapter + '章', x + 10, y + 8, { size: 11, weight: 800, color: T.purple });
+    text(ctx, '🏔️ 第' + sv.chapter + '章', x + 10, y + 8, { size: FS.sm, weight: 800, color: T.purple });
     if (sv.cur) {
       text(ctx, sv.cur.emoji + ' ' + sv.cur.desc, x + 66, y + 9,
-        { size: 10, color: T.txt2, maxW: w - 76 - 52 });
+        { size: FS.xs, color: T.txt2, maxW: w - 76 - 52 });
       text(ctx, '+' + money(sv.cur.cash), x + w - 10, y + 8,
-        { size: 10, weight: 800, align: 'right', color: T.green });
+        { size: FS.xs, weight: 800, align: 'right', color: T.green });
     } else {
       text(ctx, '✅ 本章已通关 · ' + sv.cleared + '/' + sv.total, x + 66, y + 9,
-        { size: 10, color: T.green, maxW: w - 76 });
+        { size: FS.xs, color: T.green, maxW: w - 76 });
     }
     /* 三个难度档按钮：门槛越高、奖励越丰厚 */
     var dbw = (w - 20 - 16) / 3;
     for (var di = 0; di < sv.diffs.length; di++) {
       var d = sv.diffs[di];
       GFX.button(ctx, x + 10 + di * (dbw + 8), y + 30, dbw, 28, d.emoji + d.name,
-        { kind: d.cur ? 'primary' : 'ghost', act: 'stagediff', id: d.id, size: 10, r: 9 });
+        { kind: d.cur ? 'primary' : 'ghost', act: 'stagediff', id: d.id, size: FS.xs, r: 9 });
     }
     y += sh + 10;
   }
@@ -454,16 +466,16 @@ function panelManage(ctx, x, y, w, s) {
     GFX.card(ctx, x, y, w, 84);
     var done = ct.done;
     text(ctx, '📜 今日合同 · ' + ct.name + (done ? ' ✅' : ''),
-      x + 10, y + 9, { size: 12.5, weight: 800, color: done ? T.green : T.amber, maxW: w - 20 });
+      x + 10, y + 9, { size: FS.md, weight: 800, color: done ? T.green : T.amber, maxW: w - 20 });
     var ctSub = ct.prog === null
       ? (done ? '已达成' : '打烊时结算')
       : (ct.prefix || '') + Math.round(ct.prog) + '/' + (ct.prefix || '') + ct.goal + (ct.unit || '');
     if (!done && ct.failRep < 0) ctSub += ' · 未达成扣口碑 ' + ct.failRep;
-    text(ctx, ct.desc, x + 10, y + 30, { size: 11, color: T.txt2, maxW: w - 90 });
+    text(ctx, ct.desc, x + 10, y + 30, { size: FS.sm, color: T.txt2, maxW: w - 90 });
     text(ctx, (done ? '✅ 已达成' : '+' + money(ct.cash)), x + w - 10, y + 9,
-      { size: 12, weight: 800, align: 'right', color: done ? T.txt3 : T.green });
+      { size: FS.md, weight: 800, align: 'right', color: done ? T.txt3 : T.green });
     text(ctx, ctSub, x + w - 10, y + 30,
-      { size: 10, align: 'right', color: T.txt3, maxW: w * 0.42 });
+      { size: FS.xs, align: 'right', color: T.txt3, maxW: w * 0.42 });
     GFX.bar(ctx, x + 10, y + 52, w - 20, 6, ct.ratio, { color: done ? T.green : T.cyan });
     y += 94;
   }
@@ -476,11 +488,11 @@ function panelManage(ctx, x, y, w, s) {
      没有任何一项能力可用时（没 tt / 没配广告位 / 没开内购）整块不渲染。 */
   if (CAPS.visible()) {
     GFX.fillRR(ctx, x, y, w, 48, 12, 'rgba(255,194,71,.10)', 'rgba(255,194,71,.38)');
-    text(ctx, '🎁', x + 12, y + 13, { size: 17 });
-    text(ctx, '每日福利', x + 36, y + 9, { size: 13, weight: 800, color: T.amber });
+    text(ctx, '🎁', x + 12, y + 13, { size: FS.xl });
+    text(ctx, '每日福利', x + 36, y + 9, { size: FS.lg, weight: 800, color: T.amber });
     text(ctx, CAPS.summary() || '侧边栏 · 加桌面 · 开提醒', x + 36, y + 27,
-      { size: 10, color: T.txt2, maxW: w - 70 });
-    text(ctx, '›', x + w - 18, y + 14, { size: 18, weight: 700, color: T.amber });
+      { size: FS.xs, color: T.txt2, maxW: w - 70 });
+    text(ctx, '›', x + w - 18, y + 14, { size: FS.display, weight: 700, color: T.amber });
     GFX.addHit(x, y, w, 48, 'gift', null, null);
     y += 58;
   }
@@ -490,13 +502,13 @@ function panelManage(ctx, x, y, w, s) {
     var rows = Math.ceil(s.cards.length / 2);
     GFX.card(ctx, x, y, w, 22 + rows * 20);
     text(ctx, '🃏 经营策略 ' + s.cards.length + '/' + CFG.CARD_MAX, x + 10, y + 7,
-      { size: 11.5, weight: 800 });
+      { size: FS.md, weight: 800 });
     for (var ci = 0; ci < s.cards.length; ci++) {
       var card = cardById(s.cards[ci]); if (!card) continue;
       var colx = x + 10 + (ci % 2) * ((w - 20) / 2);
       var coly = y + 22 + Math.floor(ci / 2) * 20;
       text(ctx, card.emoji + ' ' + card.name, colx, coly,
-        { size: 10, color: T.txt2, maxW: (w - 20) / 2 - 4 });
+        { size: FS.xs, color: T.txt2, maxW: (w - 20) / 2 - 4 });
     }
     y += 22 + rows * 20 + 10;
   }
@@ -516,14 +528,14 @@ function panelManage(ctx, x, y, w, s) {
      导致 s.trendKnown 永远是 false、「明日预告」永远是 ❓，scout 分支也无处触发。 */
   if (!s.trendKnown) {
     GFX.button(ctx, x + cw * 2 + 4, y + 32, cw - 14, 24, '🔍 调研 ¥150',
-      { kind: 'ghost', act: 'scout', size: 10, r: 7, disabled: !canAfford(s, 150), pressed: isPressed('scout') });
+      { kind: 'ghost', act: 'scout', size: FS.xs, r: 7, disabled: !canAfford(s, 150), pressed: isPressed('scout') });
   }
   y += ih + 10;
 
   /* 市场新闻：它会实打实地改原料价格，不显示的话玩家只看到「今天怎么这么贵」。 */
   if (s.news && s.news.text) {
     GFX.fillRR(ctx, x, y - 6, w, 28, 10, 'rgba(255,194,71,.10)', 'rgba(255,194,71,.28)');
-    text(ctx, '📰 ' + s.news.text, x + 10, y + 2, { size: 10.5, color: T.amber, maxW: w - 20 });
+    text(ctx, '📰 ' + s.news.text, x + 10, y + 2, { size: FS.sm, color: T.amber, maxW: w - 20 });
     y += 36;
   }
 
@@ -533,22 +545,22 @@ function panelManage(ctx, x, y, w, s) {
   if (qv.length) {
     var qh = 30 + qv.length * 30;
     GFX.card(ctx, x, y, w, qh);
-    text(ctx, '🎯 今日任务', x + 10, y + 8, { size: 12.5, weight: 800 });
-    text(ctx, '达成即到账', x + w - 10, y + 9, { size: 10, align: 'right', color: T.txt3 });
+    text(ctx, '🎯 今日任务', x + 10, y + 8, { size: FS.md, weight: 800 });
+    text(ctx, '达成即到账', x + w - 10, y + 9, { size: FS.xs, align: 'right', color: T.txt3 });
     var qy = y + 30;
     for (var qi = 0; qi < qv.length; qi++) {
       var q = qv[qi];
-      text(ctx, q.emoji, x + 12, qy + 6, { size: 14 });
-      text(ctx, q.name, x + 32, qy + 8, { size: 11, color: q.done ? T.txt3 : T.txt, maxW: 60 });
+      text(ctx, q.emoji, x + 12, qy + 6, { size: FS.lg });
+      text(ctx, q.name, x + 32, qy + 8, { size: FS.sm, color: q.done ? T.txt3 : T.txt, maxW: 60 });
       GFX.bar(ctx, x + 98, qy + 11, w - 98 - 80, 6, q.ratio, { color: q.done ? T.green : T.cyan });
       var qshow = q.done ? '已达成'
         : (q.dir === 'down'
           /* 越少越好型的数字是「上限」，直接写 x/y 会被读成「已完成 x 个」 */
           ? '剩 ' + Math.max(0, q.goal - Math.round(q.prog)) + q.unit
           : q.prefix + Math.round(q.prog) + '/' + q.prefix + q.goal + q.unit);
-      text(ctx, qshow, x + w - 74, qy + 8, { size: 10, color: T.txt3, align: 'right', maxW: 64 });
+      text(ctx, qshow, x + w - 74, qy + 8, { size: FS.xs, color: T.txt3, align: 'right', maxW: 64 });
       text(ctx, (q.done ? '✅ ' : '') + '+' + money(q.reward), x + w - 10, qy + 8,
-        { size: 10, weight: 800, align: 'right', color: q.done ? T.green : T.amber });
+        { size: FS.xs, weight: 800, align: 'right', color: q.done ? T.green : T.amber });
       qy += 30;
     }
     y += qh + 10;
@@ -558,9 +570,9 @@ function panelManage(ctx, x, y, w, s) {
   var rows = ING.length;
   (VIEW.panelRects = VIEW.panelRects || {}).market = { x: x, y: y, w: w, h: 40 + rows * 30 + 38 };
   GFX.card(ctx, x, y, w, 40 + rows * 30 + 38);
-  text(ctx, '🛒 采购', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '🛒 采购', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, '现金 ' + money(num(s.cash)), x + w - 10, y + 9,
-    { size: 11, align: 'right', color: T.amber });
+    { size: FS.sm, align: 'right', color: T.amber });
   var ry = y + 30;
   /* ★ V10：只列**当前城市买得到**的原料（与 H5 端同一口径）。
      全部 29 种列出来的话，北京的玩家会看到 20+ 行「藤椒油 ¥3.5」点下去没反应。
@@ -573,7 +585,7 @@ function panelManage(ctx, x, y, w, s) {
     var names = [];
     for (var ln = 0; ln < localIngs.length; ln++) names.push(localIngs[ln].emoji + localIngs[ln].name);
     text(ctx, '🗺️ 本地特产：' + names.join('、'), x + 8, ry + 4,
-      { size: 10, color: T.amber, maxW: w - 16 });
+      { size: FS.xs, color: T.amber, maxW: w - 16 });
     ry += 22;
   }
   for (var i = 0; i < ING.length; i++) {
@@ -583,21 +595,21 @@ function panelManage(ctx, x, y, w, s) {
     var prev = s.prevPrices[g.id] || g.base;
     var up = p > prev + 0.01, down = p < prev - 0.01;
     var col = up ? T.red : (down ? T.green : T.txt2);
-    text(ctx, g.emoji + ' ' + g.name, x + 10, ry + 6, { size: 11.5, color: T.txt });
-    text(ctx, '¥' + p.toFixed(1), x + 78, ry + 6, { size: 11, color: col });
-    text(ctx, (up ? '▲' : down ? '▼' : '—'), x + 122, ry + 6, { size: 10, color: col });
-    text(ctx, '库存 ' + Math.round(num(s.inv[g.id])), x + 145, ry + 6, { size: 10.5, color: T.txt3 });
+    text(ctx, g.emoji + ' ' + g.name, x + 10, ry + 6, { size: FS.md, color: T.txt });
+    text(ctx, '¥' + p.toFixed(1), x + 78, ry + 6, { size: FS.sm, color: col });
+    text(ctx, (up ? '▲' : down ? '▼' : '—'), x + 122, ry + 6, { size: FS.xs, color: col });
+    text(ctx, '库存 ' + Math.round(num(s.inv[g.id])), x + 145, ry + 6, { size: FS.sm, color: T.txt3 });
     /* 三个进货按钮：+10 / +50 / 满仓 */
     /* 只留 +10 / +50。原来第三个「满」传 extra 999 给 buyIng()，
        而仓库上限最多 1500 —— 这个按钮 100% 撞「仓库装不下了」，点了永远只弹错误。 */
     var bw = 34, bh = 27;
     var bx = x + w - 10 - (bw * 2 + 6);
-    GFX.button(ctx, bx, ry + 1, bw, bh, '+10', { kind: 'ghost', act: 'buy', id: g.id, extra: 10, size: 10, r: 7, pressed: isPressed('buy', g.id, 10) });
-    GFX.button(ctx, bx + bw + 6, ry + 1, bw, bh, '+50', { kind: 'ghost', act: 'buy', id: g.id, extra: 50, size: 10, r: 7, pressed: isPressed('buy', g.id, 50) });
+    GFX.button(ctx, bx, ry + 1, bw, bh, '+10', { kind: 'ghost', act: 'buy', id: g.id, extra: 10, size: FS.xs, r: 7, pressed: isPressed('buy', g.id, 10) });
+    GFX.button(ctx, bx + bw + 6, ry + 1, bw, bh, '+50', { kind: 'ghost', act: 'buy', id: g.id, extra: 50, size: FS.xs, r: 7, pressed: isPressed('buy', g.id, 50) });
     ry += 30;
   }
   GFX.button(ctx, x + 10, ry + 2, w - 20, 30, '🛒 一键补货（按今日客流配齐）',
-    { kind: 'cyan', act: 'autofill', size: 11, r: 9, pressed: isPressed('autofill') });
+    { kind: 'cyan', act: 'autofill', size: FS.sm, r: 9, pressed: isPressed('autofill') });
   ry += 38;
   y += 40 + rows * 30 + 38 + 10;
 
@@ -608,8 +620,8 @@ function panelManage(ctx, x, y, w, s) {
     以前是硬编码 y，面板内容顺序一变高亮就指错地方）。 */
   (VIEW.panelRects = VIEW.panelRects || {}).menu = { x: x, y: y, w: w, h: mh };
   GFX.card(ctx, x, y, w, mh);
-  text(ctx, '📝 菜单与定价', x + 10, y + 9, { size: 12.5, weight: 800 });
-  text(ctx, '倍率 0.9~1.1 最稳', x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3 });
+  text(ctx, '📝 菜单与定价', x + 10, y + 9, { size: FS.md, weight: 800 });
+  text(ctx, '倍率 0.9~1.1 最稳', x + w - 10, y + 10, { size: FS.xs, align: 'right', color: T.txt3 });
   var my = y + 30;
   for (var j = 0; j < ms.length; j++) {
     var rid = ms[j];
@@ -621,13 +633,13 @@ function panelManage(ctx, x, y, w, s) {
        却根本点不了 —— 引导变成只能硬点「下一步」。现在和 H5 的
        data-act="toggle" 行为对齐。 */
     GFX.addHit(x, my, w - 116, 44, 'toggle', rid);
-    text(ctx, r.emoji + ' ' + r.name, x + 10, my + 4, { size: 11.5, color: T.txt });
+    text(ctx, r.emoji + ' ' + r.name, x + 10, my + 4, { size: FS.md, color: T.txt });
     text(ctx, '售 ' + money(price) + ' · 本 ¥' + cost.toFixed(1) + ' · 毛利 ' + money(price - cost),
-      x + 10, my + 20, { size: 10, color: T.txt3 });
+      x + 10, my + 20, { size: FS.xs, color: T.txt3 });
     /* 倍率 - / +：行距 46px，按钮可以放大到 30 高 —— 22px 是全游戏最难点的目标之一 */
-    GFX.button(ctx, x + w - 108, my + 3, 30, 30, '−', { kind: 'ghost', act: 'ratio', id: rid, extra: -0.05, size: 14, r: 8 });
-    text(ctx, '×' + ratio.toFixed(2), x + w - 63, my + 11, { size: 11, align: 'center', color: T.cyan });
-    GFX.button(ctx, x + w - 44, my + 3, 30, 30, '＋', { kind: 'ghost', act: 'ratio', id: rid, extra: 0.05, size: 14, r: 8 });
+    GFX.button(ctx, x + w - 108, my + 3, 30, 30, '−', { kind: 'ghost', act: 'ratio', id: rid, extra: -0.05, size: FS.lg, r: 8 });
+    text(ctx, '×' + ratio.toFixed(2), x + w - 63, my + 11, { size: FS.sm, align: 'center', color: T.cyan });
+    GFX.button(ctx, x + w - 44, my + 3, 30, 30, '＋', { kind: 'ghost', act: 'ratio', id: rid, extra: 0.05, size: FS.lg, r: 8 });
     my += 46;
   }
   y += mh + 10;
@@ -636,24 +648,24 @@ function panelManage(ctx, x, y, w, s) {
      这是「当天一次性投入」，打烊后归零 —— 以前这个归零完全静默，
      玩家第二天看到 ¥0 只会以为昨天那笔钱没生效。 */
   GFX.card(ctx, x, y, w, 80);
-  text(ctx, '📣 营销投入', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '📣 营销投入', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, '¥' + Math.round(num(s.marketing)) + ' → 客流 ×' + marketingMul(num(s.marketing)).toFixed(2),
-    x + w - 10, y + 10, { size: 10.5, align: 'right', color: T.cyan });
+    x + w - 10, y + 10, { size: FS.sm, align: 'right', color: T.cyan });
   text(ctx, '预计客流 ' + Math.round(num(trafficOf(s))) + ' 人 · 出杯位 ' + stationCount(s) + ' 个',
-    x + 10, y + 28, { size: 10.5, color: T.txt3 });
+    x + 10, y + 28, { size: FS.sm, color: T.txt3 });
   var mks = [0, 200, 500, 1000, 2000];
   var mw = (w - 20 - 8 * (mks.length - 1)) / mks.length;
   /* 16px 高是全游戏最小目标，加到 22；提示文字相应下移到 y+66（卡片高 80 容得下） */
   for (var mi = 0; mi < mks.length; mi++) {
     GFX.button(ctx, x + 10 + mi * (mw + 8), y + 40, mw, 22,
       mks[mi] === 0 ? '不投' : '¥' + mks[mi],
-      { kind: 'ghost', act: 'mkt', id: String(mks[mi]), size: 10, r: 6 });
+      { kind: 'ghost', act: 'mkt', id: String(mks[mi]), size: FS.xs, r: 6 });
   }
   text(ctx, num(s.lastMarketing) > 0
     ? '📢 昨日投入 ' + money(num(s.lastMarketing)) + ' 已用完，今天要重新投'
     : '营销只在当天生效，打烊后归零',
     x + 10, y + 66,
-    { size: 10, maxW: w - 20, color: num(s.lastMarketing) > 0 ? T.amber : T.txt3 });
+    { size: FS.xs, maxW: w - 20, color: num(s.lastMarketing) > 0 ? T.amber : T.txt3 });
   y += 90;
 
   /* 中期目标：30 天只有一个终点太远，中间三周玩家不知道自己是领先还是落后。
@@ -661,16 +673,16 @@ function panelManage(ctx, x, y, w, s) {
   var ms = milestoneOf(s);
   if (ms) {
     GFX.card(ctx, x, y, w, 62);
-    text(ctx, '🎯 中期目标', x + 10, y + 8, { size: 11.5, weight: 800 });
+    text(ctx, '🎯 中期目标', x + 10, y + 8, { size: FS.md, weight: 800 });
     text(ctx, 'Day ' + ms.day + ' 前 ' + money(ms.worth), x + w - 10, y + 9,
-      { size: 10.5, align: 'right', color: T.cyan });
+      { size: FS.sm, align: 'right', color: T.cyan });
     var mp = Math.max(0, Math.min(1, num(netWorth(s)) / Math.max(1, ms.worth)));
     GFX.bar(ctx, x + 10, y + 30, w - 20, 6, mp, { color: ms.hit ? T.green : T.cyan });
     text(ctx, ms.hit
       ? '✅ 已达成（' + money(netWorth(s)) + '）· 声望 +1 已记账'
       : '还差 ' + money(Math.max(0, ms.gap)) + '（' + money(netWorth(s)) + '，' + Math.round(mp * 100) + '%）',
       x + 10, y + 42,
-      { size: 10.5, maxW: w - 20, color: ms.hit ? T.green : T.txt2 });
+      { size: FS.sm, maxW: w - 20, color: ms.hit ? T.green : T.txt2 });
     y += 72;
   }
 
@@ -680,14 +692,14 @@ function panelManage(ctx, x, y, w, s) {
   if (advs.length) {
     (VIEW.panelRects = VIEW.panelRects || {}).advice = { x: x, y: y, w: w, h: 30 + advs.length * 20 };
     GFX.card(ctx, x, y, w, 30 + advs.length * 20);
-    text(ctx, '📌 今日建议', x + 10, y + 8, { size: 11.5, weight: 800, color: T.amber });
+    text(ctx, '📌 今日建议', x + 10, y + 8, { size: FS.md, weight: 800, color: T.amber });
     var ay = y + 26;
     for (var ai = 0; ai < advs.length; ai++) {
       var av = advs[ai] || {};
       /* 文案是给 H5 的 innerHTML 写的（带 <b>），Canvas 必须先剥标签，
          否则 "</b>" 会被当成可见字符画出来。 */
       text(ctx, (av.icon || '·') + ' ' + GFX.plainText(av.text || ''), x + 10, ay, {
-        size: 10.5, maxW: w - 20,
+        size: FS.sm, maxW: w - 20,
         color: av.level === 'warn' ? T.amber : (av.level === 'good' ? T.green : T.txt2),
       });
       ay += 20;
@@ -703,10 +715,10 @@ function panelManage(ctx, x, y, w, s) {
 
   if (logs.length) {
     GFX.card(ctx, x, y, w, 30 + logs.length * 18);
-    text(ctx, '📔 店长日志', x + 10, y + 8, { size: 11.5, weight: 800, color: T.txt3 });
+    text(ctx, '📔 店长日志', x + 10, y + 8, { size: FS.md, weight: 800, color: T.txt3 });
     var ly = y + 26;
     for (var li = 0; li < logs.length; li++) {
-      text(ctx, logs[li], x + 10, ly, { size: 10, color: T.txt3, maxW: w - 20 });
+      text(ctx, logs[li], x + 10, ly, { size: FS.xs, color: T.txt3, maxW: w - 20 });
       ly += 18;
     }
     y += 30 + logs.length * 18 + 10;
@@ -716,9 +728,9 @@ function panelManage(ctx, x, y, w, s) {
 }
 
 function intel(ctx, x, y, w, k, v, sub) {
-  text(ctx, k, x, y, { size: 10, color: T.txt3 });
-  text(ctx, v, x, y + 13, { size: 12, weight: 800, color: T.txt, maxW: w });
-  if (sub) text(ctx, sub, x, y + 30, { size: 10, color: T.txt3, maxW: w });
+  text(ctx, k, x, y, { size: FS.xs, color: T.txt3 });
+  text(ctx, v, x, y + 13, { size: FS.md, weight: 800, color: T.txt, maxW: w });
+  if (sub) text(ctx, sub, x, y + 30, { size: FS.xs, color: T.txt3, maxW: w });
 }
 
 /* ============================================================
@@ -734,12 +746,12 @@ function panelLab(ctx, x, y, w, s) {
     if (sgs[sg0].maxed) mxN++;
   }
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '🏷️ 招牌配方', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '🏷️ 招牌配方', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, lvN + '/' + sgs.length + ' 款 · 满级 ' + mxN, x + w - 10, y + 10,
-    { size: 10, align: 'right', color: T.cyan });
+    { size: FS.xs, align: 'right', color: T.cyan });
   y += 34;
   text(ctx, '累计卖出杯数跨局继承 · 专精一款比铺开十款更划算',
-    x + 10, y + 2, { size: 10, color: T.txt3, maxW: w - 20 });
+    x + 10, y + 2, { size: FS.xs, color: T.txt3, maxW: w - 20 });
   y += 16;
   /* 两列排布（10 款 → 5 行）：单列 10 行会把下面的配方行顶出首屏，
      玩家打开研发页先看到一整屏招牌进度、却看不到任何能点的配方。
@@ -751,7 +763,7 @@ function panelLab(ctx, x, y, w, s) {
   }
   if (!shown.length) {
     text(ctx, '还没有任何配方卖出过 —— 先上架一款吧', x + 10, y + 6,
-      { size: 10, color: T.txt3, maxW: w - 20 });
+      { size: FS.xs, color: T.txt3, maxW: w - 20 });
     y += 24;
   } else if (shown.length > 4) {
     /* ★ 招牌进度 > 4 条时**折叠成一行摘要**。
@@ -761,7 +773,7 @@ function panelLab(ctx, x, y, w, s) {
        招牌是长期目标，研发是当次决策，后者更急。 */
     text(ctx, shown.map(function (g) {
       return g.emoji + g.name + ' ' + g.cups + '/' + g.need;
-    }).join('　'), x + 10, y + 4, { size: 10, color: T.txt3, maxW: w - 20 });
+    }).join('　'), x + 10, y + 4, { size: FS.xs, color: T.txt3, maxW: w - 20 });
     y += 20;
   } else {
     for (var sg = 0; sg < shown.length; sg += 2) {
@@ -769,12 +781,12 @@ function panelLab(ctx, x, y, w, s) {
         var g = shown[sg + cc];
         var gx = x + cc * (cw2 + 8);
         GFX.fillRR(ctx, gx, y, cw2, 26, 8, 'rgba(53,229,240,.07)', null);
-        text(ctx, g.emoji, gx + 6, y + 5, { size: 13 });
-        text(ctx, g.name, gx + 26, y + 6, { size: 10, weight: 700, maxW: cw2 - 78 });
+        text(ctx, g.emoji, gx + 6, y + 5, { size: FS.lg });
+        text(ctx, g.name, gx + 26, y + 6, { size: FS.xs, weight: 700, maxW: cw2 - 78 });
         text(ctx, g.lv > 0 ? g.tierEmoji + g.tierName : '—', gx + cw2 - 50, y + 6,
-          { size: 10, color: g.lv > 0 ? T.cyan : T.txt3, maxW: 46 });
+          { size: FS.xs, color: g.lv > 0 ? T.cyan : T.txt3, maxW: 46 });
         text(ctx, g.cups + (g.maxed ? '' : '/' + g.nextCups), gx + cw2 - 6, y + 6,
-          { size: 10, align: 'right', color: T.txt3, maxW: 48 });
+          { size: FS.xs, align: 'right', color: T.txt3, maxW: 48 });
         GFX.bar(ctx, gx + 6, y + 19, cw2 - 12, 4, g.ratio, { color: T.cyan });
       }
       y += 30;
@@ -783,9 +795,9 @@ function panelLab(ctx, x, y, w, s) {
   y += 6;
 
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '🧪 已解锁配方', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '🧪 已解锁配方', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, '菜单位 ' + (s.menu || []).length + '/' + menuSlots(s), x + w - 10, y + 10,
-    { size: 10.5, align: 'right', color: T.txt3 });
+    { size: FS.sm, align: 'right', color: T.txt3 });
   y += 44;
 
   var unlocked = (s.recipes || []).map(recipeById).filter(Boolean);
@@ -796,24 +808,24 @@ function panelLab(ctx, x, y, w, s) {
        这里补一个等级标记，让玩家知道这款已经是自己的招牌。 */
     var sgv = sigLevelOf(s, r.id);
     GFX.card(ctx, x, y, w, 44);
-    text(ctx, r.emoji + ' ' + r.name, x + 10, y + 8, { size: 12, weight: 700 });
+    text(ctx, r.emoji + ' ' + r.name, x + 10, y + 8, { size: FS.md, weight: 700 });
     /* V9 菜系 + 工坊状态：菜系是产品线，玩家需要一眼看出这条线能不能做 */
     var cu2 = cuisineById(r.cuisine);
     var sub2 = (cu2 ? cu2.emoji + cu2.name + ' · ' : '') + tagNames(r.tags) + ' · ' + money(num(r.price, 0));
-    text(ctx, sub2, x + 10, y + 25, { size: 10, color: T.txt3, maxW: w - 96 });
+    text(ctx, sub2, x + 10, y + 25, { size: FS.xs, color: T.txt3, maxW: w - 96 });
     /* V9：工坊是可选深度，不是门槛 —— 提示这条线开了没开 */
     if (r.cuisine) {
       var wsl = workshopLevel(s, r.cuisine);
       text(ctx, wsl > 0 ? ('🏭 Lv.' + wsl + ' · 权重+' + Math.round((workshopById(r.cuisine).saleBonus[wsl] || 0) * 100) + '%')
         : '🏭 未开线 · 研发省' + Math.round((workshopById(r.cuisine).researchCut || 0) * 100) + '%',
-        x + 10, y + 36, { size: 10, color: wsl > 0 ? T.cyan : T.txt3 });
+        x + 10, y + 36, { size: FS.xs, color: wsl > 0 ? T.cyan : T.txt3 });
     }
     if (sgv.lv > 0) {
       text(ctx, sgv.tier.emoji + ' ' + sgv.tier.name, x + w - 84, y + 8,
-        { size: 10, align: 'right', color: T.cyan, maxW: 74 });
+        { size: FS.xs, align: 'right', color: T.cyan, maxW: 74 });
     }
     GFX.button(ctx, x + w - 74, y + 10, 64, 24, on ? '✅ 在售' : '上架',
-      { kind: on ? 'ghost' : 'primary', act: 'toggle', id: r.id, size: 10.5, r: 8 });
+      { kind: on ? 'ghost' : 'primary', act: 'toggle', id: r.id, size: FS.sm, r: 8 });
     y += 52;
   }
 
@@ -853,9 +865,9 @@ function panelLab(ctx, x, y, w, s) {
     if ((s.recipes || []).indexOf(RESEARCH_TREE[tn].recipe) >= 0) doneN++;
   }
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '🔬 研发树', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '🔬 研发树', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, doneN + '/' + RESEARCH_TREE.length + ' 节点', x + w - 10, y + 10,
-    { size: 10, align: 'right', color: T.cyan });
+    { size: FS.xs, align: 'right', color: T.cyan });
   y += 40;
 
   for (var gi = 0; gi < tree.length; gi++) {
@@ -863,12 +875,12 @@ function panelLab(ctx, x, y, w, s) {
     var isAch = g.cityName.indexOf('成就') >= 0;
     /* 组标题 */
     text(ctx, (isAch ? '🏅' : (!g.city ? '🌐' : (g.isHere ? '📍' : '🗺️'))) + ' ' + g.cityName,
-      x + 4, y + 8, { size: 11, weight: 800, color: g.isHere || isAch || !g.city ? T.txt : T.txt3 });
+      x + 4, y + 8, { size: FS.sm, weight: 800, color: g.isHere || isAch || !g.city ? T.txt : T.txt3 });
     text(ctx, isAch ? '只能通过成就获得'
       : (!g.city ? '全国都能做 · 5 条基础菜系'
         : (g.isHere ? (g.nodes.length + ' 道本地菜') : '需切换经营城市才能研发')),
       x + w - 4, y + 8,
-      { size: 10, align: 'right', color: g.isHere || isAch || !g.city ? T.txt3 : T.amber });
+      { size: FS.xs, align: 'right', color: g.isHere || isAch || !g.city ? T.txt3 : T.amber });
     y += 20;
 
     /* 按阶段分组 */
@@ -884,7 +896,7 @@ function panelLab(ctx, x, y, w, s) {
       var nodes = byStage[st];
       if (st === 99) {
         text(ctx, '📜 成就专属 · 不在研发树中', x + 8, y + 4,
-          { size: 10, color: T.amber, maxW: w - 16 });
+          { size: FS.xs, color: T.amber, maxW: w - 16 });
         y += 18;
       } else if (st > 0) {
         /* 阶段标题带前置提示 —— Canvas 没有 tooltip，
@@ -899,7 +911,7 @@ function panelLab(ctx, x, y, w, s) {
           }
         }
         text(ctx, '第 ' + st + ' 阶段' + (pre.length ? ' · 需先做「' + pre.join('、') + '」' : ''),
-          x + 8, y + 4, { size: 10, color: T.cyan, maxW: w - 16 });
+          x + 8, y + 4, { size: FS.xs, color: T.cyan, maxW: w - 16 });
         y += 18;
       }
       for (var ni = 0; ni < nodes.length; ni++) {
@@ -920,18 +932,18 @@ function panelLab(ctx, x, y, w, s) {
           why = canR.msg || '';
         }
         GFX.card(ctx, x, y, w, 50);
-        text(ctx, nr.emoji + ' ' + nr.name, x + 10, y + 8, { size: 12, weight: 700 });
+        text(ctx, nr.emoji + ' ' + nr.name, x + 10, y + 8, { size: FS.md, weight: 700 });
         text(ctx, nr.city ? (nr.city === currentCityId(s) ? '📍本地' : '🗺️' + ((cityById(nr.city) || {}).name || ''))
           : (tagNames(nr.tags)),
-        x + 10, y + 26, { size: 10, color: T.txt3, maxW: w - 100 });
+        x + 10, y + 26, { size: FS.xs, color: T.txt3, maxW: w - 100 });
         if (why) {
-          text(ctx, why, x + 10, y + 26, { size: 10, color: T.amber, maxW: w - 100 });
+          text(ctx, why, x + 10, y + 26, { size: FS.xs, color: T.amber, maxW: w - 100 });
         }
         GFX.button(ctx, x + w - 84, y + 12, 74, 26,
           nd.status === 'ach' ? '成就获得' : ('研发 ' + money(nd.cost)),
         {
           kind: canR.ok ? 'amber' : 'ghost', act: 'research', id: nd.recipe,
-          disabled: !canR.ok, size: 10, r: 8,
+          disabled: !canR.ok, size: FS.xs, r: 8,
         });
         y += 58;
       }
@@ -961,20 +973,20 @@ function cityBar(ctx, x, y, w, s) {
      所以城市信息压到两行内，必要时把原料名截断而不是换行。 */
   var h = 38;
   GFX.card(ctx, x, y, w, h);
-  text(ctx, '📍', x + 10, y + 9, { size: 13 });
+  text(ctx, '📍', x + 10, y + 9, { size: FS.lg });
   text(ctx, (city ? city.name : cid) + (prov ? '·' + prov.name : ''),
-    x + 28, y + 8, { size: 11.5, weight: 800, color: T.txt });
+    x + 28, y + 8, { size: FS.md, weight: 800, color: T.txt });
   /* ★ 文案与 H5 端 cityBarHtml 保持一致（「本店可用菜系 N 个」）。
      两版措辞不统一会让玩家怀疑是两个不同的功能。*/
   text(ctx, '本店可用菜系 ' + avail + ' 个' + (local.length ? ' · 本地特色 ' + local.length + ' 系' : ' · 本地暂无特色'),
-    x + w - 10, y + 9, { size: 10, align: 'right', color: T.cyan });
+    x + w - 10, y + 9, { size: FS.xs, align: 'right', color: T.cyan });
   if (localIngs.length) {
     h = 56;
     var names = [];
     for (var i = 0; i < localIngs.length; i++) names.push(localIngs[i].emoji + localIngs[i].name);
     GFX.card(ctx, x, y, w, h);
     text(ctx, '🗺️ ' + names.join('、'), x + 10, y + 40,
-      { size: 10, color: T.amber, maxW: w - 20 });
+      { size: FS.xs, color: T.amber, maxW: w - 20 });
   }
   return y + h + 6;
 }
@@ -993,43 +1005,43 @@ function panelVenue(ctx, x, y, w, s) {
   var v = venueView(s);
 
   GFX.card(ctx, x, y, w, 62);
-  text(ctx, '🏙️ 经营信息', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '🏙️ 经营信息', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, v.typeName + ' · ' + [v.provName, v.cityName, v.districtName].filter(Boolean).join(' / '),
-    x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3, maxW: w * 0.55 });
-  text(ctx, '场地类型（点按循环切换）', x + 10, y + 26, { size: 10, color: T.txt2 });
+    x + w - 10, y + 10, { size: FS.xs, align: 'right', color: T.txt3, maxW: w * 0.55 });
+  text(ctx, '场地类型（点按循环切换）', x + 10, y + 26, { size: FS.xs, color: T.txt2 });
   GFX.button(ctx, x + 10, y + 40, 124, 30, v.typeEmoji + ' ' + v.typeName + ' ▸',
-    { kind: 'primary', act: 'vtypeNext', size: 11, r: 9 });
-  text(ctx, v.typeDesc, x + 144, y + 48, { size: 10, color: T.txt3, maxW: w - 154 });
+    { kind: 'primary', act: 'vtypeNext', size: FS.sm, r: 9 });
+  text(ctx, v.typeDesc, x + 144, y + 48, { size: FS.xs, color: T.txt3, maxW: w - 154 });
   y += 72;
 
   /* 省市：点一下切到下一个值。列表很长时循环是唯一合理的触屏交互 */
   GFX.card(ctx, x, y, w, 96);
-  text(ctx, '经营城市', x + 10, y + 9, { size: 12.5, weight: 800 });
-  text(ctx, '限中国大陆 · 点按循环', x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3 });
+  text(ctx, '经营城市', x + 10, y + 9, { size: FS.md, weight: 800 });
+  text(ctx, '限中国大陆 · 点按循环', x + w - 10, y + 10, { size: FS.xs, align: 'right', color: T.txt3 });
   var halfW = (w - 30) / 2;
   GFX.button(ctx, x + 10, y + 26, halfW, 30, '省 ' + v.provName + ' ▸',
-    { kind: 'ghost', act: 'vprovNext', size: 10, r: 9 });
+    { kind: 'ghost', act: 'vprovNext', size: FS.xs, r: 9 });
   GFX.button(ctx, x + 20 + halfW, y + 26, halfW, 30, '市 ' + v.cityName + ' ▸',
-    { kind: 'ghost', act: 'vcityNext', size: 10, r: 9 });
+    { kind: 'ghost', act: 'vcityNext', size: FS.xs, r: 9 });
   /* 区级是可选粒度：没收录的城市不画这一行，而不是给一颗点了没反应的按钮 */
   if (v.hasDistrictData) {
     GFX.button(ctx, x + 10, y + 60, w - 20, 30, '区 ' + (v.districtName || '（不指定）') + ' ▸',
-      { kind: 'ghost', act: 'vdistNext', size: 10, r: 9 });
+      { kind: 'ghost', act: 'vdistNext', size: FS.xs, r: 9 });
   } else {
-    text(ctx, '该城市暂未收录区级（可选仅到市级）', x + 10, y + 70, { size: 10, color: T.txt3, maxW: w - 20 });
+    text(ctx, '该城市暂未收录区级（可选仅到市级）', x + 10, y + 70, { size: FS.xs, color: T.txt3, maxW: w - 20 });
   }
   y += 106;
 
   /* 地图坐标：Canvas 无软键盘，用「定位 / 清除」 */
   GFX.card(ctx, x, y, w, 74);
-  text(ctx, '经营地图位置', x + 10, y + 9, { size: 12.5, weight: 800 });
-  text(ctx, GEO.COORD_SYS + '（高德）', x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3 });
+  text(ctx, '经营地图位置', x + 10, y + 9, { size: FS.md, weight: 800 });
+  text(ctx, GEO.COORD_SYS + '（高德）', x + w - 10, y + 10, { size: FS.xs, align: 'right', color: T.txt3 });
   text(ctx, v.hasGeo ? (v.geo.lng + ', ' + v.geo.lat) : '尚未选点',
-    x + 10, y + 30, { size: 11, color: v.hasGeo ? T.cyan : T.txt3, maxW: w - 20 });
+    x + 10, y + 30, { size: FS.sm, color: v.hasGeo ? T.cyan : T.txt3, maxW: w - 20 });
   GFX.button(ctx, x + 10, y + 46, 96, 28, v.hasGeo ? '清除坐标' : '定位当前城市',
-    { kind: v.hasGeo ? 'ghost' : 'primary', act: v.hasGeo ? 'vgeoclear' : 'vgeoCity', size: 10, r: 9 });
+    { kind: v.hasGeo ? 'ghost' : 'primary', act: v.hasGeo ? 'vgeoclear' : 'vgeoCity', size: FS.xs, r: 9 });
   text(ctx, '境内 ' + GEO.MIN_LAT + '~' + GEO.MAX_LAT + ' / ' + GEO.MIN_LNG + '~' + GEO.MAX_LNG,
-    x + 116, y + 63, { size: 10, color: T.txt3, maxW: w - 126 });
+    x + 116, y + 63, { size: FS.xs, color: T.txt3, maxW: w - 126 });
   y += 84;
   return y;
 }
@@ -1055,39 +1067,39 @@ function panelUp(ctx, x, y, w, s) {
      高端款加成），不做硬约束。放在分店之前 —— 它比开分店更早成为中期决策。 */
   var cvs2 = cuisineViews(s);
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '🏭 制作工坊', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '🏭 制作工坊', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, cvs2.filter(function (c) { return c.level > 0; }).length + '/' + cvs2.length + ' 条产线',
-    x + w - 10, y + 10, { size: 10, align: 'right', color: T.txt3 });
+    x + w - 10, y + 10, { size: FS.xs, align: 'right', color: T.txt3 });
   y += 40;
   text(ctx, '工坊 = 三层加成（成本下降为主力 / 研发更便宜 / 更抢手）；不建也能研发上架',
-    x + 4, y + 2, { size: 10, color: T.txt3, maxW: w - 8 });
+    x + 4, y + 2, { size: FS.xs, color: T.txt3, maxW: w - 8 });
   y += 18;
   for (var wi = 0; wi < cvs2.length; wi++) {
     var cv2 = cvs2[wi];
     var wsn = workshopById(cv2.id);
     GFX.card(ctx, x, y, w, 58);
     text(ctx, cv2.emoji + ' ' + wsn.name + ' Lv.' + cv2.level + '/' + cv2.maxLevel,
-      x + 10, y + 8, { size: 11, weight: 700, maxW: w - 90 });
+      x + 10, y + 8, { size: FS.sm, weight: 700, maxW: w - 90 });
     text(ctx, cv2.unlocked + '/' + cv2.total + ' 款已研发', x + 10, y + 24,
-      { size: 10, color: T.txt3 });
+      { size: FS.xs, color: T.txt3 });
     var focusTxt2 = cv2.focusCount >= 2
       ? ('🔥 主打' + cv2.focusLabel + ' +' + Math.round(cv2.focusBonus * 100) + '%')
       : ('同系满2款触发主打 · 现' + cv2.focusCount + '款');
     text(ctx, focusTxt2, x + 10, y + 40,
-      { size: 10, color: cv2.focusCount >= 2 ? T.amber : T.txt3, maxW: w - 100 });
+      { size: FS.xs, color: cv2.focusCount >= 2 ? T.amber : T.txt3, maxW: w - 100 });
     if (cv2.cost == null) {
-      text(ctx, '已满级', x + w - 10, y + 22, { size: 10, align: 'right', color: T.green });
+      text(ctx, '已满级', x + w - 10, y + 22, { size: FS.xs, align: 'right', color: T.green });
     } else {
       GFX.button(ctx, x + w - 76, y + 16, 66, 26, money(cv2.cost), {
         kind: canAfford(s, cv2.cost) ? 'primary' : 'ghost', act: 'workshop', id: cv2.id,
-        disabled: !canAfford(s, cv2.cost), size: 10, r: 8,
+        disabled: !canAfford(s, cv2.cost), size: FS.xs, r: 8,
       });
     }
     y += 66;
   }
 
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '⬆️ 店铺升级', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '⬆️ 店铺升级', x + 10, y + 9, { size: FS.md, weight: 800 });
   y += 44;
   for (var i = 0; i < UPGRADES.length; i++) {
     var u = UPGRADES[i];
@@ -1095,8 +1107,8 @@ function panelUp(ctx, x, y, w, s) {
     var cost = upgradeCost(s, u.id);
     var maxed = cost == null;
     GFX.card(ctx, x, y, w, 50);
-    text(ctx, u.emoji + ' ' + u.name, x + 10, y + 8, { size: 12, weight: 700 });
-    text(ctx, u.desc, x + 10, y + 26, { size: 10, color: T.txt3, maxW: w - 120 });
+    text(ctx, u.emoji + ' ' + u.name, x + 10, y + 8, { size: FS.md, weight: 700 });
+    text(ctx, u.desc, x + 10, y + 26, { size: FS.xs, color: T.txt3, maxW: w - 120 });
     /* 等级点：数量按各自 max 画。写死 6 的话 speed/decor（max 8）满级也只亮 6 个。 */
     for (var d = 0; d < num(u.max, 6); d++) {
       ctx.fillStyle = d < lv ? T.cyan : 'rgba(255,255,255,.13)';
@@ -1104,7 +1116,7 @@ function panelUp(ctx, x, y, w, s) {
     }
     GFX.button(ctx, x + w - 76, y + 22, 66, 22, maxed ? '已满级' : money(cost), {
       kind: maxed ? 'ghost' : 'primary', act: 'upgrade', id: u.id,
-      disabled: maxed || !canAfford(s, cost), size: 10, r: 8,
+      disabled: maxed || !canAfford(s, cost), size: FS.xs, r: 8,
     });
     y += 58;
   }
@@ -1113,31 +1125,31 @@ function panelUp(ctx, x, y, w, s) {
      直接用 SHOP_COSTS 会把地狱难度的价标少 15%，出现「按钮亮着、点了说钱不够」。 */
   var sc = shopCost(s);
   GFX.card(ctx, x, y, w, 50);
-  text(ctx, '🏪 开设分店', x + 10, y + 8, { size: 12, weight: 700 });
+  text(ctx, '🏪 开设分店', x + 10, y + 8, { size: FS.md, weight: 700 });
   text(ctx, '当前 ' + num(s.shops) + ' 家 · 出杯位 +1、客流 +60%', x + 10, y + 26,
-    { size: 10, color: T.txt3 });
+    { size: FS.xs, color: T.txt3 });
   GFX.button(ctx, x + w - 76, y + 12, 66, 26, sc != null ? money(sc) : '已满', {
-    kind: 'amber', act: 'shop', disabled: sc == null || !canAfford(s, sc), size: 10, r: 8,
+    kind: 'amber', act: 'shop', disabled: sc == null || !canAfford(s, sc), size: FS.xs, r: 8,
   });
   y += 60;
 
   /* 品牌声望（与 H5 的「🌟 品牌声望」卡对齐：说明钱从哪来、为什么不直接加客流） */
   var mbp = num(META().bp, 0);
   GFX.card(ctx, x, y, w, 62);
-  text(ctx, '🌟 品牌声望 ' + mbp + ' ★', x + 10, y + 8, { size: 12, weight: 700 });
+  text(ctx, '🌟 品牌声望 ' + mbp + ' ★', x + 10, y + 8, { size: FS.md, weight: 700 });
   text(ctx, '开局创业基金 ' + money(prestigeStartCash(mbp)) + '（封顶 ' + money(CFG.BP_START_CAP) + '）',
-    x + w - 10, y + 9, { size: 10, align: 'right', color: T.green });
+    x + w - 10, y + 9, { size: FS.xs, align: 'right', color: T.green });
   text(ctx, '本局已到账 +' + money(num(s.startBonus, 0)) + '，由你决定投去雇人 / 提速 / 开店',
-    x + 10, y + 28, { size: 10, color: T.txt3, maxW: w - 20 });
+    x + 10, y + 28, { size: FS.xs, color: T.txt3, maxW: w - 20 });
   text(ctx, '声望不再直接加客流（客人多到做不过来只会流失扣口碑）；现在转生 +'
-    + prestigeGain(s) + ' ★', x + 10, y + 44, { size: 10, color: T.txt3, maxW: w - 20 });
+    + prestigeGain(s) + ' ★', x + 10, y + 44, { size: FS.xs, color: T.txt3, maxW: w - 20 });
   y += 72;
 
   /* 转生 / 收官 */
   GFX.button(ctx, x, y, (w - 10) / 2, 40, '♻️ 品牌升级',
-    { kind: 'amber', act: 'prestige', size: 12 });
+    { kind: 'amber', act: 'prestige', size: FS.md });
   GFX.button(ctx, x + (w - 10) / 2 + 10, y, (w - 10) / 2, 40, '🏁 提前收官',
-    { kind: 'ghost', act: 'finish', size: 12 });
+    { kind: 'ghost', act: 'finish', size: FS.md });
   y += 50;
   return y + 10;
 }
@@ -1147,27 +1159,27 @@ function panelUp(ctx, x, y, w, s) {
  * ========================================================== */
 function panelStaff(ctx, x, y, w, s) {
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '👥 我的员工', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '👥 我的员工', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, '出杯位 ' + stationCount(s) + ' 个', x + w - 10, y + 10,
-    { size: 10.5, align: 'right', color: T.cyan });
+    { size: FS.sm, align: 'right', color: T.cyan });
   y += 44;
 
   var st = s.staff || [];
   if (!st.length) {
     GFX.card(ctx, x, y, w, 36);
-    text(ctx, '还没有员工，出杯位只有老板 1 个', x + 10, y + 11, { size: 11, color: T.txt3 });
+    text(ctx, '还没有员工，出杯位只有老板 1 个', x + 10, y + 11, { size: FS.sm, color: T.txt3 });
     y += 46;
   }
   for (var i = 0; i < st.length; i++) {
     var p = st[i];
     var tr = traitById(p.trait);
     GFX.card(ctx, x, y, w, 60);
-    text(ctx, p.emoji + ' ' + p.name, x + 10, y + 8, { size: 12, weight: 700 });
+    text(ctx, p.emoji + ' ' + p.name, x + 10, y + 8, { size: FS.md, weight: 700 });
     text(ctx, (tr ? tr.emoji + ' ' + tr.name : '无特质') + ' · 日薪 ' + money(p.wage),
-      x + 10, y + 26, { size: 10, color: T.txt2 });
+      x + 10, y + 26, { size: FS.xs, color: T.txt2 });
     GFX.bar(ctx, x + 10, y + 44, w - 96, 5, num(p.stamina) / 100, { color: T.green });
-    text(ctx, '体力 ' + Math.round(num(p.stamina)), x + w - 84, y + 40, { size: 10, color: T.txt3 });
-    GFX.button(ctx, x + w - 44, y + 18, 34, 24, '解雇', { kind: 'danger', act: 'fire', id: String(p.id), size: 10, r: 7 });
+    text(ctx, '体力 ' + Math.round(num(p.stamina)), x + w - 84, y + 40, { size: FS.xs, color: T.txt3 });
+    GFX.button(ctx, x + w - 44, y + 18, 34, 24, '解雇', { kind: 'danger', act: 'fire', id: String(p.id), size: FS.xs, r: 7 });
     y += 68;
   }
   /* 团建：H5 有这个按钮，小游戏原本没有 —— teamBuild() 成了死代码，
@@ -1175,25 +1187,25 @@ function panelStaff(ctx, x, y, w, s) {
   if (st.length) {
     var tbc = Math.round(180 * (1 + st.length * 0.4));
     GFX.button(ctx, x, y, w, 38, '🎉 团建（全员体力回满）' + money(tbc),
-      { kind: 'amber', act: 'teambuild', size: 11.5, disabled: !canAfford(s, tbc), pressed: isPressed('teambuild') });
+      { kind: 'amber', act: 'teambuild', size: FS.md, disabled: !canAfford(s, tbc), pressed: isPressed('teambuild') });
     y += 48;
   }
 
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '📋 候选人', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '📋 候选人', x + 10, y + 9, { size: FS.md, weight: 800 });
   y += 44;
   var cd = s.candidates || [];
   for (var j = 0; j < cd.length; j++) {
     var c = cd[j];
     var ct = traitById(c.trait);
     GFX.card(ctx, x, y, w, 54);
-    text(ctx, c.emoji + ' ' + c.name, x + 10, y + 8, { size: 12, weight: 700 });
+    text(ctx, c.emoji + ' ' + c.name, x + 10, y + 8, { size: FS.md, weight: 700 });
     text(ctx, (ct ? ct.emoji + ' ' + ct.name : '') + ' · 技能 ' + c.skill + ' · 日薪 ' + money(c.wage),
-      x + 10, y + 27, { size: 10, color: T.txt2 });
+      x + 10, y + 27, { size: FS.xs, color: T.txt2 });
     GFX.button(ctx, x + w - 76, y + 14, 66, 26, '雇佣 ' + money(c.fee), {
       kind: 'primary', act: 'hire', id: String(j),
       /* 只校验聘用费：hireStaff() 也只扣 fee，多算一个 wage 会让能雇的人变灰 */
-      disabled: !canAfford(s, c.fee), size: 10, r: 8,
+      disabled: !canAfford(s, c.fee), size: FS.xs, r: 8,
     });
     y += 62;
   }
@@ -1207,25 +1219,25 @@ function panelRival(ctx, x, y, w, s) {
   var rv = s.rival || {};
   var share = num(rivalShare(s));
   GFX.card(ctx, x, y, w, 96);
-  text(ctx, '🏙️ 商圈争夺', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '🏙️ 商圈争夺', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, (rv.emoji || '🦑') + ' ' + (rv.name || '竞争对手'), x + 10, y + 28,
-    { size: 13, weight: 800, color: T.pink });
+    { size: FS.lg, weight: 800, color: T.pink });
   text(ctx, '抢走客流 ' + Math.round(share * 100) + '%', x + w - 10, y + 28,
-    { size: 11, align: 'right', color: share > 0.15 ? T.red : T.txt2 });
+    { size: FS.sm, align: 'right', color: share > 0.15 ? T.red : T.txt2 });
   GFX.bar(ctx, x + 10, y + 52, w - 20, 8, share / 0.4, { color: T.pink });
   /* rival 上没有 cash 字段（只有 rep / aggro / proof），写上去恒显示 ¥0 */
   text(ctx, '声望 ' + Math.round(num(rv.rep)) + ' · 护城河 Lv.' + num(rv.proof),
-    x + 10, y + 68, { size: 10.5, color: T.txt3 });
+    x + 10, y + 68, { size: FS.sm, color: T.txt3 });
   y += 106;
 
   for (var i = 0; i < RIVAL_ACTIONS.length; i++) {
     var a = RIVAL_ACTIONS[i];
     GFX.card(ctx, x, y, w, 58);
-    text(ctx, a.emoji + ' ' + a.name, x + 10, y + 8, { size: 12, weight: 700 });
-    text(ctx, a.desc, x + 10, y + 27, { size: 10, color: T.txt3, maxW: w - 100 });
+    text(ctx, a.emoji + ' ' + a.name, x + 10, y + 8, { size: FS.md, weight: 700 });
+    text(ctx, a.desc, x + 10, y + 27, { size: FS.xs, color: T.txt3, maxW: w - 100 });
     GFX.button(ctx, x + w - 84, y + 16, 74, 26, money(a.cost), {
       kind: 'primary', act: 'rivalact', id: a.id,
-      disabled: !canAfford(s, a.cost), size: 10, r: 8,
+      disabled: !canAfford(s, a.cost), size: FS.xs, r: 8,
     });
     y += 66;
   }
@@ -1239,12 +1251,12 @@ function panelAch(ctx, x, y, w, s) {
   var got = 0;
   for (var k = 0; k < ACHIEVEMENTS.length; k++) if (s.ach[ACHIEVEMENTS[k].id]) got++;
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '🏅 成就', x + 10, y + 9, { size: 12.5, weight: 800 });
+  text(ctx, '🏅 成就', x + 10, y + 9, { size: FS.md, weight: 800 });
   text(ctx, got + '/' + ACHIEVEMENTS.length, x + w - 10, y + 10,
-    { size: 11, align: 'right', color: T.amber });
+    { size: FS.sm, align: 'right', color: T.amber });
   y += 44;
   text(ctx, '本局达成给现金；跨局首次达成额外给 ★（' + achStarText() + '）',
-    x + 10, y - 6, { size: 10, color: T.txt3, maxW: w - 20 });
+    x + 10, y - 6, { size: FS.xs, color: T.txt3, maxW: w - 20 });
 
   var cols = 3, cw = (w - 8 * (cols - 1)) / cols;
   for (var i = 0; i < ACHIEVEMENTS.length; i++) {
@@ -1255,9 +1267,9 @@ function panelAch(ctx, x, y, w, s) {
     GFX.fillRR(ctx, cx, cy, cw, 60, 12,
       on ? 'rgba(255,194,71,.14)' : T.card,
       on ? 'rgba(255,194,71,.5)' : T.line);
-    text(ctx, a.emoji, cx + cw / 2, cy + 6, { size: 20, align: 'center' });
-    text(ctx, a.name, cx + cw / 2, cy + 30, { size: 10, weight: 700, align: 'center', color: on ? T.amber : T.txt3, maxW: cw - 6 });
-    text(ctx, on ? '+' + a.reward.bp + '★' : a.desc, cx + cw / 2, cy + 44, { size: 10, align: 'center', color: T.txt3, maxW: cw - 6 });
+    text(ctx, a.emoji, cx + cw / 2, cy + 6, { size: FS.display, align: 'center' });
+    text(ctx, a.name, cx + cw / 2, cy + 30, { size: FS.xs, weight: 700, align: 'center', color: on ? T.amber : T.txt3, maxW: cw - 6 });
+    text(ctx, on ? '+' + a.reward.bp + '★' : a.desc, cx + cw / 2, cy + 44, { size: FS.xs, align: 'center', color: T.txt3, maxW: cw - 6 });
   }
   return y + Math.ceil(ACHIEVEMENTS.length / cols) * 68 + 10;
 }
@@ -1299,7 +1311,7 @@ function drawStage(ctx, L, s) {
   GFX.bar(ctx, x, y + 10, w, 7, num(sim.t) / num(sim.duration), { color: T.cyan });
   var tb = sim.paused ? '⏸ 已暂停' : (sim.closing ? '🔔 打烊清场中…'
     : '营业中 ' + Math.max(0, Math.ceil(num(sim.duration) - num(sim.t))) + 's');
-  text(ctx, tb, x + w / 2, y - 2, { size: 11, align: 'center', color: T.txt2 });
+  text(ctx, tb, x + w / 2, y - 2, { size: FS.sm, align: 'center', color: T.txt2 });
   y += 28;
 
   /* 四个实时数值 */
@@ -1312,9 +1324,9 @@ function drawStage(ctx, L, s) {
   ];
   for (var i = 0; i < 4; i++) {
     GFX.fillRR(ctx, x + i * (lw + 6), y, lw, 38, 10, T.card, T.line);
-    text(ctx, live[i].k, x + i * (lw + 6) + lw / 2, y + 4, { size: 10, align: 'center', color: T.txt3 });
+    text(ctx, live[i].k, x + i * (lw + 6) + lw / 2, y + 4, { size: FS.xs, align: 'center', color: T.txt3 });
     text(ctx, live[i].v, x + i * (lw + 6) + lw / 2, y + 16,
-      { size: 14, weight: 800, align: 'center', color: live[i].c, maxW: lw - 6 });
+      { size: FS.lg, weight: 800, align: 'center', color: live[i].c, maxW: lw - 6 });
   }
   y += 48;
 
@@ -1328,7 +1340,7 @@ function drawStage(ctx, L, s) {
   var qShow = Math.min(q.length, per * QROWS);
   text(ctx, '🚶 排队中 ' + q.length + '/' + queueCap(s)
     + (q.length > qShow ? '（下方显示前 ' + qShow + ' 位）' : ''),
-    x, y, { size: 11, color: T.txt3 });
+    x, y, { size: FS.sm, color: T.txt3 });
   y += 18;
   for (var qi = 0; qi < qShow; qi++) {
     var c = q[qi];
@@ -1338,9 +1350,9 @@ function drawStage(ctx, L, s) {
     /* V7 事件型顾客：金色描边 + ★ 角标，一眼认出该优先伺候谁 */
     GFX.fillRR(ctx, cx, cy, qw, 50, 10, c.special ? 'rgba(255,194,71,.14)' : T.card,
       c.special ? 'rgba(255,194,71,.75)' : T.line);
-    text(ctx, c.face || '🙂', cx + qw / 2, cy + 2, { size: 17, align: 'center' });
-    if (c.special) text(ctx, '★', cx + qw - 8, cy + 1, { size: 10, align: 'right', color: T.amber });
-    text(ctx, r.emoji, cx + qw / 2, cy + 24, { size: 11, align: 'center' });
+    text(ctx, c.face || '🙂', cx + qw / 2, cy + 2, { size: FS.xl, align: 'center' });
+    if (c.special) text(ctx, '★', cx + qw - 8, cy + 1, { size: FS.xs, align: 'right', color: T.amber });
+    text(ctx, r.emoji, cx + qw / 2, cy + 24, { size: FS.sm, align: 'center' });
     var left = 1 - num(c.wait) / Math.max(0.001, num(c.patience));
     GFX.bar(ctx, cx + 4, cy + 42, qw - 8, 4, left, { color: left < 0.3 ? T.red : T.green });
   }
@@ -1371,7 +1383,7 @@ function drawStage(ctx, L, s) {
 
   text(ctx, '🧋 出杯位 ' + stn.length + ' 个'
     + (VIEW.stageMax > 0 ? '　↕ 可上下滑动' : ''),
-    x, y, { size: 11, color: VIEW.stageMax > 0 ? T.cyan : T.txt3 });
+    x, y, { size: FS.sm, color: VIEW.stageMax > 0 ? T.cyan : T.txt3 });
 
   GFX.clipPush(ctx, x - 2, viewTop, w + 4, viewH);
   for (var si = 0; si < stn.length; si++) {
@@ -1393,14 +1405,14 @@ function drawStage(ctx, L, s) {
       var hit = (rr.tags || []).indexOf(s.trend) >= 0;
       var pay = '¥' + Math.round(num(st.order.price) * n) + (hit ? ' 🔥' : '');
       if (compact) {
-        text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + 8, sy + 16, { size: 13 });
+        text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + 8, sy + 16, { size: FS.lg });
         text(ctx, pay, sx + sw - 8, sy + 18,
-          { size: 10, align: 'right', color: hit ? T.amber : T.txt2, maxW: sw - 34 });
+          { size: FS.xs, align: 'right', color: hit ? T.amber : T.txt2, maxW: sw - 34 });
         GFX.bar(ctx, sx + 8, sy + sh - 16, sw - 16, 5, num(st.order.progress), { color: T.cyan });
       } else {
-        text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + sw / 2, sy + 22, { size: 17, align: 'center' });
+        text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + sw / 2, sy + 22, { size: FS.xl, align: 'center' });
         GFX.bar(ctx, sx + 8, sy + 46, sw - 16, 6, num(st.order.progress), { color: T.cyan });
-        text(ctx, pay, sx + sw / 2, sy + 56, { size: 10, align: 'center', color: hit ? T.amber : T.txt2 });
+        text(ctx, pay, sx + sw / 2, sy + 56, { size: FS.xs, align: 'center', color: hit ? T.amber : T.txt2 });
       }
     } else {
       text(ctx, '—', sx + sw / 2, sy + (compact ? 16 : 24),
@@ -1426,11 +1438,11 @@ function drawStage(ctx, L, s) {
   var bw = (w - 12) / 2;
   GFX.button(ctx, x, by, bw, 42,
     num(sim.rushCd) > 0 ? '⚡ 大招 (' + Math.ceil(num(sim.rushCd)) + 's)' : '⚡ 老板上阵',
-    { kind: 'rush', act: 'boss', disabled: num(sim.rushCd) > 0, size: 12 });
+    { kind: 'rush', act: 'boss', disabled: num(sim.rushCd) > 0, size: FS.md });
   GFX.button(ctx, x + bw + 12, by, bw, 42, sim.paused ? '▶ 继续' : '⏸ 暂停',
-    { kind: 'ghost', act: 'pause', size: 12 });
-  GFX.button(ctx, x, by + 48, bw, 38, '🚚 紧急进货', { kind: 'ghost', act: 'restock', size: 11.5 });
-  GFX.button(ctx, x + bw + 12, by + 48, bw, 38, '🔔 提前打烊', { kind: 'ghost', act: 'closeearly', size: 11.5 });
+    { kind: 'ghost', act: 'pause', size: FS.md });
+  GFX.button(ctx, x, by + 48, bw, 38, '🚚 紧急进货', { kind: 'ghost', act: 'restock', size: FS.md });
+  GFX.button(ctx, x + bw + 12, by + 48, bw, 38, '🔔 提前打烊', { kind: 'ghost', act: 'closeearly', size: FS.md });
   /* 营业中两个即时决策（V2）：每天各一次。用 kind:'ghost' + 文案区分 ——
      Canvas 版没有 H5 那种独立一行的样式，做不到"视觉上不是常规操作"，
      至少保证用掉之后就明确写成「已用 / 已下架」，不会让人反复点。 */
@@ -1441,9 +1453,9 @@ function drawStage(ctx, L, s) {
       : (ops.sale.used ? '📣 促销已用' : '📣 限时促销'));
   var pullLabel = !ops ? '📥 临时下架' : (ops.pull.used ? '📥 已下架' : '📥 临时下架');
   GFX.button(ctx, x, by + 92, bw, 38, saleLabel,
-    { kind: saleOn ? 'cyan' : 'ghost', act: 'sale', size: 11.5, disabled: !!(ops && ops.sale.used) });
+    { kind: saleOn ? 'cyan' : 'ghost', act: 'sale', size: FS.md, disabled: !!(ops && ops.sale.used) });
   GFX.button(ctx, x + bw + 12, by + 92, bw, 38, pullLabel,
-    { kind: 'ghost', act: 'pullmenu', size: 11.5, disabled: !!(ops && ops.pull.used) });
+    { kind: 'ghost', act: 'pullmenu', size: FS.md, disabled: !!(ops && ops.pull.used) });
 }
 
 /* ============================================================
@@ -1478,12 +1490,12 @@ function drawModal(ctx, L) {
   /* 超高时给一条提示，玩家才知道能滑 */
   if (VIEW.modalMax > 0) {
     text(ctx, '↕ 上下滑动查看更多', box.x + box.w / 2, box.y + box.h - 12,
-      { size: 10, align: 'center', color: T.txt3 });
+      { size: FS.xs, align: 'center', color: T.txt3 });
   }
   /* 事件弹窗不给 ×：step() 每帧都会重建它，给了 × 就是「关掉→下一帧又弹出来」，
      看起来像按钮失灵。H5 的 showEvent() 同样锁死，必须选一个选项。 */
   if (m.type !== 'event' && m.type !== 'report') {
-    GFX.cardBtn(ctx, box.x + box.w - 34, box.y + 14, 20, 20, [{ t: '×', size: 16 }],
+    GFX.cardBtn(ctx, box.x + box.w - 34, box.y + 14, 20, 20, [{ t: '×', size: FS.xl }],
       { act: 'close', r: 10, hitPad: 5 });
   }
 }
@@ -1507,13 +1519,13 @@ function deltaStr(cur, prev, opt) {
 /* 一行里每段自带涨跌配色，Canvas 没有富文本，只能自己排 */
 function drawDeltas(ctx, x, y, label, items) {
   var cx = x;
-  text(ctx, label, cx, y + 1, { size: 10, color: T.txt3 });
+  text(ctx, label, cx, y + 1, { size: FS.xs, color: T.txt3 });
   cx += GFX.textW(ctx, label, 10, 400) + 6;
   for (var i = 0; i < items.length; i++) {
-    if (i) { text(ctx, '·', cx, y + 1, { size: 10, color: T.txt3 }); cx += 9; }
-    text(ctx, items[i].label, cx, y + 1, { size: 10, color: T.txt3 });
+    if (i) { text(ctx, '·', cx, y + 1, { size: FS.xs, color: T.txt3 }); cx += 9; }
+    text(ctx, items[i].label, cx, y + 1, { size: FS.xs, color: T.txt3 });
     cx += GFX.textW(ctx, items[i].label, 10, 400) + 2;
-    text(ctx, items[i].d.t, cx, y, { size: 11, weight: 800, color: items[i].d.c });
+    text(ctx, items[i].d.t, cx, y, { size: FS.sm, weight: 800, color: items[i].d.c });
     cx += GFX.textW(ctx, items[i].d.t, 11, 800) + 7;
   }
 }
@@ -1523,7 +1535,7 @@ MODALS.report = function (ctx, b, m) {
   var s = S();
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 14;
-  text(ctx, '📊 Day ' + m.day + ' 结算', x, y, { size: 15, weight: 900 });
+  text(ctx, '📊 Day ' + m.day + ' 结算', x, y, { size: FS.lg, weight: 900 });
   y += 26;
 
   var rows = (s.history || []).slice(-14);
@@ -1544,8 +1556,8 @@ MODALS.report = function (ctx, b, m) {
   for (var i = 0; i < items.length; i++) {
     var ix = x + (i % cols) * (cw + 8), iy = y + Math.floor(i / cols) * 44;
     GFX.fillRR(ctx, ix, iy, cw, 38, 10, T.card, T.line);
-    text(ctx, items[i].k, ix + 8, iy + 5, { size: 10, color: T.txt3 });
-    text(ctx, items[i].v, ix + 8, iy + 19, { size: 12.5, weight: 800, color: items[i].c, maxW: cw - 16 });
+    text(ctx, items[i].k, ix + 8, iy + 5, { size: FS.xs, color: T.txt3 });
+    text(ctx, items[i].v, ix + 8, iy + 19, { size: FS.md, weight: 800, color: items[i].c, maxW: cw - 16 });
   }
   y += Math.ceil(items.length / cols) * 44 + 8;
 
@@ -1569,7 +1581,7 @@ MODALS.report = function (ctx, b, m) {
   if (cr2) {
     text(ctx, (cr2.ok ? '📜 合同达成：' : '📜 合同未达成：') + cr2.emoji + ' ' + cr2.name
       + ' · ' + (cr2.ok ? '+' + money(cr2.cash) : '口碑 ' + num(cr2.rep)),
-      x, y, { size: 10.5, weight: 700, color: cr2.ok ? T.green : T.red, maxW: w });
+      x, y, { size: FS.sm, weight: 700, color: cr2.ok ? T.green : T.red, maxW: w });
     y += 17;
   }
   /* V5 章节关卡的结算行：与 H5 的 .rep-ct 同一段内容、同一口径 */
@@ -1578,24 +1590,24 @@ MODALS.report = function (ctx, b, m) {
     text(ctx, (sr2.ok ? '🏔️ 关卡达成：' : '🏔️ 关卡未达成：') + sr2.emoji + ' ' + sr2.name
       + ' · ' + sr2.diffEmoji + sr2.diffName + ' · '
       + (sr2.ok ? '+' + money(sr2.cash) : '目标 ' + sr2.desc),
-      x, y, { size: 10.5, weight: 700, color: sr2.ok ? T.green : T.red, maxW: w });
+      x, y, { size: FS.sm, weight: 700, color: sr2.ok ? T.green : T.red, maxW: w });
     y += 17;
   }
   var hl = r.highlights || [];
   for (var hi = 0; hi < hl.length; hi++) {
-    y += para(ctx, hl[hi].text, x, y, { size: 10.5, color: T.amber, maxW: w, lineH: 15 });
+    y += para(ctx, hl[hi].text, x, y, { size: FS.sm, color: T.amber, maxW: w, lineH: 15 });
   }
   if (hl.length) y += 4;
 
   /* 营销是当日一次性投入，打烊即归零 —— 不说清楚玩家会以为钱白花了 */
   if (num(r.marketing) > 0) {
     text(ctx, '📢 营销 ' + money(r.marketing) + ' 当天有效，明日需重新设置',
-      x, y, { size: 10.5, color: T.amber, maxW: w });
+      x, y, { size: FS.sm, color: T.amber, maxW: w });
     y += 16;
   }
   if (s.endless && num(r.pressure) > 1) {
     text(ctx, '⚡ 无尽第 ' + num(s.milestone) + ' 阶：工资与租金 ×' + num(r.pressure).toFixed(2),
-      x, y, { size: 10.5, color: T.red, maxW: w });
+      x, y, { size: FS.sm, color: T.red, maxW: w });
     y += 16;
   }
 
@@ -1603,11 +1615,11 @@ MODALS.report = function (ctx, b, m) {
   if (advs2.length) {
     GFX.fillRR(ctx, x, y, w, 34, 10, 'rgba(255,194,71,.10)', 'rgba(255,194,71,.3)');
     text(ctx, '📌 ' + GFX.plainText((advs2[0].icon || '') + ' ' + (advs2[0].text || '')), x + 10, y + 11,
-      { size: 10.5, color: T.amber, maxW: w - 20 });
+      { size: FS.sm, color: T.amber, maxW: w - 20 });
     y += 44;
   }
   /* 按钮写的是「即将进入的那一天」。写 s.day 会让玩家以为这一天还没过去。 */
-  GFX.button(ctx, x, y, w, 40, '🌅 进入 Day ' + (num(s.day) + 1), { kind: 'primary', act: 'nextday', size: 13 });
+  GFX.button(ctx, x, y, w, 40, '🌅 进入 Day ' + (num(s.day) + 1), { kind: 'primary', act: 'nextday', size: FS.lg });
 };
 
 /* 经营报表（备货阶段从 HUD 的 📈 进入）。
@@ -1618,15 +1630,15 @@ MODALS.chart = function (ctx, b, m) {
   var s = S();
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 14;
-  text(ctx, '📈 经营报表', x, y, { size: 15, weight: 900 });
+  text(ctx, '📈 经营报表', x, y, { size: FS.lg, weight: 900 });
   text(ctx, 'Day ' + num(s.day) + ' · 净资产 ' + money(netWorth(s)), x + w, y + 2,
-    { size: 10.5, align: 'right', color: T.txt3 });
+    { size: FS.sm, align: 'right', color: T.txt3 });
   y += 28;
 
   var rows = (s.history || []).slice(-14);
   if (rows.length < 2) {
     text(ctx, '还没有足够的数据 —— 打烊两天后这里就会出现曲线。', x, y + 16,
-      { size: 11.5, color: T.txt3, maxW: w });
+      { size: FS.md, color: T.txt3, maxW: w });
     return;
   }
   GFX.lineChart(ctx, x, y, w, 132,
@@ -1647,8 +1659,8 @@ MODALS.chart = function (ctx, b, m) {
   for (var i = 0; i < items.length; i++) {
     var ix = x + (i % cols) * (cw + 8), iy = y + Math.floor(i / cols) * 44;
     GFX.fillRR(ctx, ix, iy, cw, 38, 10, T.card, T.line);
-    text(ctx, items[i].k, ix + 8, iy + 5, { size: 10, color: T.txt3 });
-    text(ctx, items[i].v, ix + 8, iy + 19, { size: 12.5, weight: 800, color: items[i].c, maxW: cw - 16 });
+    text(ctx, items[i].k, ix + 8, iy + 5, { size: FS.xs, color: T.txt3 });
+    text(ctx, items[i].v, ix + 8, iy + 19, { size: FS.md, weight: 800, color: items[i].c, maxW: cw - 16 });
   }
 };
 
@@ -1659,13 +1671,13 @@ MODALS.event = function (ctx, b, m) {
   if (!ev) return;
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 14;
-  text(ctx, (ev.emoji || '📌') + ' ' + (ev.title || '突发事件'), x, y, { size: 15, weight: 900 });
+  text(ctx, (ev.emoji || '📌') + ' ' + (ev.title || '突发事件'), x, y, { size: FS.lg, weight: 900 });
   y += 26;
-  y += para(ctx, ev.text || '', x, y, { size: 12, color: T.txt2, maxW: w, lineH: 18 }) + 10;
+  y += para(ctx, ev.text || '', x, y, { size: FS.md, color: T.txt2, maxW: w, lineH: 18 }) + 10;
   for (var i = 0; i < (ev.options || []).length; i++) {
     var o = ev.options[i];
     GFX.button(ctx, x, y, w, 42, o.label,
-      { kind: i === 0 ? 'primary' : 'ghost', act: 'eventopt', id: String(i), size: 12 });
+      { kind: i === 0 ? 'primary' : 'ghost', act: 'eventopt', id: String(i), size: FS.md });
     y += 50;
   }
 };
@@ -1677,22 +1689,22 @@ MODALS.card = function (ctx, b, m) {
   if (!offer.length) return;
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 14;
-  text(ctx, '🃏 经营策略 · 三选一', x, y, { size: 15, weight: 900 });
+  text(ctx, '🃏 经营策略 · 三选一', x, y, { size: FS.lg, weight: 900 });
   y += 24;
-  text(ctx, 'Day ' + num(s.day) + ' 打烊 · 选定后在本局内持续生效', x, y, { size: 11, color: T.txt3, maxW: w });
+  text(ctx, 'Day ' + num(s.day) + ' 打烊 · 选定后在本局内持续生效', x, y, { size: FS.sm, color: T.txt3, maxW: w });
   y += 26;
   for (var i = 0; i < offer.length; i++) {
     var c = offer[i];
     /* 高度按「收益 + 代价」两行算，用 para 换行会被裁掉一半 */
     GFX.fillRR(ctx, x, y, w, 58, 12, T.card2, T.line);
-    text(ctx, c.emoji + ' ' + c.name, x + 11, y + 8, { size: 12.5, weight: 800, maxW: w - 90 });
-    text(ctx, '↑ ' + c.gain, x + 11, y + 27, { size: 10, color: T.green, maxW: w - 100 });
-    text(ctx, '↓ ' + c.cost, x + 11, y + 41, { size: 10, color: T.red, maxW: w - 100 });
+    text(ctx, c.emoji + ' ' + c.name, x + 11, y + 8, { size: FS.md, weight: 800, maxW: w - 90 });
+    text(ctx, '↑ ' + c.gain, x + 11, y + 27, { size: FS.xs, color: T.green, maxW: w - 100 });
+    text(ctx, '↓ ' + c.cost, x + 11, y + 41, { size: FS.xs, color: T.red, maxW: w - 100 });
     GFX.button(ctx, x + w - 66, y + 16, 56, 26, '选它',
-      { kind: i === 0 ? 'primary' : 'ghost', act: 'pickcard', id: c.id, size: 11, r: 8 });
+      { kind: i === 0 ? 'primary' : 'ghost', act: 'pickcard', id: c.id, size: FS.sm, r: 8 });
     y += 66;
   }
-  GFX.button(ctx, x, y, w, 36, '🚫 都不要（维持现状）', { kind: 'ghost', act: 'skipcard', size: 11 });
+  GFX.button(ctx, x, y, w, 36, '🚫 都不要（维持现状）', { kind: 'ghost', act: 'skipcard', size: FS.sm });
 };
 
 /* 每日挑战日榜（F3）
@@ -1709,28 +1721,28 @@ MODALS.dailyrank = function (ctx, b, m) {
 
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 14;
-  text(ctx, '🏆 每日挑战 · 同种子日榜', x, y, { size: 15, weight: 900 });
+  text(ctx, '🏆 每日挑战 · 同种子日榜', x, y, { size: FS.lg, weight: 900 });
   y += 24;
   y += para(ctx, '每天全网共用同一个种子：同一张价格表、同一批顾客、同一串事件。'
-    + '比的只有经营决策。', x, y, { size: 10.5, color: T.txt3, maxW: w, lineH: 15 }) + 10;
+    + '比的只有经营决策。', x, y, { size: FS.sm, color: T.txt3, maxW: w, lineH: 15 }) + 10;
 
   var cw = (w - 10) / 2;
   GFX.fillRR(ctx, x, y, cw, 40, 10, T.card2, T.line);
-  text(ctx, '今日最好', x + 9, y + 6, { size: 10, color: T.txt3 });
-  text(ctx, today ? money(today) : '未挑战', x + 9, y + 20, { size: 13, weight: 800, color: T.amber });
+  text(ctx, '今日最好', x + 9, y + 6, { size: FS.xs, color: T.txt3 });
+  text(ctx, today ? money(today) : '未挑战', x + 9, y + 20, { size: FS.lg, weight: 800, color: T.amber });
   GFX.fillRR(ctx, x + cw + 10, y, cw, 40, 10, T.card2, T.line);
-  text(ctx, '个人最佳', x + cw + 19, y + 6, { size: 10, color: T.txt3 });
-  text(ctx, ever ? money(ever) : '—', x + cw + 19, y + 20, { size: 13, weight: 800, color: T.amber });
+  text(ctx, '个人最佳', x + cw + 19, y + 6, { size: FS.xs, color: T.txt3 });
+  text(ctx, ever ? money(ever) : '—', x + cw + 19, y + 20, { size: FS.lg, weight: 800, color: T.amber });
   y += 50;
 
   text(ctx, recent.length ? '📈 最近 ' + recent.length + ' 天' : '📈 最近战绩',
-    x, y, { size: 11, weight: 800, color: T.txt2 });
+    x, y, { size: FS.sm, weight: 800, color: T.txt2 });
   y += 18;
   var bh = 56;
   GFX.fillRR(ctx, x, y, w, bh + 22, 10, 'rgba(0,0,0,.22)', T.line);
   if (!recent.length) {
     text(ctx, '还没有成绩 —— 打一局每日挑战，这里就会出现柱子。',
-      x + 10, y + bh / 2, { size: 10.5, color: T.txt3, maxW: w - 20 });
+      x + 10, y + bh / 2, { size: FS.sm, color: T.txt3, maxW: w - 20 });
   } else {
     var peak = 1, i;
     for (i = 0; i < recent.length; i++) if (recent[i].best > peak) peak = recent[i].best;
@@ -1743,20 +1755,20 @@ MODALS.dailyrank = function (ctx, b, m) {
       GFX.fillRR(ctx, bx, y + 8 + (bh - hgt), bw2, hgt, 3,
         (ever > 0 && r.best >= ever) ? 'rgba(255,194,71,.85)' : 'rgba(53,229,240,.78)');
       text(ctx, String(r.d).slice(5), x + i * slot + slot / 2, y + bh + 10,
-        { size: 10, align: 'center', color: T.txt3 });
+        { size: FS.xs, align: 'center', color: T.txt3 });
     }
   }
   y += bh + 30;
 
   if (CAPS.rankListOn()) {
     GFX.button(ctx, x, y, w, 40, '🌐 查看全网日榜',
-      { kind: 'amber', act: 'ranklist', size: 12.5, pressed: isPressed('ranklist') });
+      { kind: 'amber', act: 'ranklist', size: FS.md, pressed: isPressed('ranklist') });
     y += 48;
   }
   /* 只有标题页才给「挑战今天这一局」：结局页上点它会把结算画面顶掉 */
   if (VIEW.screen === 'title') {
     GFX.button(ctx, x, y, w, 40, '🚀 挑战今天这一局',
-      { kind: 'primary', act: 'daily', size: 12.5, pressed: isPressed('daily') });
+      { kind: 'primary', act: 'daily', size: FS.md, pressed: isPressed('daily') });
   }
 };
 
@@ -1764,7 +1776,7 @@ MODALS.dailyrank = function (ctx, b, m) {
 MODALS.help = function (ctx, b, m) {
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 12;
-  text(ctx, '📖 玩法说明', x, y, { size: 15, weight: 900 });
+  text(ctx, '📖 玩法说明', x, y, { size: FS.lg, weight: 900 });
   y += 24;
   var secs = [
     ['🎯 目标', '30 天内把净资产做到目标金额即通关；现金连续 2 天为负则破产。'],
@@ -1777,15 +1789,15 @@ MODALS.help = function (ctx, b, m) {
     ['⌨️ 小技巧', '连点同一出杯位可叠加连击，小费最高翻倍；命中当日流行标签销量 +55%。'],
   ];
   for (var i = 0; i < secs.length; i++) {
-    text(ctx, secs[i][0], x, y, { size: 12, weight: 800, color: T.amber });
+    text(ctx, secs[i][0], x, y, { size: FS.md, weight: 800, color: T.amber });
     y += 18;
-    y += para(ctx, secs[i][1], x, y, { size: 11, color: T.txt2, maxW: w, lineH: 16 }) + 10;
+    y += para(ctx, secs[i][1], x, y, { size: FS.sm, color: T.txt2, maxW: w, lineH: 16 }) + 10;
   }
   /* 音效开关。返回内容底边 y —— drawModal 据此算滚动上限，
      让小屏（375×667）上被裁掉的底部章节和这个开关变得可以滑到。 */
   GFX.button(ctx, x, y, w, 38,
     (VIEW.sound ? '🔊 音效：开' : '🔇 音效：关'),
-    { kind: 'ghost', act: 'sound', size: 12 });
+    { kind: 'ghost', act: 'sound', size: FS.md });
   return y + 44;
 };
 
@@ -1794,20 +1806,20 @@ MODALS.gift = function (ctx, b, m) {
   var s = S();
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 14;
-  text(ctx, '🎁 每日福利', x, y, { size: 15, weight: 900 });
+  text(ctx, '🎁 每日福利', x, y, { size: FS.lg, weight: 900 });
   y += 24;
   y += para(ctx, '来自抖音官方能力。未开通的项目不会显示在这里，'
     + '也不会向你要任何与本局无关的权限。', x, y,
-    { size: 10, color: T.txt3, maxW: w, lineH: 15 }) + 8;
+    { size: FS.xs, color: T.txt3, maxW: w, lineH: 15 }) + 8;
 
   var row = function (emoji, title, sub, btn, act, id, kind, off) {
     GFX.fillRR(ctx, x, y, w, 54, 12, T.card, T.line);
-    text(ctx, emoji, x + 11, y + 16, { size: 18 });
-    text(ctx, title, x + 38, y + 8, { size: 12.5, weight: 800, maxW: w - 130 });
-    text(ctx, sub, x + 38, y + 27, { size: 10, color: T.txt2, maxW: w - 130 });
+    text(ctx, emoji, x + 11, y + 16, { size: FS.display });
+    text(ctx, title, x + 38, y + 8, { size: FS.md, weight: 800, maxW: w - 130 });
+    text(ctx, sub, x + 38, y + 27, { size: FS.xs, color: T.txt2, maxW: w - 130 });
     if (btn) {
       GFX.button(ctx, x + w - 100, y + 11, 90, 32, btn,
-        { kind: kind || 'ghost', act: act, id: id, size: 11, disabled: !!off });
+        { kind: kind || 'ghost', act: act, id: id, size: FS.sm, disabled: !!off });
     }
     y += 62;
   };
@@ -1863,20 +1875,20 @@ MODALS.restock = function (ctx, b, m) {
   var s = S();
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 14;
-  text(ctx, '🚚 紧急进货', x, y, { size: 15, weight: 900 });
+  text(ctx, '🚚 紧急进货', x, y, { size: FS.lg, weight: 900 });
   text(ctx, '价格 ×' + CFG.RESTOCK_MARKUP.toFixed(2) + '，立即到货', x + w, y + 2,
-    { size: 10, align: 'right', color: T.txt3 });
+    { size: FS.xs, align: 'right', color: T.txt3 });
   y += 28;
   for (var i = 0; i < ING.length; i++) {
     var g = ING[i];
     var p = Math.round((num(s.prices[g.id]) || g.base) * CFG.RESTOCK_MARKUP);
     GFX.fillRR(ctx, x, y, w, 38, 10, T.card, T.line);
-    text(ctx, g.emoji + ' ' + g.name, x + 10, y + 11, { size: 11.5 });
-    text(ctx, '¥' + p + '/份', x + 130, y + 12, { size: 10.5, color: T.amber });
+    text(ctx, g.emoji + ' ' + g.name, x + 10, y + 11, { size: FS.md });
+    text(ctx, '¥' + p + '/份', x + 130, y + 12, { size: FS.sm, color: T.amber });
     for (var q = 0; q < 3; q++) {
       var amt = [10, 30, 60][q];
       GFX.button(ctx, x + w - 10 - (2 - q) * 60 - 48, y + 8, 52, 22, '+' + amt,
-        { kind: 'ghost', act: 'rbug', id: g.id, extra: amt, size: 10, r: 7 });
+        { kind: 'ghost', act: 'rbug', id: g.id, extra: amt, size: FS.xs, r: 7 });
     }
     y += 44;
   }
@@ -1886,28 +1898,28 @@ MODALS.restock = function (ctx, b, m) {
 MODALS.confirm = function (ctx, b, m) {
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 16;
-  text(ctx, m.title || '确认', x + w / 2, y, { size: 16, weight: 900, align: 'center' });
+  text(ctx, m.title || '确认', x + w / 2, y, { size: FS.xl, weight: 900, align: 'center' });
   y += 28;
   y += para(ctx, m.text || '', x + w / 2 - (w / 2), y,
-    { size: 12, color: T.txt2, maxW: w, align: 'center', lineH: 18 }) + 8;
+    { size: FS.md, color: T.txt2, maxW: w, align: 'center', lineH: 18 }) + 8;
   GFX.button(ctx, x, y, (w - 10) / 2, 42, m.okText || '确认',
-    { kind: m.okKind || 'amber', act: m.okAct, size: 12.5 });
+    { kind: m.okKind || 'amber', act: m.okAct, size: FS.md });
   GFX.button(ctx, x + (w - 10) / 2 + 10, y, (w - 10) / 2, 42, '再想想',
-    { kind: 'ghost', act: 'close', size: 12.5 });
+    { kind: 'ghost', act: 'close', size: FS.md });
 };
 
 /* 导入存档 */
 MODALS.import = function (ctx, b, m) {
   var x = b.x + 14, w = b.w - 28;
   var y = b.y + 14;
-  text(ctx, '📥 导入存档', x, y, { size: 15, weight: 900 });
+  text(ctx, '📥 导入存档', x, y, { size: FS.lg, weight: 900 });
   y += 26;
   y += para(ctx, '抖音小游戏内没有输入框。请先在浏览器版（或备忘录）里复制存档码，'
-    + '再回到本页点下方按钮从剪贴板读取。', x, y, { size: 11, color: T.txt2, maxW: w, lineH: 17 }) + 12;
-  GFX.button(ctx, x, y, w, 42, '📋 从剪贴板导入', { kind: 'primary', act: 'doimport', size: 12.5 });
+    + '再回到本页点下方按钮从剪贴板读取。', x, y, { size: FS.sm, color: T.txt2, maxW: w, lineH: 17 }) + 12;
+  GFX.button(ctx, x, y, w, 42, '📋 从剪贴板导入', { kind: 'primary', act: 'doimport', size: FS.md });
   y += 52;
   if (VIEW.importMsg) {
-    text(ctx, VIEW.importMsg, x, y, { size: 11, color: T.txt2, maxW: w });
+    text(ctx, VIEW.importMsg, x, y, { size: FS.sm, color: T.txt2, maxW: w });
   }
 };
 
@@ -1921,19 +1933,19 @@ function drawEnd(ctx, L) {
   var m = VIEW.end || {};
   text(ctx, m.emoji || '🎉', W / 2, y, { size: 54, align: 'center' });
   y += 64;
-  text(ctx, m.title || '目标达成', W / 2, y, { size: 24, weight: 900, align: 'center' });
+  text(ctx, m.title || '目标达成', W / 2, y, { size: FS.display, weight: 900, align: 'center' });
   y += 34;
   text(ctx, m.grade || 'B', W / 2, y, { size: 44, weight: 900, align: 'center', color: T.amber });
   y += 54;
-  y += para(ctx, m.sub || '', x, y, { size: 12, color: T.txt2, maxW: w, lineH: 18 }) + 16;
+  y += para(ctx, m.sub || '', x, y, { size: FS.md, color: T.txt2, maxW: w, lineH: 18 }) + 16;
 
   var its = m.items || [];
   var cw = (w - 8) / 2;
   for (var i = 0; i < its.length; i++) {
     var ix = x + (i % 2) * (cw + 8), iy = y + Math.floor(i / 2) * 40;
     GFX.fillRR(ctx, ix, iy, cw, 34, 10, T.card, T.line);
-    text(ctx, its[i].k, ix + 8, iy + 9, { size: 10, color: T.txt3 });
-    text(ctx, its[i].v, ix + cw - 8, iy + 9, { size: 11.5, weight: 700, align: 'right', color: T.amber });
+    text(ctx, its[i].k, ix + 8, iy + 9, { size: FS.xs, color: T.txt3 });
+    text(ctx, its[i].v, ix + cw - 8, iy + 9, { size: FS.md, weight: 700, align: 'right', color: T.amber });
   }
   y += Math.ceil(its.length / 2) * 40 + 12;
 
@@ -1941,16 +1953,16 @@ function drawEnd(ctx, L) {
   var axs = (m.axes || []);
   if (axs.length) {
     GFX.fillRR(ctx, x, y, w, 26 + Math.ceil(axs.length / 2) * 30, 12, T.card, T.line);
-    text(ctx, '🏅 经营四维', x + 10, y + 8, { size: 12, weight: 800 });
+    text(ctx, '🏅 经营四维', x + 10, y + 8, { size: FS.md, weight: 800 });
     var axw = (w - 20 - 6) / 2;
     for (var ai = 0; ai < axs.length; ai++) {
       var ax = axs[ai];
       var axx = x + 10 + (ai % 2) * (axw + 6);
       var axy = y + 30 + Math.floor(ai / 2) * 30;
       text(ctx, ax.emoji + ' ' + ax.name + (ax.title ? ' · ' + ax.title : ''),
-        axx, axy, { size: 10, weight: 700, color: ax.tier > 0 ? T.amber : T.txt3, maxW: axw });
+        axx, axy, { size: FS.xs, weight: 700, color: ax.tier > 0 ? T.amber : T.txt3, maxW: axw });
       text(ctx, GFX.plainText(ax.desc), axx, axy + 13,
-        { size: 10, color: T.txt3, maxW: axw });
+        { size: FS.xs, color: T.txt3, maxW: axw });
     }
     y += 26 + Math.ceil(axs.length / 2) * 30 + 10;
   }
@@ -1960,9 +1972,9 @@ function drawEnd(ctx, L) {
      导致 startEndless() 在这版没有任何调用点 —— 无尽模式彻底不可达。 */
   if ((VIEW.end || {}).kind !== 'bankrupt') {
     GFX.fillRR(ctx, x, by, w, 44, 12, 'rgba(53,229,240,.10)', 'rgba(53,229,240,.34)');
-    text(ctx, '♾️ 无尽模式 · 目标持续升级', x + 12, by + 14, { size: 12, weight: 800, color: T.cyan });
+    text(ctx, '♾️ 无尽模式 · 目标持续升级', x + 12, by + 14, { size: FS.md, weight: 800, color: T.cyan });
     GFX.button(ctx, x + w - 96, by + 8, 84, 28, '继续经营',
-      { kind: 'cyan', act: 'endless', size: 11, r: 9, pressed: isPressed('endless') });
+      { kind: 'cyan', act: 'endless', size: FS.sm, r: 9, pressed: isPressed('endless') });
     by += 52;
   }
   /* 底行按钮：分享是抖音生态里最便宜的拉新手段，也必须是玩家点击直接触发，
@@ -1970,15 +1982,15 @@ function drawEnd(ctx, L) {
      「🏆 日榜」只在每日挑战这一局结束时插进来 —— 玩家刚打完，
      正是最想知道自己在什么位置的时刻；普通局插它就只是挤占宽度。 */
   var rowActs = [];
-  if ((VIEW.end || {}).daily) rowActs.push({ t: '🏆 日榜', kind: 'ghost', act: 'dailyrank', size: 12 });
-  if (CAPS.shareOn()) rowActs.push({ t: '📤 分享战绩', kind: 'amber', act: 'share', size: 12.5 });
+  if ((VIEW.end || {}).daily) rowActs.push({ t: '🏆 日榜', kind: 'ghost', act: 'dailyrank', size: FS.md });
+  if (CAPS.shareOn()) rowActs.push({ t: '📤 分享战绩', kind: 'amber', act: 'share', size: FS.md });
   rowActs.push({ t: '🔄 再来一局', kind: 'primary', act: 'again', size: rowActs.length >= 2 ? 12.5 : 14 });
   var rw = rowActs.length >= 2 ? (w - 10 * (rowActs.length - 1)) / rowActs.length : w;
   for (var bi = 0; bi < rowActs.length; bi++) {
     GFX.button(ctx, x + bi * (rw + 10), by, rw, 44, rowActs[bi].t,
       { kind: rowActs[bi].kind, act: rowActs[bi].act, size: rowActs[bi].size, pressed: isPressed(rowActs[bi].act) });
   }
-  GFX.button(ctx, x, by + 52, w, 40, '🏠 回到主菜单', { kind: 'ghost', act: 'home', size: 12.5 });
+  GFX.button(ctx, x, by + 52, w, 40, '🏠 回到主菜单', { kind: 'ghost', act: 'home', size: FS.md });
 }
 
 /* ============================================================
@@ -1996,7 +2008,7 @@ function drawToasts(ctx, L) {
     ctx.font = '700 12px ' + FONT;
     var tw = ctx.measureText(t.msg).width + 24;
     GFX.fillRR(ctx, (W - tw) / 2, y, tw, 26, 13, 'rgba(38,18,68,.94)', T.line2);
-    text(ctx, t.msg, W / 2, y + 7, { size: 12, weight: 700, align: 'center', color: 'white' });
+    text(ctx, t.msg, W / 2, y + 7, { size: FS.md, weight: 700, align: 'center', color: 'white' });
     ctx.globalAlpha = 1;
   }
 }
@@ -2006,7 +2018,7 @@ function drawFloaters(ctx, L) {
     var f = VIEW.floaters[i];
     ctx.globalAlpha = Math.max(0, f.life / 800);
     text(ctx, f.text, f.x, f.y - (800 - f.life) / 26,
-      { size: 13, weight: 800, align: 'center', color: f.kind === 'bad' ? T.red : T.green });
+      { size: FS.lg, weight: 800, align: 'center', color: f.kind === 'bad' ? T.red : T.green });
     ctx.globalAlpha = 1;
   }
 }
@@ -2059,20 +2071,20 @@ function drawTutorial(ctx, L) {
     }
   }
   GFX.fillRR(ctx, 16, cy, W - 32, ch, 18, T.bg2, T.line2);
-  text(ctx, (VIEW.tut.step + 1) + '/' + TUTORIAL.length, 30, cy + 12, { size: 10, color: T.txt3 });
-  text(ctx, step.title, 30, cy + 26, { size: 14, weight: 900, color: T.txt, maxW: W - 70 });
+  text(ctx, (VIEW.tut.step + 1) + '/' + TUTORIAL.length, 30, cy + 12, { size: FS.xs, color: T.txt3 });
+  text(ctx, step.title, 30, cy + 26, { size: FS.lg, weight: 900, color: T.txt, maxW: W - 70 });
   var ty = cy + 48;
   ty += para(ctx, GFX.plainText(step.text), 30, ty,
-    { size: 11.5, color: T.txt2, maxW: W - 70, lineH: 17 });
+    { size: FS.md, color: T.txt2, maxW: W - 70, lineH: 17 });
   if (hint) {
     ty += 6;
     ty += para(ctx, hint + (step.advance === 'rush'
       ? '（' + Math.min(3, (VIEW.tutRush || 0) + 1) + '/3）' : ''),
-      30, ty, { size: 11.5, weight: 700, color: T.amber, maxW: W - 70, lineH: 16 });
+      30, ty, { size: FS.md, weight: 700, color: T.amber, maxW: W - 70, lineH: 16 });
   }
-  GFX.button(ctx, 30, cy + ch - 46, (W - 78) / 2, 36, '跳过引导', { kind: 'ghost', act: 'tutskip', size: 11.5 });
+  GFX.button(ctx, 30, cy + ch - 46, (W - 78) / 2, 36, '跳过引导', { kind: 'ghost', act: 'tutskip', size: FS.md });
   GFX.button(ctx, 30 + (W - 78) / 2 + 16, cy + ch - 46, (W - 78) / 2, 36, '下一步 →',
-    { kind: 'primary', act: 'tutnext', size: 11.5 });
+    { kind: 'primary', act: 'tutnext', size: FS.md });
 }
 
 /* ============================================================

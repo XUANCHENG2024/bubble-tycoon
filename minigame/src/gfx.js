@@ -24,6 +24,24 @@ var T = {
 var FONT = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
 
 /* ------------------------------------------------------------
+ *  字号令牌 —— 与 H5 端 styles.css 的 --fs-* 一一对应
+ * ------------------------------------------------------------
+ *  ★ 为什么 Canvas 端也要令牌：
+ *    Canvas 端以前直接写字面量（size: FS.xs / 9 / 9.5 / 10 / 10.5 …），
+ *    同一语义在不同文件里字号不同 —— 跨版本切换时字号会跳变。
+ *    尤其 8.5/9px 那批已提到 10px（中文可读性下限），
+ *    若没有令牌，下次加内容时很容易又写回 9px。
+ *
+ *  ★ 命名与数值必须与 styles.css 的 :root 完全一致：
+ *      --fs-xs: 10px  --fs-sm: 11px  --fs-md: 12px
+ *      --fs-lg: 14px  --fs-xl: 16px  --fs-display: 22px
+ *    两版共用一套分档，才能保证「同一信息两版同样重」。
+ * ------------------------------------------------------------ */
+var FS = {
+  xs: 10, sm: 11, md: 12, lg: 14, xl: 16, display: 22,
+};
+
+/* ------------------------------------------------------------
  *  文本
  *  Canvas 的 measureText 逐字调用很贵，缓存一下。
  *  键里带上字号 —— 同一个字在不同字号下宽度不同。
@@ -164,8 +182,8 @@ function bar(ctx, x, y, w, h, v, o) {
 /** 数字胶囊（HUD 里的 DAY / 现金 / 口碑 / 净资产） */
 function chip(ctx, x, y, w, h, label, value, color) {
   fillRR(ctx, x, y, w, h, 10, T.card, T.line);
-  text(ctx, label, x + 8, y + 4, { size: 9.5, color: T.txt3 });
-  text(ctx, value, x + 8, y + 15, { size: 14, weight: 800, color: color || T.txt, maxW: w - 16 });
+  text(ctx, label, x + 8, y + 4, { size: FS.xs, color: T.txt3 });
+  text(ctx, value, x + 8, y + 15, { size: FS.lg, weight: 800, color: color || T.txt, maxW: w - 16 });
 }
 
 /* ------------------------------------------------------------
@@ -295,7 +313,7 @@ function cardBtn(ctx, x, y, w, h, lines, o) {
 function lineChart(ctx, x, y, w, h, series, days) {
   fillRR(ctx, x, y, w, h, 12, 'rgba(0,0,0,.22)', T.line);
   if (!days || !days.length) {
-    text(ctx, '暂无数据', x + w / 2, y + h / 2 - 7, { size: 12, align: 'center', color: T.txt3 });
+    text(ctx, '暂无数据', x + w / 2, y + h / 2 - 7, { size: FS.md, align: 'center', color: T.txt3 });
     return;
   }
   var pad = { l: 34, r: 10, t: 12, b: 20 };
@@ -317,7 +335,7 @@ function lineChart(ctx, x, y, w, h, series, days) {
     var gy = pad.t + ih * g / 3;
     ctx.beginPath(); ctx.moveTo(x + pad.l, y + gy); ctx.lineTo(x + w - pad.r, y + gy); ctx.stroke();
     text(ctx, shortNum(max * (3 - g) / 3), x + 4, y + gy - 5,
-      { size: 9, color: T.txt3, maxW: pad.l - 8 });
+      { size: FS.xs, color: T.txt3, maxW: pad.l - 8 });
   }
 
   var n = days.length;
@@ -339,8 +357,8 @@ function lineChart(ctx, x, y, w, h, series, days) {
   }
 
   /* 横轴：首尾两天 */
-  text(ctx, 'D' + days[0].day, x + pad.l, y + h - 14, { size: 9, color: T.txt3 });
-  text(ctx, 'D' + days[n - 1].day, x + w - pad.r - 20, y + h - 14, { size: 9, color: T.txt3 });
+  text(ctx, 'D' + days[0].day, x + pad.l, y + h - 14, { size: FS.xs, color: T.txt3 });
+  text(ctx, 'D' + days[n - 1].day, x + w - pad.r - 20, y + h - 14, { size: FS.xs, color: T.txt3 });
 }
 
 /** 1234 → 1.2k，图表纵轴用得到 */

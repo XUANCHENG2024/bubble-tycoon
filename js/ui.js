@@ -383,12 +383,12 @@ function managerPanelHtml(s) {
     <span class="ch-sub">${managerCount(s)}/${shops - 1} 名店长${left > 0 ? ` · 还可招 ${left} 名` : ''}</span></div>`;
 
   if (shops <= 1) {
-    h += `<div style="font-size:12px;color:var(--txt3);line-height:1.6">
+    h += `<div style="font-size:var(--fs-md);color:var(--txt3);line-height:1.6">
       目前只有总店（你亲自经营），不需要店长。<br>
       在「⬆️ 店铺升级」里开设第一家分店后，就能招募一名店长。</div></div>`;
     return h;
   }
-  h += `<div style="font-size:11.5px;color:var(--txt3);margin-bottom:9px;line-height:1.6">
+  h += `<div style="font-size:var(--fs-md);color:var(--txt3);margin-bottom:9px;line-height:1.6">
     每开一家<b>分店</b>可招一名店长，店长<b>只管自己那家店</b> ——
     加成（客流 / 出杯速度 / 口碑 / 满意）不作用于总店，也不作用于别的分店。<br>
     店长每天会<b>自动补员</b>到该店编制上限（与你手动招聘<b>共用名额</b>），
@@ -493,15 +493,15 @@ UI.renderManage = function () {
   h += `<div class="card"><div class="card-h">📡 今日情报 <span class="ch-sub">Day ${s.day}</span></div>
     <div class="intel">
       <div class="intel-i"><div class="ii-k">天气</div><div class="ii-v">${s.weather.emoji} ${s.weather.name}</div>
-        <div style="font-size:10px;color:var(--txt3)">客流 ×${s.weather.traffic}</div></div>
+        <div style="font-size:var(--fs-xs);color:var(--txt3)">客流 ×${s.weather.traffic}</div></div>
       <div class="intel-i"><div class="ii-k">今日流行</div><div class="ii-v">${tag.emoji} ${tag.name}</div>
-        <div style="font-size:10px;color:var(--txt3)">命中销量 +55%</div></div>
+        <div style="font-size:var(--fs-xs);color:var(--txt3)">命中销量 +55%</div></div>
       <div class="intel-i"><div class="ii-k">明日预告</div><div class="ii-v">${s.trendKnown ? nextTag.emoji + ' ' + nextTag.name : '❓ 未知'}</div>
         ${s.trendKnown ? '' : '<button class="btn btn-sm btn-ghost" data-act="scout" style="margin-top:3px">🔍 调研 ¥150</button>'}</div>
     </div>
     /* news.text 来自存档（可导出 / 导入），必须转义：
        这里曾经是唯一一处漏掉 esc() 的动态文本，导入一份带 payload 的存档就能执行。 */
-    ${s.news ? `<div style="margin-top:9px;font-size:11.5px;color:var(--amber)">📰 ${esc(s.news.text)}</div>` : ''}
+    ${s.news ? `<div style="margin-top:9px;font-size:var(--fs-md);color:var(--amber)">📰 ${esc(s.news.text)}</div>` : ''}
   </div>`;
 
   /* 每日合同（V1）：放在所有卡片最上面 ——
@@ -600,7 +600,7 @@ UI.renderManage = function () {
   const localSet = new Set(ingsOfCity(mktCity).map(g => g.id));
   const buyable = ING.filter(g => ingAvailableAt(g.id, mktCity));
   if (localSet.size) {
-    h += `<div style="font-size:11px;color:var(--txt3);margin-bottom:8px">
+    h += `<div style="font-size:var(--fs-sm);color:var(--txt3);margin-bottom:8px">
       🗺️ 本地特产：${esc(ingsOfCity(mktCity).map(g => g.emoji + g.name).join('、'))}</div>`;
   }
   for (const g of buyable) {
@@ -673,13 +673,13 @@ UI.renderManage = function () {
       <div class="rc-m">售价 <b style="color:var(--amber)">¥${price}</b> · 成本 ¥${cost.toFixed(1)} · 毛利 ¥${(price - cost).toFixed(1)}</div>
       <div class="rc-tags">${cuTag}${r.tags.map(t => `<span class="rc-tag ${t === s.trend ? 'hit' : ''}">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}</div>
       ${away ? `<div class="rc-tip">🗺️ 本店在${esc((cityById(currentCityId(s)) || {}).name || '')}，这款只能在那儿上架</div>` : wsTip}
-      <div class="rc-price"><span style="font-size:10px;color:var(--txt3)">定价</span>
+      <div class="rc-price"><span style="font-size:var(--fs-xs);color:var(--txt3)">定价</span>
         <input type="range" min="50" max="200" value="${Math.round(ratio * 100)}" data-act="ratio" data-id="${rid}" ${away ? 'disabled' : ''}>
         <span class="pv">×${ratio.toFixed(2)}</span></div>
     </div>`;
   }
   h += `</div>
-    ${s.menu.length === 0 ? '<div style="color:var(--red);font-size:12px;margin-top:8px">⚠️ 至少上架 1 款才能开门</div>' : ''}
+    ${s.menu.length === 0 ? '<div style="color:var(--red);font-size:var(--fs-md);margin-top:8px">⚠️ 至少上架 1 款才能开门</div>' : ''}
     </div>`;
 
   /* 营销 + 开门 */
@@ -692,7 +692,7 @@ UI.renderManage = function () {
       <button class="btn btn-sm btn-ghost" data-act="mktset" data-v="500">500</button>
       <button class="btn btn-sm btn-ghost" data-act="mktset" data-v="1000">1000</button>
     </div>
-    <div id="mktForecast" style="font-size:10.5px;color:var(--txt3);margin-top:7px;line-height:1.6">
+    <div id="mktForecast" style="font-size:var(--fs-sm);color:var(--txt3);margin-top:7px;line-height:1.6">
       预计客流 <b style="color:var(--cyan)">${trafficOf(s)} 人</b> · 出杯位 <b style="color:var(--cyan)">${stationCount(s)} 个</b> · 单杯耗时 ${(CFG.BASE_SERVICE / (1 + .2 * s.up.speed) / (1 + .12 * s.up.training)).toFixed(2)}s
       ${s.lastMarketing > 0
         ? `<br><span style="color:var(--amber)">📢 昨日投入 ${money(s.lastMarketing)} 已用完 —— 营销只当天有效，今天要重新投。</span>`
@@ -707,7 +707,7 @@ UI.renderManage = function () {
     h += `<div class="card"><div class="card-h">🎯 中期目标
       <span class="ch-sub">Day ${ms.day} 前净资产 ${money(ms.worth)}</span></div>
       <div class="ms-bar"><i style="width:${mp}%;background:${ms.hit ? 'var(--green)' : 'linear-gradient(90deg,var(--cyan),var(--purple))'}"></i></div>
-      <div style="font-size:11.5px;color:${ms.hit ? 'var(--green)' : 'var(--txt2)'};margin-top:6px;line-height:1.6">
+      <div style="font-size:var(--fs-md);color:${ms.hit ? 'var(--green)' : 'var(--txt2)'};margin-top:6px;line-height:1.6">
         ${ms.hit
           ? `✅ 已达成（当前 ${money(netWorth(s))}）· 声望 +1 已记账`
           : `还差 <b style="color:var(--amber)">${money(ms.gap)}</b>（当前 ${money(netWorth(s))}，进度 ${mp.toFixed(0)}%）`}
@@ -723,7 +723,7 @@ UI.renderManage = function () {
   const avgC = avgCupsPerOrder(s);
   const bad = (v, thr) => (v < thr ? 'var(--red)' : 'var(--green)');
   h += `<div class="card"><div class="card-h">🩺 今日体检 <span class="ch-sub">开门前的最后检查</span></div>
-      <div style="font-size:11.5px;color:var(--txt2);line-height:1.9">
+      <div style="font-size:var(--fs-md);color:var(--txt2);line-height:1.9">
         👥 预计客流 <b style="color:var(--cyan)">${trfN}</b> 人（约 ${Math.round(trfN * avgC)} 杯）<br>
         📦 库存 ${stockCups} 杯 → 够招待 <b style="color:${bad(stockN, trfN * .75)}">${stockN}</b> 人<br>
         🚀 产能 <b style="color:${bad(capN, trfN)}">${capN}</b> 单${capN < trfN ? `（手速全开约 ${capClick} 单）` : ''} · 出杯位 <b>${stationCount(s)}</b> 个
@@ -734,7 +734,7 @@ UI.renderManage = function () {
   /* 店长日志 */
   h += `<div class="card"><div class="card-h">📜 店长日志 <span class="ch-sub">共 ${s.log.length} 条</span></div>`;
   const lg = s.log.slice(-8).reverse();
-  if (!lg.length) h += `<div style="font-size:11.5px;color:var(--txt3)">还没有记录，先去进点货吧。</div>`;
+  if (!lg.length) h += `<div style="font-size:var(--fs-md);color:var(--txt3)">还没有记录，先去进点货吧。</div>`;
   for (const l of lg) h += `<div class="jrow"><span>${esc(l)}</span></div>`;
   h += `</div>`;
 
@@ -749,7 +749,7 @@ function sigCardHtml(s) {
   const anyLv = sgs.filter(x => x.lv > 0).length;
   let h = `<div class="card sig-card"><div class="card-h">🏷️ 招牌配方
     <span class="ch-sub">${anyLv}/${sgs.length} 款已成招牌 · ${maxed} 款满级</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:9px;line-height:1.6">
+    <div style="font-size:var(--fs-md);color:var(--txt3);margin-bottom:9px;line-height:1.6">
       累计卖出杯数<b>跨局继承</b>：这一局卖得多，下一局该款永久更强。<br>
       专精一款（Lv.3）比铺开十款更划算 —— 招牌加成只对<b>那一款</b>生效。</div>`;
   for (const g of sgs) {
@@ -782,7 +782,7 @@ UI.renderLab = function () {
 
   let h = `<div class="card"><div class="card-h">🧪 配方实验室 · 研发树
     <span class="ch-sub">已解锁 ${doneTree}/${RESEARCH_TREE.length} 节点</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px;line-height:1.6">
+    <div style="font-size:var(--fs-md);color:var(--txt3);margin-bottom:10px;line-height:1.6">
       配方按<b>阶段</b>推进：先做前面的，才能解锁后面的。每款配方属于一个菜系，
       建好对应<b>制作工坊</b>后研发费打折、销量权重更高（可选加成，不建也能做）。<br>
       <b>本地特色菜系只在所属城市可研发与上架</b>—— 换个城市就是换一套产品线。
@@ -904,10 +904,10 @@ function recipeNodeCardHtml(s, n) {
       ${cu ? `<span class="rc-tag cui">${cu.emoji}${esc(cu.name)}</span>` : ''}
       ${r.tags.map(t => `<span class="rc-tag">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}
     </div>
-    ${owned ? `<div style="margin-top:7px;font-size:12px;font-weight:800;color:var(--cyan)">✅ 已解锁</div>`
+    ${owned ? `<div style="margin-top:7px;font-size:var(--fs-md);font-weight:800;color:var(--cyan)">✅ 已解锁</div>`
       : isAch ? `<div class="rc-tip">🏅 成就专属 · 不可研发</div>`
         : `${r.city ? `<div class="rc-tip">📍 仅限${esc(ownCity)}</div>` : ''}
-           <div style="margin-top:7px;font-size:11px;color:var(--txt3)">需要 ${needHtml}</div>
+           <div style="margin-top:7px;font-size:var(--fs-sm);color:var(--txt3)">需要 ${needHtml}</div>
            <button class="btn btn-sm ${canR.ok ? 'btn-primary' : 'btn-ghost'}" style="width:100%;margin-top:6px"
              data-act="research" data-id="${n.recipe}" ${canR.ok ? '' : 'disabled'}>研发 ${money(n.cost)}</button>
            ${tip ? `<div class="rc-tip">${tip}</div>` : ''}`}
@@ -1003,13 +1003,13 @@ UI.renderUp = function () {
     h += `<div class="up-row">
       <div class="up-e">${u.emoji}</div>
       <div class="up-body">
-        <div class="up-n">${u.name} <span style="font-size:11px;color:var(--txt3)">Lv.${lv}/${u.max}</span></div>
+        <div class="up-n">${u.name} <span style="font-size:var(--fs-sm);color:var(--txt3)">Lv.${lv}/${u.max}</span></div>
         <div class="up-d">${u.desc}</div>
         <div class="up-d" style="color:var(--cyan)">${u.detail(lv)}</div>
         <div class="up-lv">${pips}</div>
       </div>
       ${cost == null
-        ? `<span style="font-size:12px;color:var(--green);font-weight:800">满级</span>`
+        ? `<span style="font-size:var(--fs-md);color:var(--green);font-weight:800">满级</span>`
         : `<button class="btn btn-sm ${s.cash >= cost ? 'btn-primary' : 'btn-ghost'}" data-act="upgrade" data-id="${u.id}" ${s.cash >= cost ? '' : 'disabled'}>${money(cost)}</button>`}
     </div>`;
   }
@@ -1024,7 +1024,7 @@ UI.renderUp = function () {
   const cvs = cuisineViews(s);
   h += `<div class="card"><div class="card-h">🏭 制作工坊
     <span class="ch-sub">${cvs.filter(c => c.level > 0).length}/${cvs.length} 条产线</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px;line-height:1.6">
+    <div style="font-size:var(--fs-md);color:var(--txt3);margin-bottom:10px;line-height:1.6">
       工坊给该菜系<b>三层加成</b>：<b>每杯成本下降</b>（主力，卖得越多越省）、研发费打折、产品更抢手。<br>
       <b>不建也能研发上架</b>——工坊是可选的经营深度，开了更赚，不是门票。
       另外菜单上同系配方越多，还有额外的<b>主打加成</b>。
@@ -1042,7 +1042,7 @@ UI.renderUp = function () {
     h += `<div class="up-row cui-up">
       <div class="up-e">${cv.emoji}</div>
       <div class="up-body">
-        <div class="up-n">${esc(ws.name)} <span style="font-size:11px;color:var(--txt3)">Lv.${cv.level}/${cv.maxLevel}</span></div>
+        <div class="up-n">${esc(ws.name)} <span style="font-size:var(--fs-sm);color:var(--txt3)">Lv.${cv.level}/${cv.maxLevel}</span></div>
         <div class="up-d">${esc(cv.desc)} · ${cv.unlocked}/${cv.total} 款已研发</div>
         <div class="up-d" style="color:var(--cyan)">${nextTxt}</div>
         <div class="up-d" style="color:var(--txt3)">研发费 −${Math.round((ws.researchCut || 0) * 100)}%${cv.level >= 3 ? ' · 高端款权重 +18%' : ' · 旗舰级解锁高端款加成'}</div>
@@ -1054,7 +1054,7 @@ UI.renderUp = function () {
         <div class="up-lv">${pips}</div>
       </div>
       ${cv.cost == null
-        ? `<span style="font-size:12px;color:var(--green);font-weight:800">满级</span>`
+        ? `<span style="font-size:var(--fs-md);color:var(--green);font-weight:800">满级</span>`
         : `<button class="btn btn-sm ${s.cash >= cv.cost ? 'btn-primary' : 'btn-ghost'}" data-act="workshop" data-id="${cv.id}" ${s.cash >= cv.cost ? '' : 'disabled'}>${money(cv.cost)}</button>`}
     </div>`;
   }
@@ -1064,11 +1064,11 @@ UI.renderUp = function () {
   const sc = shopCost(s);
   h += `<div class="card"><div class="card-h">🏪 分店扩张
     <span class="ch-sub">当前 ${s.shops} 家</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);line-height:1.6;margin-bottom:9px">
+    <div style="font-size:var(--fs-md);color:var(--txt3);line-height:1.6;margin-bottom:9px">
       每开一家分店：出杯位 +1、客流 +60%，但每日固定成本 +${money(CFG.RENT_PER_SHOP + CFG.SHOP_UPKEEP)}。
     </div>
     ${sc == null
-      ? `<div style="font-size:13px;font-weight:800;color:var(--green)">🏆 已达分店上限（${s.shops} 家）</div>`
+      ? `<div style="font-size:var(--fs-lg);font-weight:800;color:var(--green)">🏆 已达分店上限（${s.shops} 家）</div>`
       : `<button class="btn ${s.cash >= sc ? 'btn-green' : 'btn-ghost'}" style="width:100%" data-act="shop" ${s.cash >= sc ? '' : 'disabled'}>开设第 ${s.shops + 1} 家分店 · ${money(sc)}</button>`}
   </div>`;
 
@@ -1077,7 +1077,7 @@ UI.renderUp = function () {
   const gain = prestigeGain(s);
   h += `<div class="card"><div class="card-h">🌟 品牌声望
     <span class="ch-sub">已继承 ${meta.bp} 点</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);line-height:1.6;margin-bottom:9px">
+    <div style="font-size:var(--fs-md);color:var(--txt3);line-height:1.6;margin-bottom:9px">
       声望点永久生效：<b>折算开局创业基金</b>（${money(prestigeStartCash(meta.bp))}，封顶 ${money(CFG.BP_START_CAP)}，
       越往后每点换得越少）。本局已到账 <b style="color:var(--green)">+${money(s.startBonus || 0)}</b>，
       由你决定投去雇人、提速还是开店。<br>
@@ -1100,7 +1100,7 @@ UI.renderStaff = function () {
   let h = `<div class="card"><div class="card-h">👥 我的团队
     <span class="ch-sub">${s.staff.length} 人 · 日薪合计 ${money(s.staff.reduce((a, b) => a + b.wage, 0))}</span></div>`;
   if (!s.staff.length) {
-    h += `<div style="font-size:12px;color:var(--txt3);line-height:1.7">
+    h += `<div style="font-size:var(--fs-md);color:var(--txt3);line-height:1.7">
       现在只有你一个人做奶茶。雇佣员工可以<b>增加出杯位</b>，是提升产能最直接的方式。<br>
       <span style="color:var(--amber)">注意：员工体力会随营业下降，低于 30% 效率大跌。</span></div>`;
   }
@@ -1116,7 +1116,7 @@ UI.renderStaff = function () {
         <span>体力 <b>${Math.round(num(st.stamina))}%</b></span>
       </div>
       <div class="st-bar ${low ? 'low' : ''}"><i style="width:${pct(st.stamina)}%"></i></div>
-      ${tr ? `<div style="font-size:10.5px;color:var(--txt3);margin-top:5px">${esc(tr.desc)}</div>` : ''}
+      ${tr ? `<div style="font-size:var(--fs-sm);color:var(--txt3);margin-top:5px">${esc(tr.desc)}</div>` : ''}
       <button class="btn btn-sm btn-ghost" style="margin-top:7px" data-act="fire" data-id="${esc(st.id)}">解雇（遣散费 ${money(num(st.wage) * 2)}）</button>
     </div>`;
   }
@@ -1126,10 +1126,10 @@ UI.renderStaff = function () {
   s.candidates.forEach((c, i) => {
     const tr = traitById(c.trait);
     h += `<div class="cand">
-      <span style="font-size:22px">${esc(c.emoji)}</span>
+      <span style="font-size:var(--fs-display)">${esc(c.emoji)}</span>
       <div style="flex:1;min-width:0">
-        <div style="font-weight:800;font-size:13.5px">${esc(c.name)} ${tr ? `<span style="font-size:10px;padding:1px 6px;border-radius:99px;background:rgba(139,92,255,.3)">${esc(tr.emoji)}${esc(tr.name)}</span>` : ''}</div>
-        <div style="font-size:10.5px;color:var(--txt3);margin-top:2px">
+        <div style="font-weight:800;font-size:13.5px">${esc(c.name)} ${tr ? `<span style="font-size:var(--fs-xs);padding:1px 6px;border-radius:99px;background:rgba(139,92,255,.3)">${esc(tr.emoji)}${esc(tr.name)}</span>` : ''}</div>
+        <div style="font-size:var(--fs-sm);color:var(--txt3);margin-top:2px">
           效率 ×${num(c.skill, 1).toFixed(2)} · 日薪 ${money(num(c.wage))} · 聘用费 ${money(num(c.fee))}
           ${tr ? `<br>${esc(tr.desc)}` : ''}</div>
       </div>
@@ -1181,7 +1181,7 @@ UI.renderRival = function () {
     h += `<div class="up-row">
       <div class="up-e">${a.emoji}</div>
       <div class="up-body">
-        <div class="up-n">${a.name} ${cooling ? `<span style="font-size:10px;color:var(--txt3)">冷却至 Day ${cd}</span>` : ''}${maxed ? '<span style="font-size:10px;color:var(--green)">已满级</span>' : ''}</div>
+        <div class="up-n">${a.name} ${cooling ? `<span style="font-size:var(--fs-xs);color:var(--txt3)">冷却至 Day ${cd}</span>` : ''}${maxed ? '<span style="font-size:var(--fs-xs);color:var(--green)">已满级</span>' : ''}</div>
         <div class="up-d">${a.desc}</div>
       </div>
       <button class="btn btn-sm ${disabled ? 'btn-ghost' : 'btn-primary'}" data-act="rivalact" data-id="${a.id}" ${disabled ? 'disabled' : ''}>${money(a.cost)}</button>
@@ -1191,7 +1191,7 @@ UI.renderRival = function () {
 
   /* 客群构成 */
   h += `<div class="card"><div class="card-h">👥 客群构成 <span class="ch-sub">今日权重</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:9px;line-height:1.6">
+    <div style="font-size:var(--fs-md);color:var(--txt3);margin-bottom:9px;line-height:1.6">
       不同客群的口味偏好、价格容忍度和耐心都不一样 —— 菜单要尽量覆盖更多口味。
     </div>`;
   const weights = CUSTOMER_TYPES.map(t => typeWeightOf(s, t));
@@ -1237,7 +1237,7 @@ UI.chartSVG = function (s, w, h) {
   w = w || 620; h = h || 200;
   const data = s.history || [];
   if (data.length < 2) {
-    return `<div style="text-align:center;color:var(--txt3);font-size:12px;padding:24px 0">
+    return `<div style="text-align:center;color:var(--txt3);font-size:var(--fs-md);padding:24px 0">
       至少经营 2 天才能看到趋势曲线</div>`;
   }
   const series = [
@@ -1313,7 +1313,7 @@ UI.renderAch = function () {
   const s = window.S; if (!s) return;
   const got = ACHIEVEMENTS.filter(a => s.ach[a.id]).length;
   let h = `<div class="card"><div class="card-h">🏅 成就 <span class="ch-sub">${got}/${ACHIEVEMENTS.length}</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);margin-bottom:10px">本局达成给现金；<b>跨局首次</b>达成额外给品牌声望 ★（${achStarText()}，永久保留）。</div>`;
+    <div style="font-size:var(--fs-md);color:var(--txt3);margin-bottom:10px">本局达成给现金；<b>跨局首次</b>达成额外给品牌声望 ★（${achStarText()}，永久保留）。</div>`;
   for (const a of ACHIEVEMENTS) {
     const on = !!s.ach[a.id];
     h += `<div class="ach ${on ? 'got' : ''}">
@@ -1654,7 +1654,7 @@ UI.cardsChipsHtml = function (s) {
   }).join('');
   return `<div class="card"><div class="card-h">🃏 经营策略
     <span class="ch-sub">${ids.length}/${CFG.CARD_MAX} · 打烊时还会再抽</span></div>
-    <div style="font-size:11.5px;color:var(--txt3);line-height:1.6;margin-bottom:8px">
+    <div style="font-size:var(--fs-md);color:var(--txt3);line-height:1.6;margin-bottom:8px">
       每张卡都同时带来好处和代价，选定后会一直生效到本局结束。手感不对也不用硬吃 —— 可以选择「都不要」。
     </div>
     <div class="cd-chips">${rows}</div></div>`;
@@ -1953,7 +1953,7 @@ UI.showEnd = function (result, daily) {
   const html = `<div class="end-emoji">${emoji}</div>
     <div class="end-title">${title}</div>
     <div class="end-grade">${grade}</div>
-    <div style="font-size:12.5px;color:var(--txt2);margin-bottom:16px">${gradeSub}</div>
+    <div style="font-size:var(--fs-md);color:var(--txt2);margin-bottom:16px">${gradeSub}</div>
     ${(s.history || []).length >= 2 ? `<div class="card" style="text-align:left">
       <div class="card-h">📈 经营曲线</div><div id="endChart"></div></div>` : ''}
     <div class="card" style="text-align:left">
@@ -1975,7 +1975,7 @@ UI.showEnd = function (result, daily) {
     </div>
     <div class="card" style="text-align:left">
       <div class="card-h">♻️ 品牌升级</div>
-      <div style="font-size:12px;color:var(--txt2);line-height:1.7">
+      <div style="font-size:var(--fs-md);color:var(--txt2);line-height:1.7">
         本局可获得 <b style="color:var(--amber)">${prestigeGain(s)} ★</b> 品牌声望点（当前共 ${window.META.bp} ★）。<br>
         转生会重置本局进度，但声望点永久保留：每点客流 +2%、离线收益 +2%。
       </div>
@@ -1984,7 +1984,7 @@ UI.showEnd = function (result, daily) {
     ${daily ? `
     <div class="card" style="text-align:left">
       <div class="card-h">📅 每日挑战 <span class="ch-sub">${esc(todayKey())} · 全网同种子</span></div>
-      <div style="font-size:12px;color:var(--txt2);line-height:1.7">
+      <div style="font-size:var(--fs-md);color:var(--txt2);line-height:1.7">
         本局净资产 <b style="color:var(--amber)">${esc(money(daily.score))}</b>。${
         daily.newEver ? '🎉 刷新了个人最佳！'
           : (daily.newToday ? `比今天上一局多赚 ${esc(money(daily.score - daily.prevToday))}。`
@@ -1997,7 +1997,7 @@ UI.showEnd = function (result, daily) {
     ${result !== 'bankrupt' ? `
     <div class="card" style="text-align:left">
       <div class="card-h">♻️ 无尽模式 <span class="ch-sub">不结束，目标持续升级</span></div>
-      <div style="font-size:12px;color:var(--txt2);line-height:1.7">
+      <div style="font-size:var(--fs-md);color:var(--txt2);line-height:1.7">
         从第 ${s.day} 天继续经营，目标将提升为 <b style="color:var(--amber)">${money(endlessGoal(diffOf(s).goal, Math.max(1, s.milestone || 0)))}</b>，
         每达成一次再涨 55%。适合想把数值卷到极致的人。
       </div>
@@ -2021,7 +2021,7 @@ UI.showEnd = function (result, daily) {
   if (sb && result !== 'bankrupt') {
     const cv = UI.drawShareCard(s, grade, nw, result);
     if (cv) { cv.id = 'shareCanvas'; sb.appendChild(cv); }
-    else sb.innerHTML = `<div style="font-size:11.5px;color:var(--txt3)">当前浏览器不支持生成图片</div>`;
+    else sb.innerHTML = `<div style="font-size:var(--fs-md);color:var(--txt3)">当前浏览器不支持生成图片</div>`;
   }
 
   UI.showScreen('screen-end');
@@ -2056,7 +2056,7 @@ UI.showDailyRank = function () {
       + '</div>';
   }
   if (!bars) {
-    bars = '<div style="font-size:11.5px;color:var(--txt3)">还没有成绩 —— '
+    bars = '<div style="font-size:var(--fs-md);color:var(--txt3)">还没有成绩 —— '
       + '打一局每日挑战，这里就会出现柱子。</div>';
   }
 
@@ -2074,7 +2074,7 @@ UI.showDailyRank = function () {
       <div class="card-h">📈 ${recent.length ? `最近 ${recent.length} 天` : '最近战绩'}</div>
       <div class="rk-bars">${bars}</div>
     </div>
-    <div style="font-size:11px;color:var(--txt3);line-height:1.7">
+    <div style="font-size:var(--fs-sm);color:var(--txt3);line-height:1.7">
       网页版本机保存（换设备或清缓存会丢）。全网日榜在抖音小游戏版内可见。
     </div>
     <div class="m-btns">
