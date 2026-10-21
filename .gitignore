@@ -1,14 +1,39 @@
-# 构建产物：minigame/bundle.js 由 tools/build-minigame.js 生成，不入库
+# ── 构建产物 ───────────────────────────────────────
+# minigame/bundle.js 由 tools/build-minigame.js 生成，不入库
+# （601KB 的机器产物，入库只会让每次 clone 都多拉一份）
 minigame/bundle.js
 
-# 依赖
+# ── 依赖 ──────────────────────────────────────────
+# ★ 本项目**没有** package.json / node_modules ——
+#   纯静态站点，测试脚本只用 Node 内置模块（fs/path/vm/https/jsdom）。
+#   但 jsdom 解析器随环境提供，本地若装了 npm 包仍应忽略。
 node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 
-# 系统
+# ── 环境变量与密钥 ─────────────────────────────────
+# ★ 本项目**不需要**环境变量：纯静态、无后端、无第三方服务。
+#   下面这些规则是为将来可能引入密钥时准备的（例如接入分析/广告 SDK）。
+#   **现在不生效也不该填任何东西** —— 一旦出现 .env 就要问自己：
+#   这个密钥是不是该进仓库？答案永远是"不该"。
+.env
+.env.*
+!.env.example
+
+# ── 系统与编辑器 ───────────────────────────────────
 .DS_Store
 Thumbs.db
-
-# 编辑器
+desktop.ini
 *.swp
+*.swo
 .idea/
 .vscode/
+*.log
+npm-debug.log*
+
+# ── 本地临时 ───────────────────────────────────────
+# 部署/冒烟过程中的中间产物
+.tmp/
+*.local
+.cache/

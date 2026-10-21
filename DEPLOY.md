@@ -17,6 +17,35 @@ node tools/build-minigame.js   # 只有改过 minigame/src 才需要，H5 版无
 
 最终地址形如：`https://<用户名>.github.io/bubble-tycoon`
 
+> **本仓库当前线上地址**：<https://xuancheng2024.github.io/bubble-tycoon/>
+
+### A-0 GitHub Actions 自动部署（当前采用）
+
+仓库已配好 `.github/workflows/pages.yml`：**push 到 `main` 即自动发布**。
+
+⚠️ **需要仓库管理员做一次性设置**（否则 workflow 不会触发，
+因为 Pages 还处在 "Deploy from a branch" 模式）：
+
+1. 仓库页 → **Settings** → 左侧 **Pages**
+2. **Build and deployment → Source** 改为 **GitHub Actions**
+3. Save
+
+改完后下一次 push 会自动发布。或者在 Actions 页手动
+**pages / 发布到 GitHub Pages → Run workflow** 触发一次。
+
+三个 workflow 的分工：
+
+| Workflow | 触发时机 | 做什么 |
+|---|---|---|
+| `quick-check.yml` | 每次 push / PR | 10 套测试 + 文档引用检查（<30 秒） |
+| `full-check.yml` | 打 tag / 手动 | 全部 13 套 + 平衡模拟 + 小游戏构建 |
+| `pages.yml` | 每次 push 到 main | 发布到 GitHub Pages |
+
+> ★ **H5 版不需要任何构建步骤** —— 纯静态站点，
+> `pages.yml` 只做「上传 + 发布」，不做 build。
+> （小游戏端才需要 `node tools/build-minigame.js`，
+> 但那是给抖音开发者工具用的，不参与 Pages。）
+
 ### A-1 最快：网页拖拽（不用命令行）
 
 1. 打开 https://github.com/new ，仓库名填 `bubble-tycoon`，选 **Public**，**不要**勾选任何初始化选项

@@ -1,0 +1,61 @@
+# 快速检查：改动引擎/UI 后跑这套（< 30 秒）
+#
+# ★ 为什么分级：
+#   这套测试是本项目唯一的自动化防线（11 套、约 700 项断言）。
+#   但每次提交都全跑会让 CI 变慢，而「改动没碰到的部分」也不该拖慢反馈。
+#   所以分两档：
+#     ① quick  —— 引擎 + UI + 两版对等（改动最常碰到的）
+#     ② full   —— 全部 11 套 + 平衡模拟（提交/发版前跑）
+name: Quick Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  # 同一分支的新 push 会取消旧的未完成 run（省 Actions 配额）
+  group: quick-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: 引擎 + UI 快速检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 检查文档交叉引用（归档后最易断的）
+        run: node tools/check-doc-refs.js
+
+      - name: 引擎探针（数据模型不变式 + 城市可用性）
+        run: node tools/probe.js
+
+      - name: DOM 冒烟
+        run: node tools/dom-smoke.js
+
+      - name: 真实 DOM 冒烟（H5）
+        run: node tools/browser-smoke.js
+
+      - name: 小游戏冒烟（Canvas 端对等）
+        run: node tools/minigame-smoke.js
+
+      - name: 移动端布局
+        run: node tools/mobile-smoke.js
+
+      - name: 符号对等（两版引擎符号一致性）
+        run: node tools/symbol-check.js
+
+      - name: XSS 注入
+        run: node tools/xss-verify.js
+
+      - name: 主流程
+        run: node tools/e2e-flow.js
+
+      - name: 上线清单自动化部分
+        run: node tools/verify-checklist.js

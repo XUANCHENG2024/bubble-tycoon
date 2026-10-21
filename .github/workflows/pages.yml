@@ -1,0 +1,46 @@
+# GitHub Pages 部署
+#
+# ★ 切换到 Actions 部署的前提（**需要仓库管理员操作一次**）：
+#   Settings → Pages → Build and deployment → Source 改为 **GitHub Actions**
+#   否则本 workflow 不会触发（Pages 还在用 Deploy from branch 模式）。
+#
+# ★ 为什么 H5 版不需要构建步骤：
+#   本作是纯静态站点（index.html + styles.css + js/），
+#   没有打包、没有编译 —— 直接把仓库内容发布出去就是产物。
+#   所以这个 job 只做「上传 + 发布」，不做任何 build。
+#   （小游戏端才需要 node tools/build-minigame.js 生成 bundle.js，
+#     但那是给抖音开发者工具用的，不参与 Pages。）
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Pages 官方推荐：并发组同名 → 新 push 取消旧的未完成部署
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    name: 发布到 GitHub Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/configure-pages@v5
+
+      # upload-pages-artifact 会把整个仓库打包（对纯静态站点即产物）
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

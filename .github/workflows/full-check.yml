@@ -1,0 +1,42 @@
+# 发版前全量检查：11 套 + 平衡模拟 + 界面诊断
+#
+# ★ 为什么要单独一档：
+#   quick-check 不含平衡模拟（要跑 48 局，较慢）与界面诊断
+#   （含注入验证类断言）。这两项在「提交」时不必每次跑，
+#   但**发版前必须跑** —— 平衡失控是玩家能直接感知的问题。
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: full-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full:
+    name: 全量检查 + 平衡
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 全部 11 套
+        run: |
+          set -e
+          for t in probe dom-smoke browser-smoke minigame-smoke mobile-smoke \
+                   symbol-check xss-verify e2e-flow verify-checklist \
+                   diag-coupling diag-edge diag-ui check-doc-refs; do
+            printf '%-20s ' "$t"
+            node tools/$t.js > /dev/null
+            echo "PASS"
+          done
+
+      - name: 平衡模拟（三难度 × 16 局）
+        run: node tools/sim.js 16
+
+      - name: 小游戏端构建（平台配置校验）
+        run: node tools/build-minigame.js
