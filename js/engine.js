@@ -1390,6 +1390,109 @@ function fireManager(s, id) {
 }
 
 /**
+ * 店铺级升级（V12.1）
+ *
+ * ★ 每店独立：`store.upgrades[upgradeId] = level`
+ *
+ * ★ 与全局升级的关键差异：全局升级只有一份（`s.up`），
+ *   店铺升级**每店一份**。所以所有查询函数都要带 store 参数，
+ *   不能写成 `s.up.xxx` 那样直接读全局 ——
+ *   读错一次就是「A 店的升级加成跑到 B 店」，
+ *   表现是玩家买了 A 店的升级却发现 B 店变强了，且无法自查。
+ */
+
+/** 某店某项升级的等级 */
+function storeUpLevel(s, store, upId) {
+  if (!store || !store.upgrades) return 0;
+  return pos(store.upgrades[upId], 0);
+}
+/** 店铺升级的成本（按该店当前等级算） */
+function storeUpCost(s, store, upId) {
+  const u = STORE_UPGRADES.find(x => x.id === upId);
+  if (!u) return null;
+  const lv = storeUpLevel(s, store, upId);
+  if (lv >= u.max) return null;
+  /* 成本随**店铺等级**上浮 —— 大店的升级更贵。
+     这让「先开小店练级再做大店」有策略意义，
+     也防止玩家把所有店都堆到高等级（那样店铺升级就只是数值膨胀）。*/
+  const lvMult = 1 + (Math.max(1, num(store && store.level, 1)) - 1) * 0.22;
+  return Math.round(u.base * Math.pow(u.mult, lv) * lvMult);
+}
+/** 购买店铺升级 */
+function buyStoreUpgrade(s, branch, upId) {
+  const store = storeByBranch(s, branch);
+  if (!store) return { ok: false, msg: '店铺不存在' };
+  const u = STORE_UPGRADES.find(x => x.id === upId);
+  if (!u) return { ok: false, msg: '升级项不存在' };
+  const cost = storeUpCost(s, store, upId);
+  if (cost == null) return { ok: false, msg: '该升级已满级' };
+  if (s.cash < cost) return { ok: false, msg: '现金不足' };
+  s.cash -= cost; s.invested += cost;
+  if (!store.upgrades) store.upgrades = {};
+  const lv = storeUpLevel(s, store, upId) + 1;
+  store.upgrades[upId] = lv;
+  pushLog(s, `🏗️「${store.name}」${u.emoji} ${u.name} 升至 Lv.${lv}`);
+  return { ok: true, store, upgrade: u, level: lv, cost };
+}
+
+/** 店铺升级的客流加成（该店专用） */
+function storeTrafficBonus(s, store) {
+  return 1 + storeUpLevel(s, store, 'buzz') * 0.12;
+}
+/** 店铺升级的员工效率加成（该店专用） */
+function storeStaffBonus(s, store) {
+  return 1 + storeUpLevel(s, store, 'team') * 0.10;
+}
+/** 店铺升级的可上架数加成（该店专用） */
+function storeMenuBonus(s, store) {
+  return storeUpLevel(s, store, 'sign');
+}
+/** 店铺升级的开支减免（该店专用） */
+function storeCostCut(s, store) {
+  return clamp(storeUpLevel(s, store, 'lean') * 0.10, 0, 0.5);
+}
+
+/**
+ * 重新启用一位留档的店长（V12.1）。
+ *
+ * ★ 场景：玩家关掉一家店，店长被留档到 formerManagers；
+ *   后来开了新店，想把这位店长请回来。
+ *
+ * ★ 规则：
+ *   · **不额外收费** —— 他本来就是在职时被关停的，
+ *     重新启用不是「招新人」而是「恢复原职」，
+ *     收一笔招募费等于为同一份履历付两次钱。
+ *   · 仍受「每店至多一名店长」与「店长数 ≤ 店数」约束。
+ *   · 启用后从留档列表移除（不能反复启用同一人）。
+ */
+function rehireManager(s, formerId, branch) {
+  const fm = arr(s.formerManagers);
+  const idx = fm.findIndex(x => x && x.id === formerId);
+  if (idx < 0) return { ok: false, msg: '该店长不在待聘列表中' };
+  const store = storeByBranch(s, branch);
+  if (!store) return { ok: false, msg: '店铺不存在' };
+  if (managerOfBranch(s, branch)) return { ok: false, msg: '该店已有店长' };
+  if (managerSlotsLeft(s) <= 0) return { ok: false, msg: '没有空余名额' };
+  const f = fm[idx];
+  /* id 要避开现役店长的 id（否则两者撞 id，加成/工资会算到同一人头上）*/
+  let maxId = 0;
+  for (const m of arr(s.managers)) if (m.id > maxId) maxId = m.id;
+  const m = {
+    id: Math.max(s.nextMgrId || 1, maxId + 1),
+    name: f.name, emoji: f.emoji,
+    lv: f.lv, skill: f.skill, trait: f.trait, wage: f.wage,
+    branch, days: f.days || 0,
+  };
+  s.nextMgrId = m.id + 1;
+  s.managers.push(m);
+  fm.splice(idx, 1);
+  store.managerId = m.id;
+  syncStoreManagers(s);
+  pushLog(s, `🎩 ${m.emoji} ${m.name} 重新入职「${store.name}」`);
+  return { ok: true, manager: m, store };
+}
+
+/**
  * 关闭一家分店（V12 遗留项的实现）。
  *
  * ★ 关店与「卸任店长」是**不同的两件事**，规则不能混：
@@ -1439,10 +1542,21 @@ function closeStore(s, branch) {
   s.cash -= (sevTotal - fromStore);
   s.staff = s.staff.filter(stf => stf.branch !== branch);
 
-  /* --- 撤下该店店长（不给补偿）--- */
+  /* --- 撤下该店店长（不给补偿，但**留档**）--- */
   const mgr = managerOfBranch(s, branch);
   if (mgr) {
     s.managers.splice(s.managers.indexOf(mgr), 1);
+    /* ★ 店长信息**留档**到 formerManagers。
+       不留的话，玩家关掉一家店就永远失去这个店长 ——
+       而「关店再开一家、把这位店长请回来」本该是个有意思的经营循环
+       （换一个城市用同一位能干的店长）。
+       留档后可以「重新启用」，且不额外付费（他本来就是在职时被关停的）。*/
+    if (!Array.isArray(s.formerManagers)) s.formerManagers = [];
+    s.formerManagers.push({
+      id: mgr.id, name: mgr.name, emoji: mgr.emoji,
+      lv: mgr.lv, skill: mgr.skill, trait: mgr.trait, wage: mgr.wage,
+      days: mgr.days, fromStore: st.name, fromBranch: branch,
+    });
   }
 
   /* --- 移除该店 --- */
@@ -1559,7 +1673,7 @@ function managedStoreOneDay(s, store, mgr) {
   /* ★ 空店不产出：没有人就做不了单，但店租照付（固定开支）。
      记成「空转」而不是跳过 —— 玩家需要看到"这家店白开着"。 */
   if (staff.length === 0) {
-    const cost = storeDailyCost(store);
+    const cost = Math.round(storeDailyCost(store) * (1 - storeCostCut(s, store)));
     store.cash = Math.max(0, store.cash - cost);
     store.expense += cost;
     store.days++;
@@ -1580,6 +1694,10 @@ function managedStoreOneDay(s, store, mgr) {
   const venueMul = venueTrafficMul(store.venueType);
   let traffic = (4 + s.rep * 0.36) * lvBonus * venueMul * d.traffic;
   traffic = traffic * (1 + 0.20 * (store.level - 1));
+  /* ★ 店铺级升级（该店专用）：旺铺招财
+     托管店**同样吃**这个加成 —— 否则玩家投了升级的托管店
+     反而比没升级的自营店弱，「托管」就成了纯损失。 */
+  traffic = traffic * storeTrafficBonus(s, store);
   traffic = Math.max(1, Math.round(traffic));
 
   /* --- 店长能力加成（与玩家经营同一套 managerBonus）--- */
@@ -1587,7 +1705,10 @@ function managedStoreOneDay(s, store, mgr) {
   traffic = Math.round(traffic * mb.ops);
 
   /* --- 出杯：员工效率 × 客流 --- */
-  const avgSkill = staff.reduce((a, st) => a + staffMult(s, st), 0) / staff.length;
+  /* ★ 熟练团队（该店专用）：员工效率加成
+     托管店同样吃 —— 升级投在谁身上对谁生效，与谁经营无关。 */
+  const avgSkill = staff.reduce((a, st) => a + staffMult(s, st), 0) / staff.length
+    * storeStaffBonus(s, store);
   const cups = Math.max(0, Math.round(traffic * 0.72 * avgSkill * mb.speed));
 
   /* --- 营收：客单价取该店能卖的平均价 --- */
@@ -1601,7 +1722,8 @@ function managedStoreOneDay(s, store, mgr) {
   const cogs = Math.round(revenue * 0.34);              /* 原料率约 34% */
   const wages = Math.round(staff.reduce((a, st) => a + num(st.wage, 0), 0)
     + num(mgr.wage, 0));
-  const rent = storeDailyCost(store);
+  /* ★ 精打细算（该店专用）：固定开支减免 */
+  const rent = Math.round(storeDailyCost(store) * (1 - storeCostCut(s, store)));
 
   /* --- 采购：店长自己补料（只买本城能买到的） --- */
   const bought = managedStoreBuy(s, store, cups);
@@ -4108,6 +4230,36 @@ function sanitizeState(s) {
   let maxMgrId = 0;
   for (const m of s.managers) if (m.id > maxMgrId) maxMgrId = m.id;
   s.nextMgrId = clamp(Math.max(int(s.nextMgrId, 1), maxMgrId + 1), 1, NUM_CAP);
+  /* ---------- V12.1：留档店长（formerManagers）----------
+     清洗要点：
+       ① 必须是数组（老存档没有这个字段）
+       ② 字段逐个夹取（脏存档可能塞字符串等级/负工资）
+       ③ **不能与现役店长重名同 id** —— 重名会导致
+          「两个店长共用一个 id」，于是加成算两次、工资付两次
+       ④ 留档数量有上限（否则脏存档能塞 1000 个，白嫖店长） */
+  {
+    const fm = [];
+    const usedIds = new Set(arr(s.managers).map(m => m.id));
+    const usedNames = new Set(arr(s.managers).map(m => m.name));
+    for (const f of arr(s.formerManagers).slice(0, 12)) {
+      if (!f || typeof f !== 'object') continue;
+      const fid = int(f.id, 0);
+      const fname = str(f.name, 12);
+      if (!fname || usedIds.has(fid) || usedNames.has(fname)) continue;
+      usedIds.add(fid); usedNames.add(fname);
+      fm.push({
+        id: fid, name: fname, emoji: str(f.emoji, 8) || '🧑‍💼',
+        lv: mgrLvIds.indexOf(int(f.lv, 1)) >= 0 ? int(f.lv, 1) : 1,
+        skill: clamp(num(f.skill, 1), 0.3, 3),
+        trait: mgrTraitIds.indexOf(f.trait) >= 0 ? f.trait : 'none',
+        wage: posCap(f.wage, 120),
+        days: clamp(int(f.days, 0), 0, 9999),
+        fromStore: str(f.fromStore, 16) || '已关闭店铺',
+        fromBranch: clamp(int(f.fromBranch, 1), 1, 99),
+      });
+    }
+    s.formerManagers = fm;
+  }
   /* 候选池：只有「尚未开店且确实存在」的分店槽位才保留候选。
      已开分店的候选池清掉 —— 那些槽位已经有店长了。 */
   const cand0 = obj(s.mgrCand), mgrCand = {};

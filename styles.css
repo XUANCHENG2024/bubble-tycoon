@@ -1186,3 +1186,33 @@ body::before {
 .store-rpt b.up { color: var(--green); }
 .store-rpt b.down { color: var(--red); }
 .store-acts { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 8px; }
+
+/* ---------- V12.1：店铺级升级 / 待聘店长 ---------- */
+.store-up {
+  display: flex; align-items: center; gap: 6px; margin-top: 8px;
+  padding: 5px 8px; border-radius: 9px; cursor: pointer;
+  background: rgba(255, 255, 255, .04);
+}
+.store-up-t { font-size: 11px; font-weight: 700; color: var(--txt2); }
+.store-up-s { font-size: 10px; color: var(--txt3); }
+.store-up-arrow { margin-left: auto; font-size: 13px; color: var(--txt3); }
+.store-up-list {
+  margin-top: 5px; padding: 5px 7px; border-radius: 9px;
+  background: rgba(0, 0, 0, .18);
+}
+.store-up-row {
+  display: flex; align-items: center; gap: 7px; padding: 4px 0;
+}
+.store-up-e { font-size: 15px; width: 20px; text-align: center; }
+.store-up-info { flex: 1; min-width: 0; }
+.store-up-n { font-size: 11px; font-weight: 700; color: var(--txt); }
+.store-up-lv {
+  margin-left: 4px; font-size: 9.5px; color: var(--txt3); font-weight: 400;
+}
+.store-up-d { font-size: 10px; color: var(--txt3); }
+.store-up-max { font-size: 10px; color: var(--amber); }
+.store-former {
+  margin-top: 7px; padding: 5px 7px; border-radius: 9px;
+  background: rgba(139, 92, 255, .09); border: 1px solid rgba(139, 92, 255, .22);
+}
+.store-former-t { font-size: 10.5px; color: #c4a8ff; margin-bottom: 2px; }

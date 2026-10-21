@@ -667,6 +667,20 @@ function doAct(act, id, extra) {
     }
     return;
   }
+  if (act === 'stbuy') {
+    /* 店铺级升级（每店独立） */
+    var ub = buyStoreUpgrade(s, +id, +extra);
+    if (ub.ok) { beep('up', 760, 0.12); toast('\uD83C\uDFD7 ' + ub.store.name + ' ' + ub.upgrade.name + ' Lv.' + ub.level); }
+    else toast(ub.msg);
+    return;
+  }
+  if (act === 'smgrre') {
+    /* 重新启用留档店长（免费） */
+    var rh = rehireManager(s, +extra, +id);
+    if (rh.ok) { beep('up', 760, 0.12); toast('\uD83C\uDFA9 ' + rh.manager.name + ' 重新入职'); }
+    else toast(rh.msg);
+    return;
+  }
   if (act === 'sclose') {
     var stc = storeByBranch(s, +id);
     if (!stc) { toast('店铺不存在'); return; }

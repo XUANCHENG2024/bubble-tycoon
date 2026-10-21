@@ -450,6 +450,9 @@ function storesPanelHtml(s) {
         <button class="btn btn-xs" data-act="srename" data-b="${st.branch}">✏️ 改名</button>
         ${!isMain ? `<button class="btn btn-xs btn-danger" data-act="sclose" data-b="${st.branch}">🏚️ 关店</button>` : ''}
       </div>
+
+      ${storeUpgradeHtml(s, st)}
+      ${!mg ? storeFormerHtml(s, st) : ''}
     </div>`;
   }
 
@@ -459,6 +462,63 @@ function storesPanelHtml(s) {
     <button class="btn btn-cyan" style="width:100%" data-act="sopen" ${cost == null ? 'disabled' : ''}>
       ${cost == null ? '已达分店上限' : '🗺️ 开设新店 · ' + money(cost)}</button>
   </div></div>`;
+  return h;
+}
+
+/** 店铺级升级区（V12.1）
+ *
+ * ★ 折叠默认收起：4 个升级项 × 每店一张卡 = 页面会很长。
+ *   默认只显示一行「🏗️ 店铺升级 Lv.x」，点开才展开明细 ——
+ *   玩家需要时能找到，但不主动占版面。
+ */
+function storeUpgradeHtml(s, store) {
+  const ups = STORE_UPGRADES;
+  const anyBought = ups.some(u => storeUpLevel(s, store, u.id) > 0);
+  const totalLv = ups.reduce((a, u) => a + storeUpLevel(s, store, u.id), 0);
+  let h = `<div class="store-up" data-act="stoggleup" data-b="${store.branch}">
+    <span class="store-up-t">🏗️ 店铺升级</span>
+    <span class="store-up-s">${anyBought ? `已投入 ${totalLv} 级` : '未升级'}</span>
+    <span class="store-up-arrow">${anyBought ? '' : '›'}</span>
+  </div>`;
+  if (!anyBought) return h;
+  h += `<div class="store-up-list">`;
+  for (const u of ups) {
+    const lv = storeUpLevel(s, store, u.id);
+    const cost = storeUpCost(s, store, u.id);
+    h += `<div class="store-up-row">
+      <span class="store-up-e">${u.emoji}</span>
+      <div class="store-up-info">
+        <div class="store-up-n">${esc(u.name)} <span class="store-up-lv">Lv.${lv}/${u.max}</span></div>
+        <div class="store-up-d">${esc(u.detail ? u.detail(lv) : u.desc)}</div>
+      </div>
+      ${cost == null
+      ? '<span class="store-up-max">已满级</span>'
+      : `<button class="btn btn-xs" data-act="stbuy" data-b="${store.branch}" data-id="${u.id}"
+           ${s.cash >= cost ? '' : 'disabled'}>${money(cost)}</button>`}
+    </div>`;
+  }
+  h += `</div>`;
+  return h;
+}
+
+/** 待聘店长区（V12.1）：关过店的店长留档，可免费请回 */
+function storeFormerHtml(s, store) {
+  const fm = (s.formerManagers || []).filter(f => f && f.name);
+  if (!fm.length) return '';
+  let h = `<div class="store-former"><div class="store-former-t">📋 待聘店长（关店留档，可免费请回）</div>`;
+  for (const f of fm) {
+    const tr = managerTrait({ trait: f.trait });
+    h += `<div class="store-up-row">
+      <span class="store-up-e">${f.emoji}</span>
+      <div class="store-up-info">
+        <div class="store-up-n">${esc(f.name)}
+          <span class="store-up-lv">Lv.${f.lv} ${esc(managerRank(f.lv).name)}</span></div>
+        <div class="store-up-d">${tr.emoji} ${esc(tr.name)} · 原任职于「${esc(f.fromStore || '已关闭店铺')}」</div>
+      </div>
+      <button class="btn btn-xs btn-primary" data-act="smgrre" data-b="${store.branch}" data-id="${f.id}">请回</button>
+    </div>`;
+  }
+  h += `</div>`;
   return h;
 }
 

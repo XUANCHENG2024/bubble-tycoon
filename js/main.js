@@ -552,6 +552,24 @@ function doAct(act, el) {
       else UI.toast(r.msg, 'err');
       break;
     }
+    case 'stbuy': {
+      /* 店铺级升级（每店独立） */
+      const r = buyStoreUpgrade(s, +br, id);
+      if (r.ok) {
+        UI.toast(`🏗️「${r.store.name}」${r.upgrade.emoji} ${r.upgrade.name} Lv.${r.level}`, 'ok');
+        SFX.up();
+      } else UI.toast(r.msg, 'err');
+      break;
+    }
+    case 'smgrre': {
+      /* 重新启用留档店长（免费） */
+      const r = rehireManager(s, +id, +br);
+      if (r.ok) {
+        UI.toast(`🎩 ${r.manager.name} 重新入职「${r.store.name}」`, 'ok');
+        SFX.up();
+      } else UI.toast(r.msg, 'err');
+      break;
+    }
     case 'sclose': {
       /* 关店：不可撤销，且要付清退费 —— 所以必须二次确认。
          ★ 二次确认不是"怕玩家手滑"，而是这个操作**不可逆**：

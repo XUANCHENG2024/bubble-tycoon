@@ -232,8 +232,10 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     managerSlotsLeft, managerCount, refreshCandidates, hireStaff,
     citiesOfProvince, PROVINCES, VENUE_TYPES, VENUE_DEFAULT, CITY_DEFAULT,
     /* V12 遗留：关店 */
-    closeStore, syncShopCount, makeStore, defaultStoreName,
+    closeStore, syncShopCount, makeStore, defaultStoreName, rehireManager,
+    storeUpLevel, storeUpCost, buyStoreUpgrade, storeTrafficBonus, STORE_UPGRADES,
     storeById, playerStores, syncStoreManagers, venueTrafficMul,
+    managerOfBranch, managerById, managerCount, managerRank, managerTrait,
   };`);
   const T = window.__T;
 
@@ -965,6 +967,79 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     check(p[4] === 'true', 'V12 关店后店号连续无洞');
   }
 
+  /* ---- V12.1：店铺级升级 + 留档店长 ---- */
+  {
+    const s = window.S;
+    s.cash = 300000;
+    window.eval('window.__S12.openStore(window.S, { cityId: "510100" })');
+    window.UI.setTab('rival'); window.UI.renderAll();
+    const html = doc.getElementById('panel-rival').innerHTML;
+    check(/店铺升级/.test(html), 'V12.1 面板有「店铺升级」区');
+    /* ★ 明细默认**收起**（4 项 × 每店 = 页面会很长），
+       所以未升级时看不到具体项是设计意图，不是缺陷。 */
+    check(!/旺铺招财/.test(html), 'V12.1 未升级时升级明细收起（不占版面）');
+
+    /* 买升级 → 面板显示等级 */
+    const r = window.eval(`(function(){
+      var s = window.S;
+      var b = s.stores[1].branch;
+      var cost = window.__S12.storeUpCost(s, s.stores[1], 'buzz');
+      var r = window.__S12.buyStoreUpgrade(s, b, 'buzz');
+      UI.setTab('rival'); UI.renderAll();
+      return (r.ok ? 1 : 0) + '/' + window.__S12.storeUpLevel(s, s.stores[1], 'buzz')
+        + '/' + window.__S12.storeUpLevel(s, s.stores[0], 'buzz');
+    })()`);
+    const p = String(r).split('/');
+    check(p[0] === '1' && p[1] === '1' && p[2] === '0',
+      `V12.1 买升级生效且**只影响那家店**（${r}）`);
+    const html2 = doc.getElementById('panel-rival').innerHTML;
+    check(/Lv\.1\/5/.test(html2), 'V12.1 升级后展开明细并显示等级');
+    check(/已投入 1 级/.test(html2), 'V12.1 面板显示已投入级数');
+    check(/旺铺招财/.test(html2), 'V12.1 升级后列出升级项');
+  }
+
+  /* 关店 → 店长留档 → 请回 */
+  {
+    const r = window.eval(`(function(){
+      var s = window.S;
+      var b = s.stores[1].branch;
+      window.__S12.hireManager(s, b, 0);
+      var mgr = window.__S12.managerOfBranch(s, b);
+      window.__S12.closeStore(s, b);
+      var former = (s.formerManagers || []).length;
+      /* 再开一家店，把人请回来 */
+      window.__S12.openStore(s, { cityId: "310100" });
+      var nb = s.stores[s.stores.length - 1].branch;
+      var cashBefore = s.cash;
+      var rh = window.__S12.rehireManager(s, mgr.id, nb);
+      return [former, rh.ok ? 1 : 0, s.cash === cashBefore ? 1 : 0,
+              s.formerManagers.length,
+              window.__S12.managerOfBranch(s, nb) ? 1 : 0].join('/');
+    })()`);
+    const p = String(r).split('/');
+    check(p[0] === '1', 'V12.1 关店后店长进入待聘列表');
+    check(p[1] === '1', 'V12.1 可以请回留档店长');
+    check(p[2] === '1', 'V12.1 重新启用不额外收费');
+    check(p[3] === '0', 'V12.1 请回后从待聘列表移除');
+    check(p[4] === '1', 'V12.1 请回的店长已就位');
+    /* UI 上能看到待聘区。
+       ★ 上面已经请回了，所以此时待聘列表是空的（不显示才对）。
+         要验「有留档时显示」，得再造一个待聘出来。 */
+    window.UI.setTab('rival'); window.UI.renderAll();
+    const html = doc.getElementById('panel-rival').innerHTML;
+    check(!/待聘店长/.test(html),
+      'V12.1 请回后待聘区不再显示（列表已空）');
+    window.eval(`(function(){
+      var s = window.S;
+      s.formerManagers.push({ id: 9999, name: '待聘老店长', emoji: '🧑‍💼',
+        lv: 2, skill: 1.1, trait: 'ops', wage: 260, days: 8, fromStore: '老店' });
+      UI.setTab('rival'); UI.renderAll();
+    })()`);
+    const html2 = doc.getElementById('panel-rival').innerHTML;
+    check(/待聘店长/.test(html2) && /待聘老店长/.test(html2),
+      'V12.1 有留档店长时面板显示待聘区');
+  }
+
   /* ---- V11 店长与分店编制 ---- */
   /* 开一家分店 → 店长名额 +1 且**立刻**出现候选人。
      这条守的是因果链：玩家点完开店就该看到可招的人。
@@ -977,11 +1052,12 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     + ' var cands = (window.S.mgrCand[window.S.shops] || []).length;'
     + ' return before + "/" + after + "/" + cands; })()');
   const m1 = mgr1.split('/');
-  /* ★ V12：名额规则变了 —— 现在是「店数 − 已招数」（**含主店**），
-     所以开局就有 1 个名额（总店），开分店后变 2。
-     断言必须跟着改，否则会出现「测试全绿但规则已错」的假象。*/
-  check(m1[0] === '1' && m1[1] === '2' && Number(m1[2]) >= 2,
-    `开分店后名额 1→2 且立刻出现 ${m1[2]} 位候选人（V12 含主店，${mgr1}）`);
+  /* ★ V12：名额规则是「店数 − 已招数」（**含主店**）。
+     ★ 这里不能写死具体数字 —— 本段之前可能已经开过店，
+       基准店数不是 1。**断言要按「开店后名额 = 开店前名额 + 1」来写**，
+       这样与前面的测试顺序解耦（写死数字的断言会因测试顺序而 flaky）。*/
+  check(Number(m1[1]) === Number(m1[0]) + 1 && Number(m1[2]) >= 2,
+    `开分店后名额 ${m1[0]}→${m1[1]}（+1）且立刻出现 ${m1[2]} 位候选人`);
 
   const mgr2 = await window.eval('(function(){'
     + ' var r = hireManager(window.S, window.S.shops, 0);'

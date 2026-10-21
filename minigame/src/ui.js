@@ -1310,6 +1310,43 @@ function panelStores(ctx, x, y, w, s) {
         kind: 'ghost', act: 'sclose', id: st.branch, size: 9, r: 7,
       });
     }
+    /* ---- 店铺级升级（V12.1）----
+       Canvas 上没有折叠交互（点标题展开），所以直接列出来。
+       每店 4 项 → 4 行 × 22px = 88px，卡片要相应变高。 */
+    var upH = 0;
+    for (var ui = 0; ui < STORE_UPGRADES.length; ui++) {
+      var uu = STORE_UPGRADES[ui];
+      var ulv = storeUpLevel(s, st, uu.id);
+      var ucost = storeUpCost(s, st, uu.id);
+      text(ctx, uu.emoji + ' ' + uu.name, x + 10, y + h + upH + 4,
+        { size: 9.5, color: T.txt, maxW: w - 100 });
+      text(ctx, 'Lv.' + ulv + '/' + uu.max, x + w - 92, y + h + upH + 4,
+        { size: 9, color: T.txt3 });
+      if (ucost == null) {
+        text(ctx, '已满级', x + w - 10, y + h + upH + 4,
+          { size: 9, align: 'right', color: T.amber });
+      } else {
+        GFX.button(ctx, x + w - 76, y + h + upH - 2, 66, 18, money(ucost), {
+          kind: s.cash >= ucost ? 'ghost' : 'ghost', act: 'stbuy',
+          id: st.branch, extra: uu.id, disabled: s.cash < ucost, size: 8.5, r: 6,
+        });
+      }
+      upH += 22;
+    }
+    /* ---- 待聘店长（关店留档，可免费请回）---- */
+    var fms = s.formerManagers || [];
+    for (var fi = 0; fi < fms.length; fi++) {
+      var fm = fms[fi];
+      text(ctx, '📋 ' + fm.emoji + ' ' + fm.name, x + 10, y + h + upH + 4,
+        { size: 9.5, color: T.purple, maxW: w - 100 });
+      text(ctx, '原任职于' + (fm.fromStore || '已关闭店铺'), x + w - 92, y + h + upH + 4,
+        { size: 8.5, color: T.txt3, maxW: 74 });
+      GFX.button(ctx, x + w - 76, y + h + upH - 2, 66, 18, '请回', {
+        kind: 'primary', act: 'smgrre', id: st.branch, extra: fm.id, size: 8.5, r: 6,
+      });
+      upH += 22;
+    }
+    h += upH;
     y += h + 8;
   }
 

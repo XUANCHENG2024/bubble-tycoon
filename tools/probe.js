@@ -75,7 +75,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
-  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,'
+  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
   + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
   + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
@@ -1870,8 +1870,12 @@ console.log('=============== N. 店长与分店编制 ===============');
       '没店长的分店不受另一家店长的加成影响');
     expect('N2c', b2.speed > 1 && b2.rep > 1 && b2.ops > 1,
       `店长自己的店拿到加成（速度+${Math.round((b2.speed - 1) * 100)}%）`);
-    /* 加成要低于「再开一家分店」的收益，否则店长会盖掉分店本身 */
-    expect('N2d', b2.ops < 1.2,
+    /* ★ 加成要低于「再开一家分店」的收益（+60%），否则店长会盖掉分店本身。
+       注意：这条断言**必须按设计上限**写，不能写死某个数 ——
+       候选店长是随机抽的（Lv.1~5），ops 加成跨度 1.03~1.32，
+       写死 `< 1.2` 会在抽到 Lv.4/5 时误报（flaky 测试）。
+       设计上最高约 +32%，仍远低于 +60%，所以用 1.35 做闸门。 */
+    expect('N2d', b2.ops < 1.35,
       `客流加成 ${Math.round((b2.ops - 1) * 100)}% < 20%（远低于开分店的 +60%）`);
   }
 
@@ -2358,6 +2362,154 @@ console.log('=============== S. 店铺体系 ===============');
     s.cash = 1e9;
     const r2 = E.closeStore(s, 2);
     expect('S10o', r2.ok && s.stores.length === 1, '钱够时可关店');
+  }
+
+
+  /* ---- S11 店铺级升级 + 留档店长（V12.1）---- */
+  {
+    /* ① 升级是**每店独立**的 —— 最重要的一条 */
+    {
+      const s = E.newGame('normal', 0);
+      s.cash = 1e9;
+      E.openStore(s, { cityId: '510100' });
+      const a = s.stores[0], b = s.stores[1];
+      const r = E.buyStoreUpgrade(s, 1, 'buzz');
+      expect('S11a', r.ok && E.storeUpLevel(s, a, 'buzz') === 1,
+        '能给 A 店买升级');
+      expect('S11b', E.storeUpLevel(s, b, 'buzz') === 0,
+        '★ B 店的同名升级等级不受影响（每店独立）');
+      expect('S11c', E.storeTrafficBonus(s, a) > 1 && E.storeTrafficBonus(s, b) === 1,
+        '★ 加成只作用于被升级的那家店（不会串店）');
+    }
+
+    /* ② 成本随店铺等级上浮 */
+    {
+      const s = E.newGame('normal', 0);
+      s.cash = 1e9;
+      E.openStore(s, { cityId: '510100' });
+      const st = s.stores[1];
+      const c1 = E.storeUpCost(s, st, 'buzz');
+      st.level = 5;
+      const c5 = E.storeUpCost(s, st, 'buzz');
+      expect('S11d', c5 > c1, `店铺等级越高升级越贵（Lv1 ¥${c1} → Lv5 ¥${c5}）`);
+    }
+
+    /* ③ 满级后不能再买 */
+    {
+      const s = E.newGame('normal', 0);
+      s.cash = 1e9;
+      E.openStore(s, { cityId: '510100' });
+      const st = s.stores[1];
+      const max = E.STORE_UPGRADES.find(u => u.id === 'sign').max;
+      for (let i = 0; i < max; i++) E.buyStoreUpgrade(s, 2, 'sign');
+      expect('S11e', E.storeUpLevel(s, st, 'sign') === max, '可以升到满级');
+      const r = E.buyStoreUpgrade(s, 2, 'sign');
+      expect('S11f', !r.ok, '满级后不能再买');
+      expect('S11g', E.storeUpCost(s, st, 'sign') === null, '满级时成本为 null');
+    }
+
+    /* ④ 现金不足买不了 */
+    {
+      const s = E.newGame('normal', 0);
+      s.cash = 1;
+      E.openStore(s, { cityId: '510100' });
+      const r = E.buyStoreUpgrade(s, 2, 'buzz');
+      expect('S11h', !r.ok, '现金不足时买不了升级');
+    }
+
+    /* ⑤ ★ 托管店同样吃店铺升级 —— 否则托管永远比自营弱 */
+    {
+      const s = E.newGame('normal', 0);
+      s.cash = 1e9;
+      E.openStore(s, { cityId: '510100' });
+      E.buyStoreUpgrade(s, 2, 'buzz');
+      E.buyStoreUpgrade(s, 2, 'team');
+      E.buyStoreUpgrade(s, 2, 'lean');
+      E.hireManager(s, 2, 0);
+      E.refreshCandidates(s, true);
+      E.hireStaff(s, 0, 2);
+      E.setStoreAuto(s, 2, true);
+      const st = s.stores[1];
+      const rpt = E.managedStoresDaily(s)[0];
+      expect('S11i', rpt && rpt.traffic > 0, '托管店照常出报表');
+      /* 升级后托管店的客流应高于无升级时 —— 直接比系数更稳 */
+      expect('S11j', E.storeTrafficBonus(s, st) > 1,
+        '★ 托管店吃店铺升级的客流加成（升级投在谁身上对谁生效）');
+      expect('S11k', E.storeStaffBonus(s, st) > 1, '托管店吃熟练团队的效率加成');
+      expect('S11l', E.storeCostCut(s, st) > 0, '托管店吃精打细算的开支减免');
+    }
+
+    /* ⑥ 留档店长：关店后进 formerManagers，可免费请回 */
+    {
+      const s = E.newGame('normal', 0);
+      s.cash = 1e9;
+      E.openStore(s, { cityId: '510100' });
+      E.hireManager(s, 2, 0);
+      const mgr = E.managerOfBranch(s, 2);
+      E.closeStore(s, 2);
+      expect('S11m', s.formerManagers.length === 1,
+        `关店后店长被留档（${s.formerManagers.length} 人）`);
+      expect('S11n', s.formerManagers[0] && s.formerManagers[0].name === mgr.name
+        && s.formerManagers[0].id === mgr.id, '留档信息完整（名字/id 保留）');
+      expect('S11o', s.formerManagers[0] && s.formerManagers[0].fromStore,
+        '留档记录了原任职店铺');
+      /* 重新启用：免费。
+         ★ 基准必须在**开店之后**取 —— 开店本身要扣店费与启动金，
+           拿关店时的现金当基准，会把开店成本算到 rehire 头上，
+           然后误判成"重新启用收费了"。 */
+      E.openStore(s, { cityId: '310100' });
+      const cashBefore = s.cash;
+      const r = E.rehireManager(s, mgr.id, s.shops);
+      expect('S11p', r.ok, `可以请回留档店长（${r.ok ? r.manager.name : r.msg}）`);
+      expect('S11q', s.cash === cashBefore, '★ 重新启用不额外收费（是恢复原职不是招新人）');
+      expect('S11r', s.formerManagers.length === 0, '请回后从留档列表移除');
+      expect('S11s', E.managerOfBranch(s, s.shops)
+        && E.managerOfBranch(s, s.shops).name === mgr.name, '请回的店长已就位');
+    }
+
+    /* ⑦ 留档店长不能与现役店长重名/重 id（脏存档防护） */
+    {
+      const s = E.newGame('normal', 0);
+      s.cash = 1e9;
+      E.openStore(s, { cityId: '510100' });
+      E.hireManager(s, 2, 0);
+      const mgr = E.managerOfBranch(s, 2);
+      /* 脏存档：formerManagers 里塞一个与现役同 id 同名的 */
+      s.formerManagers = [{ id: mgr.id, name: mgr.name, emoji: '🧑‍💼', lv: 3, skill: 1.2, trait: 'ops', wage: 200, days: 5, fromStore: 'X店' }];
+      const c = E.sanitizeState(JSON.parse(JSON.stringify(s)));
+      expect('S11t', c.formerManagers.length === 0,
+        '与现役店长同 id/同名的留档被清洗掉（否则两个店长共用一个 id）');
+    }
+
+    /* ⑧ 存档往返：升级与留档都要保住 */
+    {
+      const s = E.newGame('normal', 0);
+      s.cash = 1e9;
+      E.openStore(s, { cityId: '510100' });
+      E.buyStoreUpgrade(s, 2, 'buzz');
+      E.buyStoreUpgrade(s, 2, 'buzz');
+      E.hireManager(s, 2, 0);
+      const mgr = E.managerOfBranch(s, 2);
+      E.closeStore(s, 2);
+      const back = E.sanitizeState(JSON.parse(JSON.stringify(s)));
+      /* ★ 关店后只剩总店，所以升级等级在**总店**上
+         （升的是 stores[1]，但那家店被关掉了 → 升级随店一起消失，
+         这是正确的：升级是店上的资产，不是总公司的）。
+         所以这里要验的是「关店后总店的 upgrades 里没有 buzz」，
+         而升级保留要另开一个不关店的场景来验。 */
+      expect('S11u', !(back.stores[0].upgrades && back.stores[0].upgrades.buzz),
+        '升级随店铺一起消失（升级是店上的资产，不是总公司的）');
+      const s2b = E.newGame('normal', 0);
+      s2b.cash = 1e9;
+      E.openStore(s2b, { cityId: '510100' });
+      E.buyStoreUpgrade(s2b, 2, 'buzz');
+      E.buyStoreUpgrade(s2b, 2, 'buzz');
+      const back2 = E.sanitizeState(JSON.parse(JSON.stringify(s2b)));
+      expect('S11u2', back2.stores[1].upgrades.buzz === 2,
+        '存档往返后店铺升级等级保留');
+      expect('S11v', back.formerManagers.length === 1
+        && back.formerManagers[0].id === mgr.id, '存档往返后留档店长保留');
+    }
   }
 
 console.log('');

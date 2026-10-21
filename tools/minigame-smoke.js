@@ -1379,6 +1379,56 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
   check(cr[0] === '1' && Number(cr[2]) === Number(cr[1]) - 1,
     `Canvas 关店生效（${closeRes}）`);
 
+  /* ---- V12.1 对等：Canvas 端店铺升级 + 留档店长 ---- */
+  {
+    const upEnv = makeEnv(390, 844);
+    upEnv.frames(2);
+    upEnv.tap('start'); upEnv.frames(2);
+    upEnv.tap('tutskip'); upEnv.frames(1);
+    upEnv.MG.S.cash = 300000;
+    upEnv.inCtx('openStore(__MINIGAME.S, { cityId: "510100" })');
+    upEnv.inCtx('__MINIGAME.VIEW.tab = "rival"');
+    upEnv.frames(2);
+
+    drawnTexts.length = 0;
+    upEnv.frames(1);
+    const upText = drawnTexts.join(' ');
+    check(/店铺升级|旺铺招财/.test(upText) || /旺铺招财/.test(upText),
+      'Canvas 店铺卡列出店铺升级项');
+    const upHits = (upEnv.G.hits || []).filter(h => h.act === 'stbuy');
+    check(upHits.length >= 4, `Canvas 店铺升级有 ${upHits.length} 个购买按钮命中区（4 项）`);
+
+    /* 买升级 → 等级生效 */
+    const upRes = upEnv.inCtx(`(function(){
+      var s = __MINIGAME.S;
+      var st = s.stores[1];
+      var r = buyStoreUpgrade(s, st.branch, 'buzz');
+      return (r.ok ? 1 : 0) + '/' + storeUpLevel(s, st, 'buzz')
+        + '/' + storeUpLevel(s, s.stores[0], 'buzz');
+    })()`);
+    const up = String(upRes).split('/');
+    check(up[0] === '1' && up[1] === '1' && up[2] === '0',
+      `Canvas 买升级生效且只影响那家店（${upRes}）`);
+
+    /* 关店 → 留档 → 请回 */
+    const fmRes = upEnv.inCtx(`(function(){
+      var s = __MINIGAME.S;
+      hireManager(s, 2, 0);
+      var mgr = managerOfBranch(s, 2);
+      closeStore(s, 2);
+      var former = (s.formerManagers || []).length;
+      openStore(s, { cityId: "310100" });
+      var nb = s.stores[s.stores.length - 1].branch;
+      var cashBefore = s.cash;
+      var rh = rehireManager(s, mgr.id, nb);
+      return [former, rh.ok ? 1 : 0, s.cash === cashBefore ? 1 : 0,
+              s.formerManagers.length].join('/');
+    })()`);
+    const fm = String(fmRes).split('/');
+    check(fm[0] === '1' && fm[1] === '1' && fm[2] === '1' && fm[3] === '0',
+      `Canvas 关店后店长留档且可免费请回（${fmRes}）`);
+  }
+
   /* ---- V10 对等：Canvas 研发页也要有城市标示与研发树 ----
      ★ 这条守的是「两版功能对等」：
        H5 端有 cityBar（城市 + 可用菜系）与研发树分组，
