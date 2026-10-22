@@ -18,9 +18,33 @@
   --amber: #ffc247;
   --green: #4ade80;
   --red: #ff5f6d;
-  --r1: 12px;
-  --r2: 18px;
-  --r3: 26px;
+  /* ---------- 圆角令牌（V18 补齐）----------
+     原来只有 r1/r2/r3（12/18/26px）三个，
+     而代码里散落着 7 / 8 / 9 / 10 / 14 / 99 / 999 px —— 全不在令牌里。
+     ★ 体检实测：圆角取值 **22 种**，最常用的是 9px(33 次) / var(--r1)(18) / 8px(14)。
+     ★ 缺令牌的后果不是「不好看」，而是**没法统一改**：
+       想把全局圆角调大一号，9px 的33 处得手动全改。
+     补成 5 级，覆盖从「小徽章」到「胶囊」的完整梯度： */
+  --r-xs: 6px;    /* 徽章 / 小标签 */
+  --r-sm: 8px;    /* 卡片内的小块（最常用） */
+  --r-md: 12px;   /* = r1，输入框 / 按钮 */
+  --r-lg: 18px;   /* = r2，卡片 */
+  --r-xl: 26px;   /* = r3，大面板 */
+  --r-pill: 99px; /* 胶囊（chip / 圆点指示） */
+  /* 旧的三个保留为别名，避免改动全仓 */
+  --r1: var(--r-md);
+  --r2: var(--r-lg);
+  --r3: var(--r-xl);
+
+  /* ---------- 间距令牌（V18 新增）----------
+     原来间距全是裸 px（5px/6px/7px/8px…），
+     体检实测内联 style 有 6 处 6 种写法。
+     ★ 4 级足够（更多级反而没人记得用哪一级）： */
+  --sp-1: 4px;   /* 元素内微间距 */
+  --sp-2: 7px;   /* 同组元素之间 */
+  --sp-3: 11px;  /* 卡片内区块之间 */
+  --sp-4: 16px;  /* 卡片之间 */
+
   --sh: 0 10px 30px rgba(0, 0, 0, .35);
   /* ---------- 字号令牌 ----------
      ★ 为什么建令牌：改版前字号是散落各处的字面量
@@ -380,7 +404,7 @@ body::before {
 
 /* V9 菜系分组（研发页） */
 .cui-group {
-  margin: 10px 0 0; padding: 9px; border-radius: 12px;
+  margin: 10px 0 0; padding: var(--sp-2); border-radius: var(--r-md);
   background: rgba(255, 255, 255, .035); border: 1px solid rgba(255, 255, 255, .07);
 }
 /* 未建线的菜系块：轻微降透明度表示"少一层收益"，但**不置灰到看起来像禁用**
@@ -392,7 +416,7 @@ body::before {
 .cui-group.tree.away { opacity: .58; }
 .cui-group.tree.away .rc { pointer-events: none; }
 .cui-ws.off {
-  font-size: var(--fs-xs); padding: 1px 6px; border-radius: 8px;
+  font-size: var(--fs-xs); padding: 1px 6px; border-radius: var(--r-sm);
   background: rgba(255, 255, 255, .07); color: var(--txt3);
 }
 /* 阶段分隔：让"先做前面才能做后面"有视觉节奏 */
@@ -429,7 +453,7 @@ body::before {
 .citybar-sub b { color: var(--cyan); }
 .citybar-ings { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 4px; }
 .ing-chip {
-  font-size: var(--fs-sm); padding: 2px 7px; border-radius: 9px;
+  font-size: var(--fs-sm); padding: 2px 7px; border-radius: var(--r-sm);
   background: rgba(255, 255, 255, .07); color: var(--txt2);
 }
 .citybar-hint { margin-top: 7px; font-size: var(--fs-sm); color: var(--txt3); line-height: 1.5; }
@@ -444,7 +468,7 @@ body::before {
 .rc.ach { border-style: dashed; }
 .rc.ach .rc-h span:last-child::after {
   content: '成就'; margin-left: 5px; font-size: var(--fs-xs); font-weight: 700;
-  padding: 1px 5px; border-radius: 7px;
+  padding: 1px 5px; border-radius: var(--r-sm);
   background: rgba(255, 217, 125, .2); color: var(--amber); vertical-align: middle;
 }
 .cui-head {
@@ -456,11 +480,11 @@ body::before {
 .cui-n { font-size: var(--fs-md); font-weight: 800; color: var(--txt); }
 .cui-d { font-size: var(--fs-sm); color: var(--txt3); flex: 1; min-width: 90px; }
 .cui-ws {
-  font-size: var(--fs-xs); padding: 2px 7px; border-radius: 8px;
+  font-size: var(--fs-xs); padding: 2px 7px; border-radius: var(--r-sm);
   background: rgba(255, 255, 255, .07); color: var(--txt3);
 }
 .cui-ws.on { background: rgba(74, 222, 128, .16); color: var(--green); }
-.cui-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.cui-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-2); }
 .cui-up .up-d { margin-top: 2px; }
 
 /* 结局四维称号（V8） */
@@ -521,7 +545,7 @@ body::before {
 /* 配方卡 */
 .rc {
   background: var(--card2); border: 1.5px solid transparent; border-radius: var(--r1);
-  padding: 9px 10px; cursor: pointer; transition: .16s; position: relative;
+  padding: var(--sp-2) var(--sp-3); cursor: pointer; transition: .16s; position: relative;
 }
 .rc:hover { transform: translateY(-2px); background: rgba(255, 255, 255, .16); }
 .rc.on { border-color: var(--cyan); background: rgba(53, 229, 240, .12); }
@@ -531,7 +555,7 @@ body::before {
 .rc-h .rc-e { font-size: 19px; }
 .rc-m { font-size: var(--fs-sm); color: var(--txt3); margin-top: 3px; line-height: 1.5; }
 .rc-tags { display: flex; gap: 3px; margin-top: 4px; flex-wrap: wrap; }
-.rc-tag { font-size: var(--fs-xs); padding: 1px 6px; border-radius: 999px; background: rgba(255, 255, 255, .12); }
+.rc-tag { font-size: var(--fs-xs); padding: 1px 6px; border-radius: var(--r-pill); background: rgba(255, 255, 255, .12); }
 .rc-tag.hit { background: rgba(255, 194, 71, .28); color: var(--amber); font-weight: 800; }
 .rc-price { display: flex; align-items: center; gap: 6px; margin-top: 6px; }
 /* 滑杆：18px 高对手指太细，靠 padding 把可触摸区域撑到 44px（Apple HIG 建议值），
@@ -1499,7 +1523,7 @@ body::before {
 
 .ing-use-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .ing-use {
-  font-size: var(--fs-xs); padding: 2px 6px; border-radius: 6px;
+  font-size: var(--fs-xs); padding: 2px 6px; border-radius: var(--r-xs);
   background: rgba(255, 255, 255, .06); color: var(--txt2);
   border: 1px solid transparent; cursor: default;
 }
@@ -1533,7 +1557,7 @@ body::before {
 }
 /* 配方卡里可点跳市场的原料 */
 .ing-link {
-  font-size: var(--fs-xs); padding: 1px 5px; border-radius: 5px; cursor: pointer;
+  font-size: var(--fs-xs); padding: 1px 5px; border-radius: var(--r-xs); cursor: pointer;
   background: rgba(255, 255, 255, .07); color: var(--txt2);
   border: 1px solid rgba(255, 255, 255, .12);
 }
@@ -1685,7 +1709,7 @@ body::before {
 /* 已达成批次的折叠条 */
 .ach-fold {
   display: flex; justify-content: space-between; align-items: center; width: 100%;
-  margin-top: 8px; padding: 7px 9px; border-radius: 8px; cursor: pointer;
+  margin-top: var(--sp-2); padding: 7px 9px; border-radius: var(--r-sm); cursor: pointer;
   background: rgba(255, 255, 255, .05); color: var(--txt3);
   border: 1px solid rgba(255, 255, 255, .09);
   font-size: var(--fs-sm);
@@ -1696,3 +1720,143 @@ body::before {
 /* 已达成的行更淡（它们是背景，不是待办） */
 .ach.got { opacity: .6; }
 .ach.got .ach-d { display: none; }
+
+/* ================= V18：研发界面设计语言收敛 ================= */
+/* ★ 把研发界面用到的圆角/间距收敛到令牌。
+   ★ 只改研发界面相关的类 —— 不全仓替换：
+     全仓替换的风险远大于收益（其他地方可能有它自己的理由），
+     而研发页是本轮的重点区域，先在这里立住规范。
+   ★ 映射（按视觉等效，不是机械替换）：
+     7/8px→--r-sm   9/10/12px→--r-md   99/999px→--r-pill */
+
+/* 分组头（button 化后圆角要跟着，焦点圈才贴合） */
+.cui-head.foldable { border-radius: var(--r-sm); padding: 3px 4px; margin: -3px -4px; }
+/* 配方卡：卡片级圆角 */
+.rc { border-radius: var(--r-md); }
+/* 配方卡内的提示条：小块级 */
+.rc-tip { border-radius: var(--r-sm); padding: 3px var(--sp-2); }
+/* 阶段标题：胶囊感（它是个分隔标签） */
+.tree-stage { border-radius: var(--r-pill); padding: 2px 10px; }
+/* 分组摘要行 */
+.fold-sum { padding-left: var(--sp-4); }
+/* 导航 chip：胶囊 */
+.navchip { border-radius: var(--r-pill); padding: 4px 11px; }
+/* 配方卡里的标签 */
+.rc-tag { border-radius: var(--r-pill); }
+/* 可点跳市场的原料 chip */
+.ing-link { border-radius: var(--r-xs); }
+
+/* ---------- 状态反馈动效（P1）---------- */
+/* ★ 明确「按下了」与「松开了」—— 之前只有 hover，
+   在触屏上完全没有按下反馈（hover 不会触发）。
+   ★ 用 active（:active 在触屏与鼠标上都成立）。 */
+.rc, .navchip, .ing-link, .ing-use, .ach-fold {
+  transition: transform .12s ease, background-color .15s ease, opacity .15s ease;
+}
+.rc:active, .navchip:active, .ing-link:active,
+.ing-use:active, .ach-fold:active {
+  transform: scale(.97);
+}
+/* 键盘聚焦时也给一点反馈（与鼠标 hover 区分） */
+.rc:focus-within, .navchip:focus-visible {
+  box-shadow: 0 0 0 2px rgba(53, 229, 240, .35);
+}
+
+/* ---------- 禁用态统一（P1）---------- */
+/* ★ 原来禁用态只有浏览器默认的灰，而「为什么不能点」，
+   研发界面很多（不在本店 / 没解锁 / 缺料 / 钱不够）。
+   ★ 统一成「降低不透明度 + 去掉阴影」，
+     并保留一个最小的可读性（对比度不能掉到不可读）。 */
+.rc.locked { opacity: .62; }
+.rc.locked button:disabled,
+.rc .btn:disabled {
+  opacity: .45;
+  box-shadow: none;
+  cursor: not-allowed;
+  /* ★ 不用 filter: grayscale —— 那会连带降低文字对比度；
+     纯 opacity 就够表达「不可用」了。 */
+}
+/* 禁用态的 tooltip 提示由 JS 侧给出（title 属性），这里只管视觉 */
+
+@media (prefers-reduced-motion: reduce) {
+  .rc, .navchip, .ing-link, .ing-use, .ach-fold { transition: none; }
+  .rc:active, .navchip:active, .ing-link:active,
+  .ing-use:active, .ach-fold:active { transform: none; }
+}
+
+/* ================= V18：可访问性与响应式 ================= */
+
+/* ---------- 焦点可见（P0）----------
+   ★ 全局兜底：所有可聚焦元素都有可见焦点圈。
+   之前只有 .vsel:focus 一处且写了 outline:none ——
+   键盘用户在整个研发界面看不到自己在哪儿。 */
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* ★ 鼠标点击不显示焦点圈，键盘 Tab 才显示 —— 这是 :focus-visible 的意义。
+   用 :focus 会让鼠标用户每点一下都看到框。 */
+.cui-head.foldable:focus:not(:focus-visible) { outline: none; }
+
+/* ---------- 分组头按钮化（P0）----------
+   ★ V18 从 div 改成 button，必须重置浏览器默认样式：
+   button 自带 border / background / font / padding / text-align，
+   不重置就会出现「灰色凸起的方块」而非设计好的头部。 */
+.cui-head.foldable {
+  display: flex; align-items: center; gap: 6px; width: 100%;
+  border: none; background: none; color: inherit;
+  font: inherit; text-align: left; padding: inherit;
+  cursor: pointer; border-radius: var(--r-sm);
+}
+.cui-head.foldable:hover { background: rgba(255, 255, 255, .05); }
+.cui-head.foldable:active { background: rgba(255, 255, 255, .09); }
+
+/* ---------- 空状态（P0）---------- */
+.empty {
+  padding: 26px 18px; text-align: center;
+  border: 1px dashed rgba(255, 255, 255, .16);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, .02);
+}
+.empty-e { font-size: 40px; line-height: 1.2; margin-bottom: 8px; }
+.empty-t { font-size: var(--fs-lg); font-weight: 800; color: var(--txt); margin-bottom: 6px; }
+.empty-d { font-size: var(--fs-sm); color: var(--txt2); line-height: 1.7; }
+.empty-d b { color: var(--cyan); }
+
+/* ---------- 横向溢出保护（P1）---------- */
+body, #app {
+  /* ★ 全局兜底：禁止整页横向滚动。
+     单个元素超宽应由它自己处理（overflow-x:auto，如 .labnav-in），
+     否则用户会把整页左右拖动，以为布局坏了。
+     ★ 用 overflow-x: clip 而不是 hidden：
+       hidden 在部分浏览器里会连 position:sticky 一起干掉
+       （sticky 的祖先不能是 overflow:hidden）。 */
+  overflow-x: clip;
+  max-width: 100%;
+}
+@supports not (overflow-x: clip) {
+  body, #app { overflow-x: hidden; }
+}
+
+/* ---------- 断点补齐（P1）----------
+   实测原断点只有 640 / 340，缺 768（平板）与 1024（桌面）。 */
+@media (min-width: 768px) {
+  /* 宽屏 2 列太稀疏 —— 加到 3 列 */
+  .cui-grid { grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); }
+  /* 宽屏正文不该无限拉伸 —— 限宽保证行长可读 */
+  #panel-lab, #panel-manage { max-width: 900px; margin: 0 auto; }
+}
+@media (min-width: 1024px) {
+  .cui-grid { gap: var(--sp-4); }
+  /* 桌面端导航条不必横滑 —— 换行放下 */
+  .labnav-in { flex-wrap: wrap; overflow-x: visible; }
+}
+/* ---------- 390 断点（iPhone 12/13/14 主力宽度）----------
+   原断点只有 340（超窄）与 640（平板），
+   390~639 这段最常见的手机宽度反而没有任何专属规则。 */
+@media (min-width: 390px) {
+  /* 卡片间距随可用空间放宽一点点 */
+  .cui-grid { gap: var(--sp-2); }
+  .card { padding-left: var(--sp-4); padding-right: var(--sp-4); }
+}

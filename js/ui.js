@@ -1717,16 +1717,31 @@ UI.renderLab = function () {
            这是临时浏览状态，刷新后回到默认更符合直觉。 */
     const groupKey = isAch ? 'ach' : (g.city ? ('c' + g.city) : 'univ');
     const collapsed = UI.collapsed && UI.collapsed[groupKey];
+    /* ★ V18：分组头从 div 改成 **button**。
+       原问题是 div.cui-head + data-act=foldtree ——
+       div 不可聚焦，键盘用户 Tab 到这里就过去了，**完全无法折叠**。
+       ★ 用 button 一次性拿到：可聚焦 / Enter+Space 天然触发 /
+         读屏软件播报「按钮」/ 自带 role ——
+         比手加 role="button" tabindex="0" 可靠得多（原生语义不会漏）。
+       ★ aria-expanded 告诉读屏「这块现在是展开还是收起」。
+       ★ CSS 里必须重置 button 默认样式（border/background/font），
+         否则会显示成灰色凸起方块 —— 见 .cui-head.foldable 规则。
+       ★ 这段说明放在模板**外**：写在 ${} 表达式里的注释，
+         只要结尾多一个花括号就会让表达式提前闭合、语法直接崩（踩过一次）。
+         同理注释里也不能出现反引号 —— 会把外层模板字符串提前结束。 */
     h += `<div class="cui-group tree${g.isHere || !g.city || isAch ? '' : ' away'}${collapsed ? ' fold' : ''}"
       data-fold="${groupKey}">
-      <div class="cui-head foldable" data-act="foldtree" data-id="${groupKey}">
+      <button type="button" class="cui-head foldable"
+        data-act="foldtree" data-id="${groupKey}"
+        aria-expanded="${collapsed ? 'false' : 'true'}"
+        aria-controls="fold-${groupKey}">
         ${head}
         ${!g.isHere && !isAch ? `<span class="cui-ws off">不在本店</span>` : ''}
-        <span class="fold-arrow${collapsed ? '' : ' open'}">▾</span>
-      </div>`;
+        <span class="fold-arrow${collapsed ? '' : ' open'}" aria-hidden="true">▾</span>
+      </button>`;
     /* ★ 折叠时只显示摘要行，不铺卡片 */
     if (collapsed) {
-      h += `<div class="fold-sum">${g.nodes.length} 道${
+      h += `<div class="fold-sum" id="fold-${groupKey}">${g.nodes.length} 道${
         !g.isHere && g.city ? ' · 切换到' + esc((cityById(g.city) || {}).name || '') + '后开放' : ''}</div>
       </div>`;
       continue;
@@ -1764,12 +1779,26 @@ UI.renderLab = function () {
         h += `<div class="tree-stage">第 ${st} 阶段${names.length
           ? ` · 需先做 ${links.join('、')}` : ''}</div>`;
       }
-      h += `<div class="cui-grid">`;
+      /* ★ V18：内容区给 id，让 aria-controls 能指向它 */
+      h += `<div class="cui-grid" id="fold-${groupKey}">`;
       for (const n of nodes) h += recipeNodeCardHtml(s, n);
       h += `</div>`;
     }
     h += `</div>`;       /* 闭合 cui-group */
   }
+  /* ★ V18：空状态。
+     原来树为空时这一页只剩顶部那张卡，玩家看到的是**一片空白**，
+     不知道是加载中、出错了、还是本来就该是空的。
+     ★ 空状态要说清三件事：发生了什么 / 为什么 / 下一步做什么。 */
+  if (!tree.length) {
+    h += `<div class="empty">
+      <div class="empty-e">🔬</div>
+      <div class="empty-t">没有可研发的配方</div>
+      <div class="empty-d">当前经营城市下暂时没有配方节点。<br>
+        换个城市看看，或到<b>经营页</b>看看菜单里有什么。</div>
+    </div>`;
+  }
+
   $('panel-lab').innerHTML = sigHtml + h;
 };
 
@@ -1917,12 +1946,14 @@ function labFoldNavHtml(s) {
        玩家一眼知道哪些现在能点，哪些要先换城市。 */
     const cls = g.isHere || !g.city || isAch ? 'here' : 'away';
     const label = isAch ? '🏅 成就' : (!g.city ? '🌐 通用' : g.cityName.replace(/市$/, ''));
-    chips.push(`<button class="navchip ${cls}${folded ? ' fold' : ''}"
+    chips.push(`<button type="button" class="navchip ${cls}${folded ? ' fold' : ''}"
       data-act="foldtree" data-id="${key}"
+      aria-expanded="${folded ? 'false' : 'true'}"
       title="${esc(g.cityName)}：${g.nodes.length} 道${folded ? '（点击展开）' : ''}">${esc(label)}</button>`);
   }
-  return `<div class="labnav" role="tablist">
-    <div class="labnav-in">${chips.join('')}</div>
+  /* ★ V18：nav 用 tablist 语义（role 在 div 上）+ 每个 chip 标role=tab */
+  return `<div class="labnav">
+    <div class="labnav-in" role="tablist" aria-label="研发树分组">${chips.join('')}</div>
   </div>`;
 }
 

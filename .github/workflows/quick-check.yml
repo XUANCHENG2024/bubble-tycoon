@@ -81,6 +81,9 @@ jobs:
       - name: 死按钮（每个 data-act 都有处理路径且点得动）
         run: node tools/check-deadbtn.js
 
+      - name: 研发界面规范（可访问性 / 设计令牌 / 响应式 / 交互状态）
+        run: node tools/check-ui-spec.js
+
       - name: 主流程
         run: node tools/e2e-flow.js
 
