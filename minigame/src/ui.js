@@ -712,13 +712,21 @@ function panelManage(ctx, x, y, w, s) {
       text(ctx, '📉抄底', x + 145, ry + 6, { size: FS.xs, weight: 800, color: T.green, maxW: 34 });
     }
     text(ctx, '库存 ' + Math.round(num(s.inv[g.id])), x + (bargain ? 180 : 145), ry + 6, { size: FS.sm, color: T.txt3 });
-    /* 三个进货按钮：+10 / +50 / 满仓 */
-    /* 只留 +10 / +50。原来第三个「满」传 extra 999 给 buyIng()，
-       而仓库上限最多 1500 —— 这个按钮 100% 撞「仓库装不下了」，点了永远只弹错误。 */
+    /* 三个进货按钮：+10 / +50 / 清仓 */
+    /* 只留 +10 / +50。原来第三个「满」传extra 999 给 buyIng()，
+       而仓库上限最多 1500 —— 这个按钮 100%撞「仓库装不下了」，点了永远只弹错误。 */
     var bw = 34, bh = 27;
-    var bx = x + w - 10 - (bw * 2 + 6);
+    var bx = x + w - 10 - (bw * 3 + 12);
     GFX.button(ctx, bx, ry + 1, bw, bh, '+10', { kind: 'ghost', act: 'buy', id: g.id, extra: 10, size: FS.xs, r: 7, pressed: isPressed('buy', g.id, 10) });
     GFX.button(ctx, bx + bw + 6, ry + 1, bw, bh, '+50', { kind: 'ghost', act: 'buy', id: g.id, extra: 50, size: FS.xs, r: 7, pressed: isPressed('buy', g.id, 50) });
+    /* ★ V13.9：清仓按钮（与 H5 端对等）。
+       ★ 没有它就是**玩家无解的死局**：仓库满时买不进需要的料，
+         而原来没有任何清理途径；切城后旧城专属料更是买不到也用不上，
+         却占着仓位让需要的料进不来。
+       ★ 无库存时禁用（而不是隐藏）—— 布局稳定，少一个跳动源。 */
+    var hasInv = num(s.inv[g.id]) > 0;
+    GFX.button(ctx, bx + (bw + 6) * 2, ry + 1, bw, bh, '清仓',
+      { kind: hasInv ? 'ghost' : 'ghost', act: 'sell', id: g.id, size: FS.xs, r: 7, disabled: !hasInv });
     ry += 30;
   }
   GFX.button(ctx, x + 10, ry + 2, w - 20, 30, '🛒 一键补货（按菜单需求配齐）',
@@ -727,10 +735,29 @@ function panelManage(ctx, x, y, w, s) {
   text(ctx, '按今日菜单的需求买齐（缺口紧急的先买），有余量再补便宜的',
     x + 10, ry, { size: FS.xs, color: T.txt3, maxW: w - 20 });
   ry += 18;
+  /* ★ V13.9：清理「本地买不到的料」（与 H5 端对等）。
+     切城后旧城专属料留在仓库里，买不到也用不上却占着仓位 ——
+     没有这一步就是玩家无解的死局。
+     ★ 只在**确实有这类料**时才占高度（常驻一个用不上的按钮是噪音）。 */
+  var staleN = 0, staleQty = 0;
+  for (var si = 0; si < ING.length; si++) {
+    var sg = ING[si];
+    var sq = num(s.inv[sg.id]);
+    if (sq > 0 && !ingAvailableAt(sg.id, mktCity)) { staleN++; staleQty += sq; }
+  }
+  if (staleN) {
+    text(ctx, '⚠ 有 ' + staleQty + ' 个本地买不到的原料占着仓位',
+      x + 10, ry, { size: FS.xs, weight: 700, color: T.amber, maxW: w - 20 });
+    ry += 18;
+    GFX.button(ctx, x + 10, ry, w - 20, 28, '清掉它们（按 ' + Math.round(CFG.LIQUID_RATE * 100) + '% 回购）',
+      { kind: 'ghost', act: 'sellstale', size: FS.sm, r: 8, pressed: isPressed('sellstale') });
+    ry += 34;
+  }
   /* V13.9：按钮 32 + 说明 18 = 50（原 38）。
      ★ 必须跟着改，否则说明文字会画到「菜单与定价」标题上 —— Canvas
-       没有自动流式布局，累加值与实际绘制高度必须手写一致。 */
-  y += 40 + rows * 30 + 50 + 10;
+       没有自动流式布局，累加值与实际绘制高度必须手写一致。
+★★ 上面若有「清理买不到的料」，还要再加上它的 18 + 34。 */
+  y += 40 + rows * 30 + 50 + (staleN ? 52 : 0) + 10;
 
   /* 菜单与定价 */
   var ms = s.menu || [];

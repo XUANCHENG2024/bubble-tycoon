@@ -390,8 +390,38 @@ function doAct(act, el) {
     }
     case 'autofill': {
       const r = autoFill(s);
-      UI.toast(r.bought ? `补货 ${r.bought} 单位 · -${money(r.spent)}` : '现金或仓位不足', r.bought ? 'ok' : 'err');
+      UI.toast(r.bought ? `补货 ${r.bought} 单位（${r.kinds} 种）· -${money(r.spent)}` : '现金或仓位不足', r.bought ? 'ok' : 'err');
       if (r.bought) { SFX.cash(); TUT.notify('buy'); }
+      break;
+    }
+    case 'sell': {
+      /* ★ V13.9：单种原料清仓。
+         ★ 卖完等于亏损（按 50% 回购），所以 toast 要把「亏了多少」说清楚 ——
+           玩家点了按钮才知道代价，比事后发现净资产掉了好。 */
+      const have = Math.floor(num(s.inv[id], 0));
+      const unit = num(s.prices[id], 0) * CFG.LIQUID_RATE;
+      const r = sellIng(s, id);
+      if (!r.ok) { UI.toast(r.msg, 'err'); break; }
+      const lost = Math.max(0, Math.round((num(s.avgCost[id], unit) - unit) * r.qty));
+      UI.toast(`清仓 ${r.qty} 个 ${ingById(id).name} · +${money(r.got)}`
+        + (lost > 0 ? `（比成本少 ${money(lost)}）` : ''), lost > 0 ? 'gold' : 'ok');
+      SFX.cash();
+      break;
+    }
+    case 'sellstale': {
+      /* ★ V13.9：一键清理「本地买不到」的原料 ——
+         切城后的救命功能：没有它，满仓的旧城料会让玩家彻底卡死。 */
+      const cid = currentCityId(s);
+      const stale = ING.filter(g => (s.inv[g.id] || 0) > 0 && !ingAvailableAt(g.id, cid));
+      if (!stale.length) { UI.toast('没有本地买不到的原料', 'err'); break; }
+      let got = 0, qty = 0;
+      for (const g of stale) {
+        const r = sellIng(s, g.id);
+        if (r.ok) { got += r.got; qty += r.qty; }
+      }
+      UI.toast(`清理 ${qty} 个本地买不到的原料 · +${money(got)}`, 'gold');
+      SFX.cash();
+      pump();
       break;
     }
     case 'toggle': {

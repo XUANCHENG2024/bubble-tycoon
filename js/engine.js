@@ -807,6 +807,52 @@ function buyIng(s, id, qty, markup) {
   return { ok: true, cost, qty };
 }
 /**
+ * 清仓：按当前市价的一部分回收库存原料（V13.9）
+ *
+ * ★★ 为什么必须有这个（这是玩家无解的死局）：
+ *   仓库满时买不进需要的料，而原来**没有任何清理途径** ——
+ *   玩家看着满仓的原料却什么都做不了，只能干等仓库升级。
+ *   切城尤其致命：旧城的专属料留在仓库里，新城买不到也用不上，
+ *   却占着仓位让需要的料进不来。
+ *
+ * ★ 为什么是「打折回收」而不是「免费丢弃」：
+ *   免费丢弃会让囤货毫无风险（反正丢不掉），
+ *   打折回收保留了「囤多了要付代价」的经济压力，
+ *   同时给玩家一条**急用钱时变现**的路（这本身也是决策）。
+ *   回购价 50%：低于进价的一半才亏，血本无归但不至于伤筋动骨。
+ *
+ * ★ 不返还声望/口碑、不计「抄底」flag —— 那是买入才有的行为。
+ *
+ * @param {object} s状态
+ * @param {string} id   原料 id
+ * @param {number} qty  数量（不传 = 全部）
+ * @returns {{ok:boolean, msg?:string, got?:number, qty?:number}}
+ */
+function sellIng(s, id, qty) {
+  const g = ingById(id);
+  if (!g) return { ok: false, msg: '原料不存在' };
+  const have = Math.floor(num(s.inv[id], 0));
+  /* 数量校验与 buyIng 同口径：NaN / 负数 / 非数字都要挡住。
+     ★ 用 Math.floor 而不是 Math.round —— 卖掉不该"四舍五入变多"。 */
+  let n = qty == null ? have : Math.floor(num(qty, 0));
+  if (!(n > 0)) return { ok: false, msg: '数量无效' };
+  if (n > have) return { ok: false, msg: '库存不足' };
+  const unit = num(s.prices[id], g.base) * CFG.LIQUID_RATE;
+  const got = Math.max(0, Math.round(unit * n));
+  s.inv[id] = have - n;
+  /* ★ avgCost 必须同步下调，否则净资产虚高：
+     卖 100 个成本 ¥2 的料、按 ¥1 回收后，
+     avgCost 还停在 ¥2 → invValue 把已经卖掉的货也算进资产。 */
+  if (s.inv[id] > 0) {
+    s.avgCost[id] = num(s.avgCost[id], g.base);
+  } else {
+    s.avgCost[id] = g.base;   /* 清空后回到基准，避免下次买入被旧均价带偏 */
+  }
+  s.cash += got;
+  return { ok: true, got, qty: n };
+}
+
+/**
  * 一键补货（V13.9 重写）
  *
  * ★★★ 为什么重写（原版三个实测出来的问题）：

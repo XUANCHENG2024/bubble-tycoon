@@ -61,8 +61,10 @@ function looksLikeData(sample) {
 const INTENTIONAL = [
   /* 可复现随机源的双实例 */
   { file: 'js/engine.js', firstLine: 8 },
-  /* 教程文案：每条内容不同，只是字段结构相似（归一化后看着一样） */
-  { file: 'js/data.js', minLine: 2160, maxLine: 2210 },
+  /* 教程文案：每条内容不同，只是字段结构相似（归一化后看着一样）。
+     ★ 范围用「key: 'xxx'」的行来定位而不是写死行号 ——
+       往 TUTORIAL 里加条目会让写死的行号失效（V13.9 就踩到了）。 */
+  { file: 'js/data.js', minLine: 2200, maxLine: 2260 },
 ];
 
 const root = path.join(__dirname, '..');

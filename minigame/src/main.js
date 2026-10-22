@@ -566,6 +566,34 @@ function doAct(act, id, extra) {
     if (r.ok) { beep('up', 600, 0.06); tutNotify('buy'); } else toast(r.msg);
     return;
   }
+  if (act === 'sell') {
+    /* ★ V13.9：单种原料清仓。
+       ★ 卖完等于亏损（按 LIQUID_RATE 回购），所以要把「比成本少多少」说清楚 ——
+         玩家点了按钮才知道代价，比事后发现净资产掉了好。 */
+    var sr = sellIng(s, id);
+    if (!sr.ok) { toast(sr.msg); return; }
+    var unitNow = num(s.prices[id], 0) * CFG.LIQUID_RATE;
+    var lostNow = Math.max(0, Math.round((num(s.avgCost[id], unitNow) - unitNow) * sr.qty));
+    beep('up', 420, 0.05);
+    toast('清仓 ' + sr.qty + ' 个 · +¥' + sr.got
+      + (lostNow > 0 ? '（比成本少 ¥' + lostNow + '）' : ''));
+    return;
+  }
+  if (act === 'sellstale') {
+    /* ★ V13.9：一键清理「本地买不到」的原料 ——
+       切城后的救命功能：没有它，满仓的旧城料会让玩家彻底卡死。 */
+    var cid2 = currentCityId(s);
+    var got2 = 0, qty2 = 0, n2 = 0;
+    for (var gi = 0; gi < ING.length; gi++) {
+      var gg = ING[gi];
+      if (num(s.inv[gg.id]) <= 0 || ingAvailableAt(gg.id, cid2)) continue;
+      var rr2 = sellIng(s, gg.id);
+      if (rr2.ok) { got2 += rr2.got; qty2 += rr2.qty; n2++; }
+    }
+    beep('up', 420, 0.05);
+    toast(n2 ? ('清理 ' + qty2 + ' 个（' + n2 + ' 种）· +¥' + got2) : '没有本地买不到的原料');
+    return;
+  }
   if (act === 'ratio') {
     var rid = id;
     setRatio(s, rid, num(s.ratios[rid], 1) + num(extra, 0.05));

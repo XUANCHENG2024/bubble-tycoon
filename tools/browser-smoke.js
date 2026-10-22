@@ -1077,6 +1077,47 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
       `resetHUDCache 后 HUD 立即反映新值（${cashEl.textContent}）`);
   }
 
+  /* ---- V13.9 库存清仓：玩家必须有办法腾仓位 ---- */
+  {
+    /* ★★ 这一版栽在「用 doAct 验引擎函数」上：
+       sellIng 单独调只 +¥50，走 doAct 却 +¥2450 ——
+       因为 doAct 还会跑 pump() 与 SFX 等一串副作用（测试环境里 SFX 是桩）。
+       ★★ **验引擎函数就调引擎函数**，别绕 action ——
+          action 的正确性由「面板有按钮」+ 引擎函数两条分别守住。
+       ★ 而且要**自包含**：不依赖前面断言留下的状态。 */
+    const RID = window.eval('window.S.menu[0] || window.S.recipes[0]');
+    const IID = window.eval('(function(){var r=recipeById(' + JSON.stringify(RID)
+      + ');var ks=Object.keys((r&&r.req)||{});return ks.length?ks[0]:ING[0].id;})()');
+    const BASE = window.eval('ingById(' + JSON.stringify(IID) + ').base');
+    const EXPECT = Math.round(100 * BASE * 0.5);
+    window.eval('(function(){var S=window.S;S.cash=100000;S.inv[' + JSON.stringify(IID)
+      + ']=100;S.prices[' + JSON.stringify(IID) + ']=' + BASE + ';})()');
+    const cashBefore = window.eval('window.S.cash');
+    const r = window.eval('sellIng(window.S, ' + JSON.stringify(IID) + ')');
+    check(r.ok && window.eval('window.S.inv[' + JSON.stringify(IID) + ']') === 0,
+      `V13.9 清仓把库存清零（100 → ${window.eval('window.S.inv[' + JSON.stringify(IID) + ']')}）`);
+    const got = window.eval('window.S.cash') - cashBefore;
+    check(got === EXPECT,
+      `V13.9 清仓按 ${Math.round(window.eval('CFG.LIQUID_RATE') * 100)}% 回购`
+      + `（+¥${got}，期望 ¥${EXPECT}）`);
+    /* ★ avgCost 必须回落 —— 否则卖掉的货还算进净资产（虚高） */
+    const avgAfter = window.eval('window.S.avgCost[' + JSON.stringify(IID) + ']');
+    check(Math.abs(avgAfter - BASE) < 0.01,
+      `V13.9 清空后 avgCost 回落到基准（¥${avgAfter}，基准 ¥${BASE}）`);
+    /* 库存为 0 时不能再卖（不能刷钱） */
+    const cashBefore2 = window.eval('window.S.cash');
+    const r2 = window.eval('sellIng(window.S, ' + JSON.stringify(IID) + ')');
+    check(!r2.ok && window.eval('window.S.cash') === cashBefore2,
+      `V13.9 无库存时清仓被拒（${r2.msg}）且不加钱`);
+    /* 数量异常输入不能污染现金 */
+    const bad = window.eval('sellIng(window.S, ' + JSON.stringify(IID) + ', NaN)');
+    check(!bad.ok, `V13.9 清仓数量 NaN 被拒（${bad.msg}）`);
+    /* 面板有清仓按钮 */
+    window.UI.setTab('manage'); window.UI.renderAll();
+    check(/data-act="sell"/.test(doc.getElementById('panel-manage').innerHTML),
+      'V13.9 市场面板有清仓按钮');
+  }
+
   /* ---- V13.8 切城逻辑抽取：两个入口行为必须一致 ---- */
   {
     /* ★ mapset（地图）与 mappick（选择器）抽成了同一个 doSetVenueCity。

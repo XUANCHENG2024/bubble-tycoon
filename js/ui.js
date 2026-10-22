@@ -1244,6 +1244,9 @@ UI.renderManage = function () {
       <div class="mkt-btns">
         <button class="btn btn-ghost" data-act="buy" data-id="${g.id}" data-q="10">+10</button>
         <button class="btn btn-ghost" data-act="buy" data-id="${g.id}" data-q="30">+30</button>
+        <button class="btn btn-ghost mkt-sell" data-act="sell" data-id="${g.id}"
+          title="按当前价${Math.round(CFG.LIQUID_RATE * 100)}% 回购（清仓腾仓位）"
+          ${(s.inv[g.id] || 0) > 0 ? '' : 'disabled'}>清仓</button>
       </div>
     </div>`;
   }
@@ -1255,7 +1258,28 @@ UI.renderManage = function () {
       <button class="btn btn-cyan" style="flex:1" data-act="autofill">🛒 一键补货</button>
     </div>
     <div style="font-size:var(--fs-xs);color:var(--txt3);margin-top:5px;line-height:1.6">
-      按<b>今日菜单的需求</b>买齐原料（按缺口紧急度排序），有余量再补当前便宜的。</div></div>`;
+      按<b>今日菜单的需求</b>买齐原料（按缺口紧急度排序），有余量再补当前便宜的。</div>`;
+
+  /* ★ V13.9：「清理买不到的料」——
+     切城后旧城专属料会留在仓库里，新城买不到也用不上，
+     却占着仓位让需要的料进不来。没有这一步就是**玩家无解的死局**。
+     ★ 只在**确实有这类料**时才显示 —— 常驻一个用不上的按钮是噪音。 */
+  const stale = ING.filter(g => (s.inv[g.id] || 0) > 0 && !ingAvailableAt(g.id, mktCity));
+  if (stale.length) {
+    const staleQty = stale.reduce((n, g) => n + (s.inv[g.id] || 0), 0);
+    const refund = stale.reduce((n, g) =>
+      n + Math.round(num(s.prices[g.id], g.base) * CFG.LIQUID_RATE * (s.inv[g.id] || 0)), 0);
+    h += `<div style="margin-top:9px;padding:7px 9px;border-radius:9px;
+        background:rgba(255,194,71,.10);border:1px solid rgba(255,194,71,.26)">
+      <div style="font-size:var(--fs-sm);color:var(--amber);line-height:1.6">
+        ⚠️ 仓库里有 <b>${staleQty}</b> 个<b>本地买不到</b>的原料
+        （${stale.slice(0, 3).map(g => esc(g.name)).join('、')}${stale.length > 3 ? '…' : ''}），
+        它们正占着仓位。</div>
+      <button class="btn btn-sm" style="margin-top:6px;width:100%"
+        data-act="sellstale">清掉它们（回收约 ${money(refund)}）</button>
+    </div>`;
+  }
+  h += `</div>`;
 
   /* ---------- V11 店长与分店编制 ----------
      放在「原料市场」之后：它属于人事管理，重要性低于"今天卖什么"，
