@@ -2748,6 +2748,183 @@ console.log('=============== U. 店长组合加成 ===============');
     E.clearSave(3);
   }
 }
+
+/* ============================================================
+ *  V 组：地域挑战关卡（V13.5）
+ *
+ *  守的是「新增的 4 个 metric 必须**真的能达成**」——
+ *  只测「关卡存在」是不够的：
+ *  实测第一版风味关门槛 12 被缩放到 14，玩家即使一天卖满 12 杯也达不到，
+ *  这个关卡等于白加。所以每个 metric 都要跑**达成 + 不达成**两个方向。
+ * ============================================================ */
+console.log('=============== V. 地域挑战关卡 ===============');
+{
+  const NEW_STAGES = ['st_city', 'st_cuisine', 'st_branch', 'st_visit'];
+
+  /* ---- V1 四个关卡存在且 metric 合法 ---- */
+  {
+    const missing = NEW_STAGES.filter(id => !E.STAGES.some(x => x.id === id));
+    expect('V1a', missing.length === 0,
+      `4 个地域挑战关卡都已定义${missing.length ? '（缺：' + missing.join(',') + '）' : ''}`);
+    const badMetric = E.STAGES.filter(x =>
+      ['cityCups', 'cuisineCups', 'branches', 'visits'].indexOf(x.metric) >= 0
+      && !(x.goal > 0));
+    expect('V1b', badMetric.length === 0,
+      `地域挑战关卡的门槛都 > 0${badMetric.length ? '（异常：' + badMetric.map(x => x.id).join(',') + '）' : ''}`);
+    /* 风味关必须指定菜系，否则玩家不知道要卖什么 */
+    const cui = E.STAGES.find(x => x.id === 'st_cuisine');
+    expect('V1c', !!(cui && cui.cuisine && E.CUISINES.some(c => c.id === cui.cuisine)),
+      `风味关指定了有效菜系（${cui && cui.cuisine}）`);
+  }
+
+  /* ---- V2 每个 metric 都能真正达成（造局 + 结算）---- */
+  {
+    /* 造一个「当天指标足够」的局面，并让 currentStage 落到目标关卡 */
+    const attempt = (id, setup) => {
+      const st = E.STAGES.find(x => x.id === id);
+      const s = E.newGame('normal', 0, null);
+      s.cash = 500000;
+      s.day = (st.chapter - 1) * 5 + 1;
+      s.stage = { done: {}, diff: 'std' };
+      for (const x of E.STAGES) {
+        if (x.chapter < st.chapter || (x.chapter === st.chapter && x.order < st.order)) {
+          s.stage.done[x.id] = true;
+        }
+      }
+      s.sim = {
+        cups: 0, orders: 0, revenue: 0, lost: 0, clicks: 0, comboBest: 0,
+        trendCups: 0, typeServed: {}, byRecipe: {},
+      };
+      setup(s, st, E.stageGoalOf(s, st, E.stageDiffById('std')));
+      const cur = E.currentStage(s);
+      if (!cur || cur.id !== id) return { ok: false, why: 'currentStage 未落到目标关卡' };
+      const before = s.cash;
+      const r = E.settleStage(s);
+      return { ok: !!(r && r.ok), gained: Math.round(s.cash - before), res: r };
+    };
+
+    /* ① 本地关：当天在本地卖够杯数 */
+    {
+      const st = E.STAGES.find(x => x.id === 'st_city');
+      const r = attempt('st_city', (s, st2, goal) => { s.sim.cups = goal + 4; });
+      expect('V2a', r.ok,
+        `本地关可达成（卖 ${st.goal + 4} 杯 / 门槛 ${st.goal}）` + (r.ok ? ` → +¥${r.gained}` : ` → ${r.why || JSON.stringify(r.res)}`));
+    }
+    /* ② 风味关：卖出指定菜系的杯数
+       ★ 用**缩放后的门槛**给量（天数成长会让 9 变成 11），
+         否则测的是"原始 goal 够不够"，而玩家面对的是缩放后的门槛。 */
+    {
+      const st = E.STAGES.find(x => x.id === 'st_cuisine');
+      const rec = E.RECIPES.find(x => x.cuisine === st.cuisine);
+      const r = attempt('st_cuisine', (s, st2, goal) => {
+        s.sim.cups = goal + 2;
+        s.sim.byRecipe[rec.id] = goal;
+      });
+      expect('V2b', r.ok,
+        `风味关可达成（${st.cuisine} 卖够缩放后门槛）` + (r.ok ? ` → +¥${r.gained}` : ` → ${r.why || JSON.stringify(r.res)}`));
+    }
+    /* ③ 扩张关：分店数够 */
+    {
+      const st = E.STAGES.find(x => x.id === 'st_branch');
+      const r = attempt('st_branch', (s, st2, goal) => { s.shops = goal; });
+      expect('V2c', r.ok,
+        `扩张关可达成（${st.goal} 家店）` + (r.ok ? ` → +¥${r.gained}` : ` → ${r.why || JSON.stringify(r.res)}`));
+    }
+    /* ④ 游商关：到访城市数够 */
+    {
+      const st = E.STAGES.find(x => x.id === 'st_visit');
+      const r = attempt('st_visit', (s, st2, goal) => {
+        s.citiesVisited = ['110100', '310100', '510100', '440100', '440300'];
+      });
+      expect('V2d', r.ok,
+        `游商关可达成（到访 ${st.goal} 城）` + (r.ok ? ` → +¥${r.gained}` : ` → ${r.why || JSON.stringify(r.res)}`));
+    }
+  }
+
+  /* ---- V3 达不到就不能给钱（不能白送）---- */
+  {
+    const st = E.STAGES.find(x => x.id === 'st_city');
+    const s = E.newGame('normal', 0, null);
+    s.cash = 500000;
+    s.day = (st.chapter - 1) * 5 + 1;
+    s.stage = { done: {}, diff: 'std' };
+    for (const x of E.STAGES) {
+      if (x.chapter < st.chapter || (x.chapter === st.chapter && x.order < st.order)) {
+        s.stage.done[x.id] = true;
+      }
+    }
+    s.sim = {
+      cups: 3, orders: 1, revenue: 10, lost: 0, clicks: 0, comboBest: 0,
+      trendCups: 0, typeServed: {}, byRecipe: {},
+    };
+    const before = s.cash;
+    const r = E.settleStage(s);
+    expect('V3a', !(r && r.ok) && s.cash === before,
+      `没达标不给钱（卖 3 杯 / 门槛 ${st.goal}）`);
+  }
+
+  /* ---- V4 累计型 metric 不吃天数缩放 ---- */
+  {
+    /* branches/visits 是累计量，乘天数系数会变成不可能的斜率 */
+    const s = E.newGame('normal', 0, null);
+    s.day = 25;
+    const st = E.STAGES.find(x => x.id === 'st_branch');
+    const g1 = E.stageGoalOf(s, st, E.stageDiffById('std'));
+    const s2 = E.newGame('normal', 0, null);
+    s2.day = 1;
+    const g2 = E.stageGoalOf(s2, st, E.stageDiffById('std'));
+    expect('V4a', g1 === g2,
+      `累计型关卡门槛不随天数变化（Day1 ${g2} → Day25 ${g1}）`);
+  }
+
+  /* ---- V5 关卡顺序：currentStage 必须按 chapter/order 走，不能按数组物理顺序 ---- */
+  {
+    /* ★ V13.5 的新关卡是**追加在 STAGES 数组末尾**的，
+       所以「第 3 章 order4」在数组里排在「第 4 章 order1」之后。
+       currentStage 若直接遍历数组，会跳到后面的章节去。
+       这条断言专门锁住「数组物理顺序 ≠ 关卡顺序」这个坑。 */
+    const stCity = E.STAGES.find(x => x.id === 'st_city');
+    const s = E.newGame('normal', 0, null);
+    s.day = (stCity.chapter - 1) * 5 + 1;
+    s.stage = { done: {}, diff: 'std' };
+    for (const x of E.STAGES) {
+      if (x.chapter < stCity.chapter || (x.chapter === stCity.chapter && x.order < stCity.order)) {
+        s.stage.done[x.id] = true;
+      }
+    }
+    const cur = E.currentStage(s);
+    expect('V5a', cur && cur.id === 'st_city',
+      `currentStage 按 chapter/order 走（得到 ${cur && cur.id}，应为 st_city）`);
+  }
+
+  /* ---- V6 跨章补打：前面的关卡没打完，不会永久作废 ---- */
+  {
+    /* ★ 修复前：一关卡住 = 整章 3~4 关全部永久错过（实测第 3 章 4 关全废）。
+       修复后：待打关卡可以跨章继续打。 */
+    const s = E.newGame('normal', 0, null);
+    s.cash = 500000;
+    /* 连续 5 天不达成第 1 关 */
+    for (let d = 1; d <= 5; d++) {
+      s.day = d;
+      s.sim = {
+        cups: 0, orders: 0, revenue: 0, lost: 0, clicks: 0, comboBest: 0,
+        trendCups: 0, typeServed: {}, byRecipe: {},
+      };
+      E.settleStage(s);
+    }
+    /* day6 进了第 2 章，第 1 章的关卡仍应可打 */
+    s.day = 6;
+    const cur = E.currentStage(s);
+    const ch1 = E.STAGES.filter(x => x.chapter === 1);
+    const stillPlayable = ch1.some(x => !s.stage.done[x.id]);
+    expect('V6a', stillPlayable && cur && cur.chapter === 1,
+      `跨章补打：第 1 章未完成的关卡仍可打（当前待打 ${cur && cur.name}）`);
+    /* UI 要能表达"还有 N 关待补" */
+    const sv = E.stageView(s);
+    expect('V6b', sv.backlog > 0,
+      `stageView 报出待补关卡数（backlog=${sv.backlog}）`);
+  }
+}
 }
 
 console.log('');

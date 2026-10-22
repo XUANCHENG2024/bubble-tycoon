@@ -2838,7 +2838,36 @@ function contractMetrics(s) {
     comboBest: num(sim.comboBest, 0),
     trendCups: num(sim.trendCups, 0),
     typeServed: Object.assign({}, sim.typeServed || {}),
+    /* ★ V13.5 地域维度指标（供「地域挑战」关卡用）。
+       全部**只统计当天**（与其它关卡指标同一口径），
+       这样「今天在成都卖了多少杯」才是玩家能当场看到、能努力达成的事。
+       ★ cuisineCups 需要按配方→菜系聚合：
+         sim.byRecipe 记的是配方销量，菜系要从配方反查。 */
+    cityCups: num(sim.cups, 0),                       /* 当天总杯数（城市维度关卡用） */
+    cuisineCups: cuisineCupsToday(s),                /* 当天指定菜系的杯数 */
+    branches: pos(s.shops, 1),                        /* 当前分店数（不是当天量） */
+    visits: (s.citiesVisited || []).length,           /* 已到访城市数（累计） */
   };
+}
+
+/**
+ * 当天某个菜系卖出的杯数（V13.5 地域挑战用）
+ *
+ * ★ 口径：**当天**（与其它关卡指标一致），
+ *   跨天累计会让「今天做 X」这种可当场努力的目标失去意义。
+ *
+ * @param {string} cuisineId 菜系 id；为空时返回 0
+ */
+function cuisineCupsToday(s, cuisineId) {
+  if (!cuisineId) return 0;
+  const sim = s.sim || s.report || {};
+  const by = sim.byRecipe || {};
+  let n = 0;
+  for (const rid in by) {
+    const r = recipeById(rid);
+    if (r && r.cuisine === cuisineId) n += num(by[rid], 0);
+  }
+  return n;
 }
 
 /** 每天开局抽一个合同（备货页可见）；已抽过的优先不重复 */
@@ -3008,8 +3037,26 @@ function stageDoneSet(s) {
 /** 当前待打的关卡：本章第一个没打通的。全打通了就返回 null（本章已通关） */
 function currentStage(s) {
   const done = stageDoneSet(s);
-  const list = chapterStages(s);
-  for (const st of list) if (!done[st.id]) return st;
+  /* ★ V13.5：**跨章**找第一个未完成的关卡。
+     原来是「只在本章里找」，而章节是按天硬切的（day 11~15 = 第 3 章），
+     关卡又每天只结算一次 ——
+     结果是「一关卡住 = 整章 3~4 关全部永久错过」。
+     实测：连续 5 天不达成第 1 关，day 16 进第 4 章时，
+     第 3 章的 4 关全部作废。
+     那是**既有缺陷**，但 V13.5 给每章加了第 4 关（容错从 2 关降到 1 关），
+     会让它更容易发生，所以连着一起修。
+     修法：待打关卡可以在更早的章节里继续打，
+     顺序仍是「先打靠前的章节」（保证玩家按进度推进）。
+
+     ★★ 必须**按 chapter/order 排序**后再找 ——
+       STAGES 数组的物理顺序不等于关卡顺序：
+       V13.5 把新关卡追加在数组末尾，
+       所以「第 3 章 order4」在数组里排在「第 4 章 order1」之后。
+       不排序的话 currentStage 会跳到后面的章节去。 */
+  const ordered = STAGES.slice().sort((a, b) => (a.chapter - b.chapter) || (a.order - b.order));
+  for (const st of ordered) {
+    if (!done[st.id]) return st;
+  }
   return null;
 }
 /**
@@ -3024,21 +3071,28 @@ function stageGoalOf(s, st, diff) {
   if (!st) return 0;
   const d = diffOf(s);
   let g = num(st.goal, 1);
+  /* ★ V13.5：累计型 metric（分店数 / 到访城市数）**不吃天数成长缩放**。
+     那些是"你一共开几家店""你去过几个城市"，随天数自然增长 ——
+     再乘一遍天数系数会让门槛变成不可能的斜率。
+     而且它们的量级很小（3 家 / 4 城），乘上 1.35 会变成 4 / 5.4 这种非整数。 */
+  const cum = (st.metric === 'branches' || st.metric === 'visits');
   if (st.metric === 'sat') {
     /* 比例型：只吃难度档的微量加成，且封顶 0.99 */
     g = Math.min(0.99, g + (num(diff.goalMul, 1) - 1) * 0.02);
   } else if (st.metric === 'lost') {
     /* 上限型：难度越高允许流失越少 */
     g = Math.max(0, Math.round(g / Math.max(1, num(diff.goalMul, 1))));
-  } else {
+  } else if (!cum) {
     g = g * num(diff.goalMul, 1);
   }
   /* 游戏难度缩放：easy 门槛低、hard 门槛高（但只吃一档，避免 hard 完全打不动） */
   const gd = num(d.stageGoal, 1);
-  if (st.metric !== 'sat') g = st.metric === 'lost' ? Math.max(0, Math.round(g / gd)) : g * gd;
+  if (st.metric !== 'sat' && !cum) g = st.metric === 'lost' ? Math.max(0, Math.round(g / gd)) : g * gd;
   /* 天数成长：越到后期目标越高（一天的量本来就更大） */
-  const t = 1 + Math.max(0, num(s.day, 1) - 1) * 0.012;
-  if (st.metric !== 'sat') g = g * t;
+  if (st.metric !== 'sat' && !cum) {
+    const t = 1 + Math.max(0, num(s.day, 1) - 1) * 0.012;
+    g = g * t;
+  }
   return st.metric === 'sat' ? Math.round(g * 1000) / 1000 : Math.max(1, Math.round(g));
 }
 /**
@@ -3074,6 +3128,10 @@ function settleStage(s) {
   else if (st.metric === 'lost') prog = m.lost;
   else if (st.metric === 'infl') prog = m.typeServed.influencer || 0;
   else if (st.metric === 'trend') prog = m.trendCups;
+  /* ★ V13.5 地域挑战的 4 个 metric */
+  else if (st.metric === 'cuisineCups') prog = cuisineCupsToday(s, st.cuisine);
+  else if (st.metric === 'branches') prog = pos(s.shops, 1);
+  else if (st.metric === 'visits') prog = (s.citiesVisited || []).length;
   else prog = num(m[st.metric], 0);
 
   const ok = st.metric === 'lost' ? prog <= g : prog >= g;
@@ -3105,9 +3163,14 @@ function stageView(s) {
   const cleared = list.filter(x => done[x.id]).length;
   /* 本章全通 → 展示"本章已通关"，引导玩家往下一章走 */
   const chapterDone = list.length > 0 && cleared >= list.length;
+  /* ★ V13.5：跨章补打时，本章可能已全通，但**更早的章节**还有关卡没打。
+     那些关卡现在仍可补打（currentStage 是全局找第一个未完成的），
+     所以 UI 必须让玩家知道"还有 N 关待补"，否则会以为全打完了。 */
+  const backlog = STAGES.filter(x => !done[x.id] && x.chapter < ch).length;
   return {
     chapter: ch, chapterCount: STAGE_CHAPTERS, cleared, total: list.length,
     chapterDone, chapterProgress: list.length ? cleared / list.length : 0,
+    backlog,
     stages: list.map(x => ({
       id: x.id, name: x.name, emoji: x.emoji, desc: x.desc, done: !!done[x.id],
       current: cur && cur.id === x.id,
@@ -3117,6 +3180,13 @@ function stageView(s) {
       desc: cur.desc.replace('{g}', stageGoalOf(s, cur, diff)),
       goal: stageGoalOf(s, cur, diff), cash: stageCashOf(s, cur, diff),
       metric: cur.metric, unit: cur.unit || '', prefix: cur.prefix || '',
+      /* ★ V13.5：地域挑战要显示**具体目标** ——
+         「卖出特色菜系 12 杯」玩家不知道是哪道菜系，
+         得给出名字与图标，否则这个关卡等于没法准备。 */
+      cuisine: cur.cuisine ? (CUISINES.find(c => c.id === cur.cuisine) || null) : null,
+      cityName: cur.metric === 'cityCups'
+        ? ((cityById(s.venue && s.venue.cityId) || {}).name || null)
+        : null,
     } : null,
     diffs: STAGE_DIFFS.map(d => ({
       id: d.id, name: d.name, emoji: d.emoji, star: d.star,

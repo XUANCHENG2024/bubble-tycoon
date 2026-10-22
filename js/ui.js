@@ -985,7 +985,14 @@ UI.renderManage = function () {
 
   /* V5 章节关卡：中期目标（跨 5 天推进），紧跟在每日合同之后 ——
      两个都是"开门前就知道目标"的方向盘，但时间尺度不同：
-     合同是今天这一关，关卡是这一整章。 */
+     合同是今天这一关，关卡是这一整章。
+
+     ★ V13.5：地域挑战关卡要给出**具体目标**，否则玩家没法准备 ——
+       「卖出特色菜系 12 杯」得告诉他是哪道菜系；
+       「在本地卖出 18 杯」得告诉他是哪个城市。
+       ★★ 下面那两行目标提示的说明**必须写在这里（模板外）** ——
+         写在模板字符串内部的话，注释只是字面文本，会被原样渲染到界面上
+         （V13.5 又踩过一次，check-leak 直接抓到）。 */
   const sv = stageView(s);
   if (sv) {
     const steps = sv.stages.map(x =>
@@ -997,7 +1004,8 @@ UI.renderManage = function () {
     ).join('');
     h += `<div class="card stage${sv.chapterDone ? ' done' : ''}" data-tut="stage">
       <div class="card-h">🏔️ 第 ${sv.chapter} 章 · 关卡
-        <span class="ch-sub">本章 ${sv.cleared}/${sv.total} · 共 ${sv.chapterCount} 章</span></div>
+        <span class="ch-sub">本章 ${sv.cleared}/${sv.total} · 共 ${sv.chapterCount} 章</span>
+        ${sv.backlog > 0 ? `<span class="stg-backlog">待补 ${sv.backlog} 关</span>` : ''}</div>
       <div class="stg-steps">${steps}</div>
       ${sv.chapterDone
         ? `<div class="stg-sub" style="color:var(--green)">✅ 本章已通关 · 明天进入第 ${Math.min(sv.chapterCount, sv.chapter + 1)} 章</div>`
@@ -1008,6 +1016,10 @@ UI.renderManage = function () {
           <span class="stg-d">${esc(sv.cur.desc)}</span>
           <span class="stg-r">+${money(sv.cur.cash)}</span>
         </div>
+        ${sv.cur.cuisine ? `<div class="stg-target">🎯 目标菜系：${esc(sv.cur.cuisine.emoji)} ${esc(sv.cur.cuisine.name)}
+          <span class="stg-target-sub">${esc(sv.cur.cuisine.desc)}</span></div>` : ''}
+        ${sv.cur.cityName ? `<div class="stg-target">🎯 目标城市：${esc(sv.cur.cityName)}
+          <span class="stg-target-sub">在当前经营城市卖出的杯数</span></div>` : ''}
         <div class="stg-diffs">
           <span class="stg-dl">难度</span>${diffBtns}
           <span class="stg-hint">难度越高门槛越大、奖励越丰厚 · 未达成只失奖励不扣口碑</span>

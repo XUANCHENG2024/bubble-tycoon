@@ -1330,3 +1330,21 @@ body::before {
 .mgr-combo-d { font-size: var(--fs-xs); color: var(--txt3); margin-top: 1px; }
 .mgr-combo-m { font-size: var(--fs-xs); color: var(--cyan); margin-top: 2px; }
 .mgr-combo-need { font-size: var(--fs-xs); color: var(--txt3); margin-top: 2px; opacity: .9; }
+
+/* ---------- V13.5：地域挑战的目标提示 ---------- */
+.stg-target {
+  margin-top: 6px; padding: 5px 8px; border-radius: 8px;
+  font-size: var(--fs-sm); color: var(--amber);
+  background: rgba(255, 194, 71, .10); border: 1px solid rgba(255, 194, 71, .24);
+}
+.stg-target-sub {
+  display: block; margin-top: 1px;
+  font-size: var(--fs-xs); color: var(--txt3);
+}
+
+/* ---------- V13.5：跨章待补关卡提示 ---------- */
+.stg-backlog {
+  margin-left: 6px; padding: 1px 6px; border-radius: 6px;
+  font-size: var(--fs-xs); font-weight: 700; color: var(--amber);
+  background: rgba(255, 194, 71, .14); border: 1px solid rgba(255, 194, 71, .3);
+}

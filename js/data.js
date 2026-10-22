@@ -1819,6 +1819,26 @@ const STAGES = [
   { id: 'st_cups3',  chapter: 6, order: 1, emoji: '🥤', name: '出杯关·叁', metric: 'cups',   goal: 92,  cash: 28, unit: '杯', desc: '卖出 {g} 杯' },
   { id: 'st_rev3',   chapter: 6, order: 2, emoji: '💸', name: '营收关·叁', metric: 'revenue', goal: 2700, cash: 31, unit: '', prefix: '¥', desc: '营收达到 ¥{g}' },
   { id: 'st_trend2', chapter: 6, order: 3, emoji: '🌟', name: '潮流关·贰', metric: 'trend',  goal: 12,  cash: 36, unit: '杯', desc: '命中今日流行 {g} 杯' },
+
+  /* ---- V13.5 地域挑战 ----
+     ★ 为什么加这一类：
+       原来的 18 关全是**通用经营指标**（出杯/营收/满意/翻台/手速/潮流/利润…），
+       玩到第 5、6 章时玩家已经把它们摸透了 —— 关卡不再带来新信息，
+       只是把门槛调高。而本项目明明有**地域**这个最有辨识度的维度
+       （34 省 / 272 市 / 19 菜系 / 城市特色配方）却完全没进关卡。
+       借鉴《房产大亨》「每张地图有专属地标开发任务」的做法 ——
+       让关卡考「你在某个地方做成了什么」，而不只是「你总量做够没」。
+
+     ★ 新增 4 个 metric：
+       cityCups    在**当前经营城市**卖出 N 杯     （换个地方经营才能刷）
+       cuisineCups 卖出某个**菜系** N 杯           （要研发出对应配方）
+       branches    拥有 N 家分店                   （开分店）
+       visits      到访过 N 个城市                （跨城游商）
+     */
+  { id: 'st_city',    chapter: 3, order: 4, emoji: '🏙️', name: '本地关',   metric: 'cityCups',    goal: 18,  cash: 20, unit: '杯', desc: '在本地卖出 {g} 杯' },
+  { id: 'st_cuisine', chapter: 4, order: 4, emoji: '🍜', name: '风味关',   metric: 'cuisineCups', goal: 9,   cash: 26, unit: '杯', desc: '卖出特色菜系 {g} 杯', cuisine: 'matcha' },
+  { id: 'st_branch',  chapter: 5, order: 4, emoji: '🏪', name: '扩张关',   metric: 'branches',    goal: 3,   cash: 30, unit: '家', desc: '开够 {g} 家店' },
+  { id: 'st_visit',   chapter: 6, order: 4, emoji: '🧭', name: '游商关',   metric: 'visits',      goal: 4,   cash: 40, unit: '城', desc: '到访过 {g} 个城市' },
 ];
 /* 章节关卡的难度档：goal / cash 都是相对 STAGES 里基准值的乘子。
    cashMul 递增（1.0 / 1.8 / 3.0）而 goalMul 递增得更快（1.0 / 1.35 / 1.8），

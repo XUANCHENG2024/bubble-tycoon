@@ -491,13 +491,19 @@ function panelManage(ctx, x, y, w, s) {
     (VIEW.panelRects = VIEW.panelRects || {}).stage = { x: x, y: y, w: w, h: sh };
     GFX.fillRR(ctx, x, y, w, sh, 12, 'rgba(139,92,255,.13)', 'rgba(139,92,255,.45)');
     text(ctx, '🏔️ 第' + sv.chapter + '章', x + 10, y + 8, { size: FS.sm, weight: 800, color: T.purple });
+    /* ★ V13.5：跨章补打时，本章可能已通关但更早章节还有关卡没打，
+       那个数字要露出来，否则玩家会以为全打完了。 */
+    if (sv.backlog > 0) {
+      text(ctx, '待补' + sv.backlog + '关', x + 66, y + 8,
+        { size: FS.xs, weight: 700, color: T.amber });
+    }
     if (sv.cur) {
-      text(ctx, sv.cur.emoji + ' ' + sv.cur.desc, x + 66, y + 9,
-        { size: FS.xs, color: T.txt2, maxW: w - 76 - 52 });
+      text(ctx, sv.cur.emoji + ' ' + sv.cur.desc, x + (sv.backlog > 0 ? 116 : 66), y + 9,
+        { size: FS.xs, color: T.txt2, maxW: w - 76 - 52 - (sv.backlog > 0 ? 50 : 0) });
       text(ctx, '+' + money(sv.cur.cash), x + w - 10, y + 8,
         { size: FS.xs, weight: 800, align: 'right', color: T.green });
     } else {
-      text(ctx, '✅ 本章已通关 · ' + sv.cleared + '/' + sv.total, x + 66, y + 9,
+      text(ctx, '✅ 本章已通关 · ' + sv.cleared + '/' + sv.total, x + (sv.backlog > 0 ? 116 : 66), y + 9,
         { size: FS.xs, color: T.green, maxW: w - 76 });
     }
     /* 三个难度档按钮：门槛越高、奖励越丰厚 */
