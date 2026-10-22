@@ -1429,6 +1429,42 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
       `Canvas 关店后店长留档且可免费请回（${fmRes}）`);
   }
 
+  /* ---- V13.9 对等：Canvas 抄底徽章 ---- */
+  {
+    const e8 = makeEnv(390, 844);
+    e8.frames(2); e8.tap('start'); e8.frames(2); e8.tap('tutskip'); e8.frames(1);
+    /* ★ 先把某种料的价格压到基准价以下（模拟低价日） */
+    e8.inCtx(`(function(){
+      var S = __MINIGAME.S;
+      S.cash = 300000;
+      var g = ING[0];
+      S.prices[g.id] = Math.round(g.base * 0.6 * 100) / 100;   /* 60% 基准价 */
+      S.prevPrices[g.id] = g.base;
+      __MINIGAME.VIEW.tab = 'manage';
+    })()`);
+    e8.frames(3);
+    drawnTexts.length = 0;
+    e8.frames(1);
+    const t8 = drawnTexts.join(' ');
+    check(/抄底/.test(t8),
+      `Canvas 低价日显示「📉 抄底」徽章（${/抄底/.test(t8) ? '有' : '无'}）`);
+    check(/-\d+%/.test(t8),
+      `Canvas 显示相对基准价的百分比（${(t8.match(/-?\d+%/g) || []).slice(0, 3).join(',') || '无'}）`);
+    /* ★ 高价日不该有徽章 */
+    e8.inCtx(`(function(){
+      var S = __MINIGAME.S; var g = ING[0];
+      S.prices[g.id] = g.base * 1.3; S.prevPrices[g.id] = g.base;
+    })()`);
+    e8.frames(2);
+    drawnTexts.length = 0;
+    e8.frames(1);
+    check(!/抄底/.test(drawnTexts.join(' ')),
+      'Canvas 高价日不显示抄底徽章（不误报）');
+    /* 按钮文案应反映新逻辑 */
+    check(/一键补货/.test(t8), 'Canvas 一键补货按钮存在');
+    check(/缺口紧急/.test(t8), 'Canvas 补货按钮下方说明新策略');
+  }
+
   /* ---- V13.8 对等：Canvas 负债提示 ---- */
   {
     const e6 = makeEnv(390, 844);

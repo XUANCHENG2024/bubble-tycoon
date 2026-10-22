@@ -695,10 +695,23 @@ function panelManage(ctx, x, y, w, s) {
     var prev = s.prevPrices[g.id] || g.base;
     var up = p > prev + 0.01, down = p < prev - 0.01;
     var col = up ? T.red : (down ? T.green : T.txt2);
+    /* ★ V13.9：与 H5 端对等 ——标出「相对基准价便宜多少」。
+       原来只有「比昨天涨/跌」，玩家不知道现在到底便不便宜，
+       而「便宜就囤」正是玩法核心之一（H5 教学第③步就教这个）。
+       ★ 阈值与「抄底大师」成就共用 CFG.BARGAIN_RATIO，
+       徽章亮了却没触发成就会让玩家困惑。 */
+    var vsBase = p / g.base;
+    var bargain = vsBase <= CFG.BARGAIN_RATIO;
     text(ctx, g.emoji + ' ' + g.name, x + 10, ry + 6, { size: FS.md, color: T.txt });
-    text(ctx, '¥' + p.toFixed(1), x + 78, ry + 6, { size: FS.sm, color: col });
+    text(ctx, '¥' + p.toFixed(1), x + 78, ry + 6, { size: FS.sm, color: bargain ? T.green : col });
     text(ctx, (up ? '▲' : down ? '▼' : '—'), x + 122, ry + 6, { size: FS.xs, color: col });
-    text(ctx, '库存 ' + Math.round(num(s.inv[g.id])), x + 145, ry + 6, { size: FS.sm, color: T.txt3 });
+    /* 相对基准价的百分比（弱化，不与主价格抢视觉） */
+    var pct = Math.round((vsBase - 1) * 100);
+    text(ctx, (pct > 0 ? '+' : '') + pct + '%', x + 136, ry + 6, { size: FS.xs, color: T.txt3, maxW: 30 });
+    if (bargain) {
+      text(ctx, '📉抄底', x + 145, ry + 6, { size: FS.xs, weight: 800, color: T.green, maxW: 34 });
+    }
+    text(ctx, '库存 ' + Math.round(num(s.inv[g.id])), x + (bargain ? 180 : 145), ry + 6, { size: FS.sm, color: T.txt3 });
     /* 三个进货按钮：+10 / +50 / 满仓 */
     /* 只留 +10 / +50。原来第三个「满」传 extra 999 给 buyIng()，
        而仓库上限最多 1500 —— 这个按钮 100% 撞「仓库装不下了」，点了永远只弹错误。 */
@@ -708,10 +721,16 @@ function panelManage(ctx, x, y, w, s) {
     GFX.button(ctx, bx + bw + 6, ry + 1, bw, bh, '+50', { kind: 'ghost', act: 'buy', id: g.id, extra: 50, size: FS.xs, r: 7, pressed: isPressed('buy', g.id, 50) });
     ry += 30;
   }
-  GFX.button(ctx, x + 10, ry + 2, w - 20, 30, '🛒 一键补货（按今日客流配齐）',
+  GFX.button(ctx, x + 10, ry + 2, w - 20, 30, '🛒 一键补货（按菜单需求配齐）',
     { kind: 'cyan', act: 'autofill', size: FS.sm, r: 9, pressed: isPressed('autofill') });
-  ry += 38;
-  y += 40 + rows * 30 + 38 + 10;
+  ry += 32;
+  text(ctx, '按今日菜单的需求买齐（缺口紧急的先买），有余量再补便宜的',
+    x + 10, ry, { size: FS.xs, color: T.txt3, maxW: w - 20 });
+  ry += 18;
+  /* V13.9：按钮 32 + 说明 18 = 50（原 38）。
+     ★ 必须跟着改，否则说明文字会画到「菜单与定价」标题上 —— Canvas
+       没有自动流式布局，累加值与实际绘制高度必须手写一致。 */
+  y += 40 + rows * 30 + 50 + 10;
 
   /* 菜单与定价 */
   var ms = s.menu || [];

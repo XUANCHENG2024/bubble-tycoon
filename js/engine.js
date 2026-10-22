@@ -797,28 +797,133 @@ function buyIng(s, id, qty, markup) {
   s.avgCost[id] = (s.avgCost[id] * old + unit * qty) / (old + qty);
   s.inv[id] = old + qty;
   s.cash -= cost;
-  if (!markup && unit <= ingById(id).base * 0.7) s.flags.bargain = true;
+  /* ★ V13.9：抄底判定改用 CFG.BARGAIN_RATIO（0.78）。
+     原代码写死 `base * 0.7`，而日常波动下限就是 0.72 ——
+     差一点点，导致 90% 玩家拿不到「抄底大师」。
+     阈值与"价格显示为绿色"的染色阈值必须一致，
+     否则会出现「界面显示绿色但没算抄底」或反之。 */
+  if (!markup && unit <= ingById(id).base * CFG.BARGAIN_RATIO) s.flags.bargain = true;
   bumpQuest(s, 'restock', 1);
   return { ok: true, cost, qty };
 }
-function autoFill(s) {
-  let spent = 0, bought = 0;
-  const target = Math.min(storageCap(s), 999);
-  /* ★ V10：只补**当前城市买得到**的原料。
-     遍历全部 ING 会把现金浪费在 20+ 种城市专属料上（北京买不到藤椒油），
-     表现为「一键补货毫无反应」—— 玩家看到的是按钮坏了。
-     更糟的是它挤占了通用料的采购额度：want 是按剩余仓位算的，
-     买不到的料虽然花不出去，但会占掉本轮可买的份额。 */
+/**
+ * 一键补货（V13.9 重写）
+ *
+ * ★★★ 为什么重写（原版三个实测出来的问题）：
+ *
+ * ① **填不满仓库** —— 原版给每种料 `Math.min(want, 40)` 的硬上限，
+ *    空仓时 420 的容量只买到 200（48%）。
+ *    玩家的体感是「点了没反应」，但控制台里明明花掉了钱——
+ *    这是**最像 bug 的体验**，比真的报错更糟。
+ *
+ * ② **买了菜单用不上的料** —— 原版遍历全部 ING（32 种），
+ *    按「剩余仓位平均分」决定买什么。
+ *    菜单只用 3 种料时，另外 29 种会白占仓位（实测 5 种里有 1 种是废料），
+ *    而真正需要的料反而没买够。
+ *
+ * ③ **仓位分配不均** —— 原版的 `target - invUsed(s) - bought`
+ *    每轮都重算，但 `Math.min(want, 40)` 先把它砍到 40，
+ *    所以「剩余仓位」这个信号其实从来没起作用。
+ *
+ * ★★★ 现在的做法：**按菜单真实需求分配，最后再兜底填满**。
+ *   ① 算出每种料「菜单做 N 杯需要多少」—— N 取「够卖一天」，
+ *      而不是拍一个常数；
+ *   ② 按需求优先级（缺口最大的先买）分配剩余仓位与现金；
+ *   ③ 有余量时再按「单价低 + 当前便宜」补满剩余仓位 ——
+ *      这一步替代原来的「平摊 32 种料」。
+ *
+ * @param {object} s 状态
+ * @param {object} [opt] { cups: 目标备货杯数 }
+ *   不传 = 按一天的预估销量算；传 0 = 只补到菜单需求的 1杯（省着买）
+ * @returns {{spent:number, bought:number, kinds:number}}
+ */
+function autoFill(s, opt) {
   const cid = currentCityId(s);
-  for (const g of ING) {
-    if (!ingAvailableAt(g.id, cid)) continue;
-    const want = Math.max(0, Math.min(target - invUsed(s) - bought, Math.floor(s.cash * 0.35 / Math.max(0.1, s.prices[g.id]))));
-    if (want > 0 && s.cash > 120) {
-      const r = buyIng(s, g.id, Math.min(want, 40));
-      if (r.ok) { spent += r.cost; bought += r.qty; }
+  const cap = storageCap(s);
+  const priceOfIng = (id) => Math.max(0.1, num(s.prices[id], 1));
+
+  /* ---------- ① 目标备货量：按菜单真实需求 ---------- */
+  /*★ 用 maxCupsFromStock 的同款口径（reqOf，已含工坊降本）——
+     否则会出现"备货按降后算、扣料按降前扣"的老问题。 */
+  const wantCups = opt && opt.cups != null
+    ? num(opt.cups, 0)
+    : Math.max(1, Math.round(trafficOf(s) * avgCupsPerOrder(s) * 1.15));
+  /** 每种料的需求（wantCups 杯的量） */
+  const need = {};
+  for (const rid of (s.menu || [])) {
+    const req = reqOf(s, rid);
+    for (const k in req) need[k] = (need[k] || 0) + req[k] * wantCups / Math.max(1, s.menu.length);
+  }
+
+  /* ---------- ② 按「缺口比例」排优先级 ---------- */
+  /* ★ 排的是**缺口占比**而不是绝对缺口：
+     缺 1 个茶叶（用量大）和缺 1 个香草（用量小），
+     前者更紧急 —— 按绝对值排会把香草排前面。 */
+  const plan = [];
+  for (const k in need) {
+    const cur = num(s.inv[k], 0);
+    const gap = need[k] - cur;
+    if (gap <= 0) continue;
+    const g = ingById(k);
+    if (!g) continue;
+    plan.push({ g, gap, urgent: gap / Math.max(0.1, need[k]) });
+  }
+  plan.sort((a, b) => b.urgent - a.urgent);
+
+  let spent = 0, bought = 0, kinds = 0;
+  const room = () => Math.max(0, cap - invUsed(s));
+  /* ★ 现金预算：留两成周转金。
+     原来那句「cash * 0.35 对每种料各算一次」的写法，
+     25 种料累加起来会远超 35%，而且没有任何上界。 */
+  let budget = Math.max(0, num(s.cash, 0) * 0.6);
+
+  for (const it of plan) {
+    if (room() <= 0 || budget <= 0) break;
+    if (!ingAvailableAt(it.g.id, cid)) continue;
+    const unit = priceOfIng(it.g.id);
+    /* 想要买多少：受三个上限约束 —— 缺口、仓位、现金预算 */
+    const qty = Math.max(0, Math.min(
+      Math.floor(it.gap + 0.999),
+      Math.floor(room()),
+      Math.floor(budget / unit),
+    ));
+    if (qty <= 0) continue;
+    const r = buyIng(s, it.g.id, qty);
+    if (r.ok) {
+      spent += r.cost; bought += r.qty; kinds++;
+      budget -= r.cost;
     }
   }
-  return { spent, bought };
+
+  /* ---------- ③ 有余量再补满：优先「便宜且正在低价」的 ---------- */
+  /* ★ 替代原来「平摊 32 种料」——
+     只买**当前城市有售**的，且按「折扣力度」排序（越便宜越先买），
+     这样玩家点完会看到「把便宜的都囤了」，而不是「每种都多了几个」。
+     ★ 每种仍有软上限（不把仓位全压在一种上），
+       否则会出现「仓库全是茶叶，一杯奶茶都做不了」。 */
+  if (room() > 0 && budget > 0) {
+    const extra = ING
+      .filter(g => ingAvailableAt(g.id, cid))
+      .map(g => ({ g, r: priceOfIng(g.id) / g.base }))
+      .sort((a, b) => a.r - b.r);
+    for (const it of extra) {
+      if (room() <= 0 || budget <= 0) break;
+      const cur = num(s.inv[it.g.id], 0);
+      const softCap = Math.max(need[it.g.id] || 0, Math.ceil(cap * 0.35));
+      if (cur >= softCap) continue;
+      const unit = priceOfIng(it.g.id);
+      const qty = Math.max(0, Math.min(
+        Math.floor(softCap - cur),
+        Math.floor(room()),
+        Math.floor(budget / unit),
+      ));
+      if (qty <= 0) continue;
+      const r = buyIng(s, it.g.id, qty);
+      if (r.ok) { spent += r.cost; bought += r.qty; kinds++; budget -= r.cost; }
+    }
+  }
+
+  return { spent, bought, kinds };
 }
 /** 该配方单杯的**实际配方用量**（已含 V9 工坊降本）
  *

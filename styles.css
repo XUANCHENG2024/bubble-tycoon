@@ -1413,3 +1413,21 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   .debt-bar { animation: none; }
 }
+
+/* ---------- V13.9：原料市场「抄底」徽章与相对基准价 ---------- */
+.mkt-row.bargain {
+  background: rgba(78, 205, 140, .08);
+  border-left: 3px solid var(--green);
+}
+.mkt-tag {
+  display: inline-block; margin-left: 4px; padding: 0 5px;
+  border-radius: 5px; font-size: var(--fs-xs); font-weight: 700;
+  color: var(--green); background: rgba(78, 205, 140, .16);
+}
+/* 相对基准价的百分比：弱化处理，不与主价格抢视觉 */
+.mkt-vs {
+  display: inline-block; margin-left: 3px;
+  font-size: var(--fs-xs); color: var(--txt3); font-weight: 400;
+}
+/* ★ 抄底行让价格数字本身也变绿 —— 徽章之外再给一层视觉提示 */
+.mkt-row.bargain .mkt-p { color: var(--green); }

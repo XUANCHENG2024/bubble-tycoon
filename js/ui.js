@@ -1221,10 +1221,24 @@ UI.renderManage = function () {
     const dir = p > pv + .001 ? 'up' : (p < pv - .001 ? 'down' : '');
     const arrow = dir === 'up' ? '▲' : (dir === 'down' ? '▼' : '—');
     const ratio = clamp(p / (g.base * 2.3), 0, 1);
-    h += `<div class="mkt-row${localSet.has(g.id) ? ' local' : ''}">
+    /* ★ V13.9：补上「相对基准价」的两个信号 ——
+       ① 今天是涨还是跌（dir/arrow，玩家已经熟悉）
+       ② **相对基准价便不便宜**（徽章）——
+          没有第②个时，玩家只能看到「比昨天贵了」，
+          却不知道「其实比基准价便宜很多，值得囤」。
+          ★ 而「值得囤」正是教学第③步想教的事，
+            界面却不给这个信息 —— 教学与界面脱节了。
+       ★ 阈值与「抄底大师」成就共用 CFG.BARGAIN_RATIO：
+          徽章亮了却没触发成就（或反之）会让玩家困惑。 */
+    const vsBase = p / g.base;
+    const bargain = vsBase <= CFG.BARGAIN_RATIO;
+    const pctTxt = Math.round((vsBase - 1) * 100);
+    h += `<div class="mkt-row${localSet.has(g.id) ? ' local' : ''}${bargain ? ' bargain' : ''}">
       <div class="mkt-e">${g.emoji}</div>
-      <div class="mkt-n">${g.name}</div>
-      <div class="mkt-p ${dir}">¥${p.toFixed(2)} ${arrow}</div>
+      <div class="mkt-n">${g.name}
+        ${bargain ? `<span class="mkt-tag" title="低于基准价 ${Math.round((1 - CFG.BARGAIN_RATIO) * 100)}% · 现在买很划算">📉 抄底</span>` : ''}</div>
+      <div class="mkt-p ${dir}">¥${p.toFixed(2)} ${arrow}
+        <span class="mkt-vs">${pctTxt > 0 ? '+' : ''}${pctTxt}%</span></div>
       <div class="mkt-bar"><i style="width:${ratio * 100}%"></i></div>
       <div class="mkt-c">存 ${Math.round(s.inv[g.id] || 0)}</div>
       <div class="mkt-btns">
@@ -1233,9 +1247,15 @@ UI.renderManage = function () {
       </div>
     </div>`;
   }
+  /* ★ V13.9：一键补货要说清「做了什么」。
+     原来点完只有 toast 报「花了多少」，玩家不知道买到了什么、
+     有没有买齐。这与 V13.9 重写 autoFill（按菜单需求分配）是配套的：
+     现在补货是有策略的，就该把策略结果讲出来。 */
   h += `<div style="display:flex;gap:7px;margin-top:10px">
       <button class="btn btn-cyan" style="flex:1" data-act="autofill">🛒 一键补货</button>
-    </div></div>`;
+    </div>
+    <div style="font-size:var(--fs-xs);color:var(--txt3);margin-top:5px;line-height:1.6">
+      按<b>今日菜单的需求</b>买齐原料（按缺口紧急度排序），有余量再补当前便宜的。</div></div>`;
 
   /* ---------- V11 店长与分店编制 ----------
      放在「原料市场」之后：它属于人事管理，重要性低于"今天卖什么"，

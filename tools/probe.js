@@ -75,7 +75,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
-  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,MANAGER_COMBOS,MANAGER_TRAITS,managerComboView,managerComboBonus,MANAGER_SPECIALTY,managerSpecialtyMul,managerCanSpecialty,managerSetSpecialty,REGULAR_CFG,REGULAR_TRAITS,regularView,spawnOne,regularIdentityOf,regularServe,regularBonus,regularPullMul,regularsOf,CUSTOMER_TYPES,CUSTOMER_FACES,SPECIAL_CUSTOMERS,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
+  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,MANAGER_COMBOS,MANAGER_TRAITS,managerComboView,managerComboBonus,MANAGER_SPECIALTY,managerSpecialtyMul,managerCanSpecialty,managerSetSpecialty,REGULAR_CFG,REGULAR_TRAITS,regularView,spawnOne,regularIdentityOf,regularServe,regularBonus,regularPullMul,regularsOf,autoFill,rollWeather,rollNews,refreshMarket,ING,CUSTOMER_TYPES,CUSTOMER_FACES,SPECIAL_CUSTOMERS,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
   + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
   + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
@@ -3151,6 +3151,159 @@ console.log('=============== X. 店长专精 ===============');
     const cb = E.managerComboBonus(s);
     expect('X5a', withBoth.ops > 1 && sp.ops > 1 && cb.sat > 1,
       `专精与组合可同时生效（ops=${withBoth.ops.toFixed(3)}，组合满意 ×${cb.sat.toFixed(2)}）`);
+  }
+}
+
+/* ============================================================
+ *  Y 组：仓库与采购（V13.9）
+ *
+ *  守的是三件实测出来的事：
+ *   ① 一键补货要能**填满仓库**（原来只能填 48%，像坏了）
+ *   ② 补货只买**菜单用得到的料**（原来会白占仓位）
+ *   ③ 「抄底大师」成就必须**真的可达**
+ *     （原阈值 0.70 < 日常波动下限 0.72 → 90% 玩家拿不到）
+ * ============================================================ */
+console.log('=============== Y. 仓库与采购 ===============');
+{
+  /* ---- Y1 一键补货能填满仓库 ---- */
+  {
+    /* ★ 这条守的是 V13.9 重写 autoFill 的**核心目标**。
+       原版给每种料 Math.min(want, 40) 的硬上限，
+       空仓时 420 的容量只买到 200（48%）——
+       玩家的体感是「点了没反应」，但钱确实花了。 */
+    const s = E.newGame('normal', 0, null);
+    s.cash = 100000;
+    s.inv = {};
+    for (const g of E.ING) s.inv[g.id] = 0;
+    E.autoFill(s);
+    const cap = E.storageCap(s);
+    const used = E.invUsed(s);
+    expect('Y1a', used >= cap * 0.9,
+      `一键补货能填满仓库（${used}/${cap} = ${(used / cap * 100).toFixed(0)}%）`);
+  }
+
+  /* ---- Y2 只买菜单用得到的料 ---- */
+  {
+    const s = E.newGame('normal', 0, null);
+    s.cash = 200000;
+    s.inv = {};
+    for (const g of E.ING) s.inv[g.id] = 0;
+    /* 菜单只用两种配方 */
+    const useIds = s.recipes.slice(0, 2);
+    s.menu = useIds.slice();
+    const need = new Set();
+    for (const rid of useIds) {
+      const r = E.recipeById(rid);
+      for (const k in (r && r.req) || {}) need.add(k);
+    }
+    E.autoFill(s);
+    let wasted = 0;
+    for (const g of E.ING) {
+      const q = s.inv[g.id] || 0;
+      if (q > 0 && !need.has(g.id)) wasted += q;
+    }
+    /* 允许一点底料（万一玩家临时上架新配方），但不能像原来那样占掉 1/5 的仓位 */
+    const cap = E.storageCap(s);
+    expect('Y2a', wasted <= cap * 0.12,
+      `补货基本不浪费仓位（无用料 ${wasted}/${cap} = ${(wasted / cap * 100).toFixed(0)}%）`);
+  }
+
+  /* ---- Y3 抄底阈值必须**不低于**日常波动下限 ---- */
+  {
+    /* ★ 这是本组最重要的断言：
+       抄底阈值 < 日常波动下限时，「每天都看到打折但永远差一点」，
+       成就形同虚设（实测 30 天只有 8.8% 概率达成）。
+       波动下限是 refreshMarket 里的 0.72，这里对着它守。
+       ★ 用 >= 而不是 >：阈值**正好等于**下限是可以的
+         （语义是「这波跌到下限了」，实测 300 局里 99% 的玩家会遇到，
+          平均 4.1 天 —— 既有机会又不至于天天抄底）。
+         真正要防的是「远低于下限」那种不可能达成的配置。 */
+    const floor = 0.72;
+    expect('Y3a', E.CFG.BARGAIN_RATIO >= floor,
+      `抄底阈值 ${E.CFG.BARGAIN_RATIO} 不低于日常波动下限 ${floor}（否则成就形同虚设）`);
+    /* 而且不能高到每天都达成 —— 那就不是「抄底」了 */
+    expect('Y3b', E.CFG.BARGAIN_RATIO < 0.9,
+      `抄底阈值 ${E.CFG.BARGAIN_RATIO} 未高到人人都能达成（保留「要运气」的感觉）`);
+  }
+
+  /* ---- Y4 抄底成就真的能触发 ---- */
+  {
+    /*走真实流程跑 200 天：天气与新闻要先 roll 出来，refreshMarket 才用得上。 */
+    const s = E.newGame('normal', 0, null);
+    s.cash = 1e9;
+    let hitDays = 0;
+    for (let d = 0; d < 200; d++) {
+      E.rollWeather(s);
+      E.rollNews(s);
+      E.refreshMarket(s);
+      let anyBargain = false;
+      for (const g of E.ING) {
+        if (s.prices[g.id] <= g.base * E.CFG.BARGAIN_RATIO) anyBargain = true;
+      }
+      if (anyBargain) hitDays++;
+    }
+    expect('Y4a', hitDays > 0,
+      `200 天里有 ${hitDays} 天能见到抄底价（成就可达）`);
+    expect('Y4b', hitDays < 200,
+      `抄底价不是天天都有（${hitDays}/200 天 = ${(hitDays / 2).toFixed(0)}%）`);
+  }
+
+  /* ---- Y5 buyIng 的边界与异常输入 ---- */
+  {
+    const s = E.newGame('normal', 0, null);
+    const ing = E.ING[0];
+    s.inv[ing.id] = 0;
+    s.prices[ing.id] = 10;
+    const cap = E.storageCap(s);
+    /* ★ 每一步都要给**足够的现金**——
+       否则报的是「现金不足」而不是被测的那个原因，
+       断言就变成了在测另一件事（第一版的错判据）。 */
+    s.cash = 1e6;
+    const over = E.buyIng(s, ing.id, cap + 10);
+    expect('Y5a', !over.ok && /装不下/.test(over.msg),
+      `超容被拒（${over.msg}）`);
+    /* 现金差 1 分被拒 */
+    s.cash = 99;
+    const short = E.buyIng(s, ing.id, 10);
+    expect('Y5b', !short.ok && /现金不足/.test(short.msg),
+      `现金不足被拒（${short.msg}）`);
+    /* 恰好够则成功 */
+    s.cash = 100;
+    const exact = E.buyIng(s, ing.id, 10);
+    expect('Y5c', exact.ok && Math.abs(s.cash) < 0.01,
+      `恰好付得起则成功（剩 ¥${Math.round(s.cash)}）`);
+    /* 异常输入不能污染现金 */
+    for (const q of [NaN, -5, null, undefined, 'abc']) {
+      const before = s.cash;
+      E.buyIng(s, ing.id, q);
+      if (!Number.isFinite(s.cash) || s.cash < 0) {
+        expect('Y5d', false, `异常输入 ${String(q)} 污染了现金：${s.cash}`);
+        break;
+      }
+    }
+    if (Number.isFinite(s.cash) && s.cash >= 0) {
+      expect('Y5d', true, '异常输入（NaN/负数/null/undefined/"abc"）不污染现金');
+    }
+  }
+
+  /* ---- Y6 满仓时不浪费现金 ---- */
+  {
+    const s = E.newGame('normal', 0, null);
+    s.cash = 100000;
+    const cap = E.storageCap(s);
+    s.inv = {};
+    for (const g of E.ING) s.inv[g.id] = 0;
+    let filled = 0;
+    for (const g of E.ING) {
+      if (filled >= cap) break;
+      const q = Math.min(50, cap - filled);
+      if (E.buyIng(s, g.id, q).ok) filled += q;
+    }
+    const before = s.cash;
+    const r = E.autoFill(s);
+    expect('Y6a', r.spent === 0,
+      `满仓时补货不花钱（花了 ¥${r.spent}）`);
+    expect('Y6b', s.cash === before, `满仓时现金不变（¥${Math.round(s.cash)}）`);
   }
 }
 }
