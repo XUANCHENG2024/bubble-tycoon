@@ -313,6 +313,8 @@ function hudEl() {
     HUD_EL = {
       day: $('hudDay'), cash: $('hudCash'), rep: $('hudRep'), worth: $('hudWorth'),
       goalFill: $('goalFill'), goalText: $('goalText'),
+      /* ★ V14：分段仪表的刻度条 */
+      goalTicks: $('goalTicks'),
       /* ★ V13.8：负债警示条（平时 hidden，不占空间） */
       debtBar: $('debtBar'), debtText: $('debtText'),
     };
@@ -347,14 +349,42 @@ UI.renderHUD = function () {
   const worthTxt = money(nw);
   if (HUD_CACHE.worth !== worthTxt) { h.worth.textContent = worthTxt; HUD_CACHE.worth = worthTxt; }
 
-  const goal = Math.max(1, num(goalOf(s), 1));
-  const p = pct(nw / goal * 100);
-  /* ★ style.width 用「实际值」判断，避免字符串精度差异导致每帧都写 */
+  /* ★★ V14：进度条改成**分段仪表**。
+   *
+   * 原来：`goalOf(s)` 恒返回最终目标（38000），
+   *   于是进度条 Day1 就显示 2% ——「开局就欠 3 万 4」，
+   *   而这个数字 30 天不变，中间 29 天提供**零信息**。
+   *
+   * 现在：指向**下一个中期锚点**（第1 段 9% = ¥3420），
+   *   玩家每一天都能回答「今天够不够」——
+   *   仪表盘的作用不是显示"离终点多远"，是显示"现在该做什么"。
+   *
+   * ★ 阶段进度用「本段起点」做分母（nextGoalOf 里算），
+   *   否则跨段瞬间会从 100% 掉回很低 —— 视觉上像倒退，很泄气。
+   * ★ 同时画出 6 段刻度，让玩家看到全程节奏。 */
+  const gm = nextGoalOf(s);
+  const p = pct(gm.phase * 100);
+  /* style.width 用实际值判断，避免字符串精度差异导致每帧都写 */
   if (HUD_CACHE.goalW !== p) { h.goalFill.style.width = p + '%'; HUD_CACHE.goalW = p; }
 
+  /* 刻度条：6 段，随进度点亮已过的部分 */
+  const ticks = MILESTONE_RATIO.map((r, i) =>
+    `<i class="gt-tick${i < gm.idx ? ' on' : (i === gm.idx ? ' cur' : '')}"></i>`).join('');
+  if (HUD_CACHE.ticks !== gm.idx) {
+    if (h.goalTicks) h.goalTicks.innerHTML = ticks;
+    HUD_CACHE.ticks = gm.idx;
+  }
+
   const share = num(rivalShare(s));
-  const goalTxt = `目标 ${money(goal)} · ${p.toFixed(0)}%`
-    + (share >= 0.15 ? ` · 🦑对手抢 ${Math.round(share * 100)}%` : '');
+  /*★ 文案跟着口径一起改** —— 这是这次改动的关键一半：
+     只改进度条不改文案，等于让玩家盯着一个没有意义的百分比。 */
+  const goalTxt = gm.reached
+    ? `✔ 已达第 ${gm.idx + 1} 阶段目标 ${money(gm.value)}`
+      + (gm.nextAt ? ` · 下一阶段 Day${gm.nextAt}` : ' · 已是最终目标')
+    + (share >= 0.15 ? ` · 🦑对手抢 ${Math.round(share * 100)}%` : '')
+    : `阶段目标 ${money(gm.value)} · ${p.toFixed(0)}%`
+      + (gm.nextAt ? ` · 下一阶段 Day${gm.nextAt}` : '')
+      + (share >= 0.15 ? ` · 🦑对手抢 ${Math.round(share * 100)}%` : '');
   if (HUD_CACHE.goalT !== goalTxt) { h.goalText.textContent = goalTxt; HUD_CACHE.goalT = goalTxt; }
 
   /* 负现金标红：同样用脏检查（color 写也会触发样式重算） */
@@ -389,7 +419,7 @@ UI.renderHUD = function () {
  *    而因为「值相同就不写」，旧值恰好等于新值时不更新就对了、
  *    不等时又会写……看似没问题，但**节点可能已经被替换**（换局重建 HUD），
  *    缓存里的旧值会让新节点漏更新。所以新局要显式清空。 */
-const HUD_CACHE = { day: '', cash: '', rep: '', worth: '', goalW: '', goalT: '', cashColor: '', debt: '' };
+const HUD_CACHE = { day: '', cash: '', rep: '', worth: '', goalW: '', goalT: '', cashColor: '', debt: '', ticks: -1 };
 UI.resetHUDCache = function () {
   for (const k in HUD_CACHE) HUD_CACHE[k] = (k === 'goalW') ? '' : '';
   HUD_CACHE.goalW = -1;      /* 进度条用数值，初值 -1 保证首帧一定写 */

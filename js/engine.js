@@ -735,9 +735,75 @@ function rivalAction(s, id) {
 }
 
 /* ---------------- 目标（支持无尽模式滚动里程碑） ---------------- */
+/**
+ * 最终目标（通关线）—— 不随天数变化。
+ *
+ * ★ 这是**结算口径**：30 天结束时净资产要达到它才算通关。
+ *   UI 不要直接用它 —— 玩家在第 3 天看到「离 38000 还差 34000」毫无意义。
+ *   UI 要的是 nextGoalOf()（下一锚点）。
+ */
 function goalOf(s) {
   const d = diffOf(s);
   return s.endless ? endlessGoal(d.goal, s.milestone || 0) : d.goal;
+}
+
+/**
+ * 当前阶段目标（V14）—— **UI 应该显示的这个**
+ *
+ * ★★★ 为什么要分两个（这是 V14 最重要的一处改动）：
+ *
+ *   原来 goalOf() 一个数撑起全部 30 天，导致进度条：
+ *     第 1 天  2%（离 38000 差 34000 —— 开局就"欠 3 万 4"）
+ *     第 15 天 30%
+ *     第 30 天 100%
+ *   中间 29 天这条 bar 提供**零信息** —— 数字不动，玩家不知道
+ *   「今天是领先还是落后」「下一步该冲多少」。
+ *   探针实测：Day1~Day30 目标恒为 38000，一动不动。
+ *
+ *   而项目**本来就有中期锚点**（MILESTONE_RATIO: 9%→17%→28%→42%→58%→100%），
+ *   设计是对的，只是 UI 没把它显示出来。
+ *
+ *   现在：进度条指向**下一个锚点**，且全程目标降低到第 3 天。
+ *   玩家每一天都能回答「今天够不够」—— 这才是仪表盘的作用。
+ *
+ * @returns {{value:number, final:number, idx:number, atDay:number,
+ *            reached:boolean, nextAt:number|null, phase:number}}
+ *   value   当前该冲的数（锚点值）
+ *   final   最终通关线
+ *   idx     当前处在第几个锚点（0-based）
+ *   atDay   当前锚点的天数（5/10/…/30）
+ *   reached 这个锚点是否已达成
+ *   nextAt  下一个锚点的天数（没有则 null = 已到终点）
+ *   phase   本阶段进度 0~1（用于把"距下一锚点"折成条）
+ */
+function nextGoalOf(s) {
+  const final = goalOf(s);
+  const nw = num(netWorth(s), 0);
+  /* 无尽模式只有一个滚动目标，直接返回（里程碑本身就是分段） */
+  if (s.endless) {
+    return {
+      value: final, final, idx: 0, atDay: num(s.day, 1),
+      reached: nw >= final, nextAt: null, phase: final > 0 ? nw / final : 0,
+    };
+  }
+  const R = MILESTONE_RATIO;
+  const day = clamp(num(s.day, 1), 1, CFG.DAYS);
+  /* 当前处于第几个阶段：Day1~5 是第 0 个锚点，Day6~10 是第 1 个… */
+  let idx = Math.min(R.length - 1, Math.ceil(day / MILESTONE_EVERY) - 1);
+  idx = Math.max(0, idx);
+  const value = Math.round(final * R[idx]);
+  const atDay = Math.min(CFG.DAYS, (idx + 1) * MILESTONE_EVERY);
+  const reached = nw >= value;
+  const nextIdx = idx + 1;
+  const nextAt = nextIdx < R.length ? Math.min(CFG.DAYS, (nextIdx + 1) * MILESTONE_EVERY) : null;
+  /* ★ 阶段进度用「本阶段起点」做分母：
+     直接用 value 做分母的话，第 5 天刚过锚点、进度会瞬间从 100% 掉回很低
+     （因为分母跳到下一个锚点）—— 视觉上像"倒退"，很泄气。
+     所以分母 =本阶段区间宽度，进度条表达的是「这段路走了多少」。 */
+  const prevValue = idx > 0 ? Math.round(final * R[idx - 1]) : 0;
+  const span = Math.max(1, value - prevValue);
+  const phase = clamp((nw - prevValue) / span, 0, 1);
+  return { value, final, idx, atDay, reached, nextAt, phase };
 }
 
 /* ---------------- 每日刷新 ---------------- */

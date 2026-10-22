@@ -228,7 +228,6 @@ function drawHUD(ctx, L, s) {
 
   var y = 10 + L.padTop;
   var cw = (W - 32 - 12) / 4;
-  var goal = Math.max(1, num(goalOf(s), 1));
   GFX.chip(ctx, 16, y, cw, 40,
     'DAY', s.endless ? s.day + ' 无尽' + s.milestone : s.day + ' / ' + CFG.DAYS, T.txt);
   GFX.chip(ctx, 16 + cw + 4, y, cw, 40, '现金', money(num(s.cash)),
@@ -275,10 +274,26 @@ function drawHUD(ctx, L, s) {
     dW = 112;
     barW = Math.max(60, barW - dW);
   }
-  GFX.bar(ctx, 16, y + 2, barW, 5, num(netWorth(s)) / goal, { color: T.cyan });
+  /* ★★ V14：与 H5 端对等 —— 进度条指向**下一个中期锚点**，
+     而不是 30 天都不变的最终目标。
+     原来 `netWorth(s) / goal` 的 goal 是常量（38000），
+     于是 Day1 就显示 2% ——「开局欠 3 万 4」，中间 29 天零信息。
+     ★ 文案也一起改：只改进度条不改文案等于让玩家盯着没意义的百分比。 */
+  var gm = nextGoalOf(s);
+  GFX.bar(ctx, 16, y + 2, barW, 5, gm.phase, { color: T.cyan });
+  /* 分段刻度：让玩家看见全程节奏（6 个锚点） */
+  for (var ti = 0; ti < MILESTONE_RATIO.length; ti++) {
+    var tx = 16 + barW * MILESTONE_RATIO[ti];
+    GFX.fillRR(ctx, tx - 1, y, 2, 9,
+      2, ti < gm.idx ? T.green : (ti === gm.idx ? T.amber : 'rgba(255,255,255,.22)'), null);
+  }
   var share = num(rivalShare(s));
-  var gt = '目标 ' + money(goal) + ' · ' + Math.round(num(netWorth(s)) / goal * 100) + '%'
-    + (share >= 0.15 ? ' · 🦑对手抢 ' + Math.round(share * 100) + '%' : '');
+  var gt = gm.reached
+    ? ('✔ 已达第 ' + (gm.idx + 1) + ' 阶段目标 ' + money(gm.value)
+      + (gm.nextAt ? ' · 下一阶段 Day' + gm.nextAt : ' · 已是最终目标'))
+    : ('阶段目标 ' + money(gm.value) + ' · ' + Math.round(gm.phase * 100) + '%'
+      + (gm.nextAt ? ' · 下一阶段 Day' + gm.nextAt : ''));
+  if (share >= 0.15) gt += ' · 🦑对手抢 ' + Math.round(share * 100) + '%';
   text(ctx, gt, 16, y + 12, { size: FS.xs, color: T.txt3, maxW: barW });
   if (dTxt && barW >= 60) {
     text(ctx, dTxt, 16 + barW + 8, y + 12,

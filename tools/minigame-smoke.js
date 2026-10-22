@@ -1429,6 +1429,36 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
       `Canvas 关店后店长留档且可免费请回（${fmRes}）`);
   }
 
+  /* ---- V14 对等：Canvas 分段目标仪表 ---- */
+  {
+    const e9 = makeEnv(390, 844);
+    e9.frames(2); e9.tap('start'); e9.frames(2); e9.tap('tutskip'); e9.frames(1);
+    /* Day1 + 小净资产 → 文案应是「阶段目标」而不是最终目标 */
+    e9.inCtx('(function(){var S=__MINIGAME.S;S.day=1;S.cash=2500;S.invested=0;})()');
+    e9.frames(2);
+    drawnTexts.length = 0;
+    e9.frames(1);
+    const t9 = drawnTexts.join(' ');
+    check(/阶段目标/.test(t9),
+      `Canvas 显示「阶段目标」（${/阶段目标/.test(t9) ? '有' : '无'}）`);
+    check(!/目标 ¥38,000/.test(t9) || /阶段目标/.test(t9),
+      'Canvas 不把最终目标当阶段目标');
+    /* 锚点日应显示「已达」 */
+    e9.inCtx('(function(){var S=__MINIGAME.S;S.day=5;S.cash=3420;S.invested=0;})()');
+    e9.frames(2);
+    drawnTexts.length = 0;
+    e9.frames(1);
+    check(/已达第/.test(drawnTexts.join(' ')), 'Canvas 锚点日显示「✔ 已达第 N 阶段目标」');
+    /* Day1 的百分比应远高于老口径的 7% */
+    e9.inCtx('(function(){var S=__MINIGAME.S;S.day=1;S.cash=2500;S.invested=0;})()');
+    e9.frames(2);
+    drawnTexts.length = 0;
+    e9.frames(1);
+    const pct9 = (drawnTexts.join(' ').match(/阶段目标 ¥3,420 · (\d+)%/) || [])[1];
+    check(pct9 && Number(pct9) > 50,
+      `Canvas Day1 阶段进度 ${pct9 || '?'}%（老口径只有 7%）`);
+  }
+
   /* ---- V13.9 对等：Canvas 抄底徽章 ---- */
   {
     const e8 = makeEnv(390, 844);

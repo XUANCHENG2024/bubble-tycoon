@@ -1431,3 +1431,34 @@ body::before {
 }
 /* ★ 抄底行让价格数字本身也变绿 —— 徽章之外再给一层视觉提示 */
 .mkt-row.bargain .mkt-p { color: var(--green); }
+
+/* ---------- V14：分段目标仪表 ---------- */
+/* ★ 刻度条画在进度条**上方**（top:-4px），不占额外高度 ——
+     .goal-bar 是绝对定位在 HUD 底部只有 6px 高，
+     往上借空间才不会挤到 .goal-text。 */
+.goal-ticks {
+  position: absolute; left: 0; right: 0; top: -4px;
+  height: 3px; pointer-events: none;
+}
+.gt-tick {
+  position: absolute; top: 0; width: 2px; height: 3px; border-radius: 1px;
+  background: rgba(255, 255, 255, .22);
+  transform: translateX(-1px);
+  transition: background .3s ease;
+}
+/* 六个刻度按锚点比例分布（9/17/28/42/58/100%） */
+.gt-tick:nth-child(1) { left: 9%; }
+.gt-tick:nth-child(2) { left: 17%; }
+.gt-tick:nth-child(3) { left: 28%; }
+.gt-tick:nth-child(4) { left: 42%; }
+.gt-tick:nth-child(5) { left: 58%; }
+.gt-tick:nth-child(6) { left: 100%; }
+/* 已走过的段：点亮 */
+.gt-tick.on { background: var(--green); }
+/* 当前段：更亮 + 加宽，让玩家一眼看到「我现在在这」 */
+.gt-tick.cur {
+  background: var(--amber); width: 3px; height: 5px; top: -1px;
+  box-shadow: 0 0 6px rgba(255, 194, 71, .8);
+}
+/* 进度条本体也压扁一点，给刻度让位 */
+.goal-bar { overflow: visible; }

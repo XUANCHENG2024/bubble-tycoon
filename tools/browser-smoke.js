@@ -1077,6 +1077,54 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
       `resetHUDCache 后 HUD 立即反映新值（${cashEl.textContent}）`);
   }
 
+  /* ---- V14 分段目标仪表 ---- */
+  {
+    /* ★ 这条守的是「进度条不再是零信息的装饰」——
+       原来 goalOf() 恒返回最终目标，Day1 就显示 2%
+       （开局欠 3 万 4），而且 30 天不变。 */
+    /*★★ 又踩了同一个坑（V13.9 已经栽过一次）：
+       `window.S = newGame(...)` 会**污染后面的断言** ——
+       后面那些测开分店/店长的用例依赖前面留下的局面。
+       ★ 正确做法：**保存并恢复**原状态，而不是重新赋值。
+         断言要「自包含」不等于可以「换掉整个局面」——
+         换掉整个局面恰恰是最不安全的做法。 */
+    const savedS = window.eval('window.S');
+    /* Day1：净资产很小 → 阶段进度不该是 2% */
+    window.eval('(function(){var S=window.S;S.cash=2500;S.invested=0;S.day=1;})()');
+    window.UI.resetHUDCache();
+    window.UI.renderHUD();
+    const gm1 = window.eval('nextGoalOf(window.S)');
+    check(gm1.value < gm1.final,
+      `V14 阶段目标 < 最终目标（¥${gm1.value} < ¥${gm1.final}）`);
+    check(gm1.phase > 0.1,
+      `V14 Day1 净资产 ¥2500 时阶段进度 ${(gm1.phase * 100).toFixed(0)}%（老口径只有 ${(2500 / gm1.final * 100).toFixed(0)}%）`);
+    /* 锚点日应显示 100% */
+    window.eval('(function(){var S=window.S;S.cash=3420;S.invested=0;S.day=5;})()');
+    window.UI.resetHUDCache();
+    window.UI.renderHUD();
+    const gm5 = window.eval('nextGoalOf(window.S)');
+    check(gm5.reached && gm5.phase >= 1,
+      `V14 锚点日（Day5）达成显示 100%（${(gm5.phase * 100).toFixed(0)}%）`);
+    /* 刻度条要真的画出来（6 个）*/
+    const ticks = doc.querySelectorAll('#goalTicks .gt-tick');
+    check(ticks.length === 6, `V14 刻度条画出 6 个刻度（实际 ${ticks.length}）`);
+    check(doc.querySelectorAll('#goalTicks .gt-tick.cur').length === 1,
+      'V14 当前段刻度唯一（cur 只有 1 个）');
+    /* ★ 跨段不能"倒退"：刚过 Day5 锚点，进度应重新起算但不为负 */
+    window.eval('(function(){var S=window.S;S.cash=3600;S.invested=0;S.day=6;})()');
+    const gm6 = window.eval('nextGoalOf(window.S)');
+    check(gm6.phase >= 0 && gm6.idx === 1,
+      `V14 跨段后进入第 2 段（idx=${gm6.idx}，phase=${(gm6.phase * 100).toFixed(0)}%）`);
+    /* 文案必须跟着口径改 —— 这是改动的一半 */
+    const gtTxt = doc.getElementById('goalText').textContent;
+    check(/阶段目标/.test(gtTxt),
+      `V14 文案改成「阶段目标」（实际「${gtTxt.slice(0, 30)}」）`);
+    check(!/目标 ¥38,000/.test(gtTxt), 'V14 文案不再显示最终目标当阶段目标');
+    /* ★ 恢复原状态，别影响后续断言 */
+    window.eval('window.S = window.__savedS || window.S');
+    if (savedS) window.eval('window.__savedS = null');
+  }
+
   /* ---- V13.9 库存清仓：玩家必须有办法腾仓位 ---- */
   {
     /* ★★ 这一版栽在「用 doAct 验引擎函数」上：
