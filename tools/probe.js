@@ -75,7 +75,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
-  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,MANAGER_COMBOS,MANAGER_TRAITS,managerComboView,managerComboBonus,MANAGER_SPECIALTY,managerSpecialtyMul,managerCanSpecialty,managerSetSpecialty,REGULAR_CFG,REGULAR_TRAITS,regularView,spawnOne,regularIdentityOf,regularServe,regularBonus,regularPullMul,regularsOf,autoFill,rollWeather,rollNews,refreshMarket,ING,CUSTOMER_TYPES,CUSTOMER_FACES,SPECIAL_CUSTOMERS,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
+  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,MANAGER_COMBOS,MANAGER_TRAITS,managerComboView,managerComboBonus,MANAGER_SPECIALTY,managerSpecialtyMul,managerCanSpecialty,managerSetSpecialty,REGULAR_CFG,REGULAR_TRAITS,regularView,spawnOne,regularIdentityOf,regularServe,regularBonus,regularPullMul,regularsOf,autoFill,rollWeather,rollNews,refreshMarket,ING,SAVE_VERSION,migrateSave,MIGRATIONS,CUSTOMER_TYPES,CUSTOMER_FACES,SPECIAL_CUSTOMERS,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
   + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
   + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
@@ -1195,9 +1195,23 @@ console.log('=============== K. 经营维度 ===============');
     expect('K4j', JSON.stringify(rt.venue) === JSON.stringify(rt2.venue),
       '清洗是幂等的：存档往返后经营维度不变（不会每次读档都漂移）');
 
-    /* ⑦ 存量存档必须仍能通过导入校验（v 号不变，不为新特性升版本） */
+    /*⑦ 存量存档必须仍能通过导入校验。
+     * ★ V14.4：这条断言的**意图是对的、判据是错的**。
+     *   它原来写的是「老存档的版本号仍是 v2，不因新特性升版本」——
+     *   而「不升版本」恰恰是**问题根源**：
+     *     · 版本号不升 → 无法判断这份存档缺什么 → 只能靠默认值兜底
+     *     · 而 loadGame / importSave 里`v !== 2` 那两处硬编码，
+     *       一旦真的把版本升上去，**所有存量存档会全部读不出来**。
+     *   所以「为了不失效而不升版本」是把版本机制彻底废掉。
+     * ★ 正确的做法（V14.4 起）：**该升就升 + 写迁移链**，
+     *   让老存档读进来时走一遍迁移补齐缺的字段。
+     *   这条断言现在守的是「老存档经过 sanitize 后仍是可用的当前版本」。 */
     const legacyJson = JSON.parse(JSON.stringify(legacy));
-    expect('K4k', legacyJson.v === 2, '老存档的版本号仍是 v2（不因新特性升版本，否则存量直接失效）');
+    expect('K4k', legacyJson.v === E.SAVE_VERSION,
+      `legacy 由 newGame 构造，版本号是当前版本（v${legacyJson.v}）`);
+    const legacyUpgraded = E.sanitizeState(JSON.parse(JSON.stringify(legacy)));
+    expect('K4l', legacyUpgraded && legacyUpgraded.v === E.SAVE_VERSION,
+      `老存档读入后被标记为当前版本（v${legacyUpgraded && legacyUpgraded.v}，当前 ${E.SAVE_VERSION}）`);
     expect('K4l', E.sanitizeState(legacyJson) !== null,
       '老存档清洗后仍可用（不会被判为损坏）');
   }
@@ -1436,7 +1450,11 @@ console.log('=============== L. 菜系与制作工坊 ===============');
     expect('L4d', once === twice, `工坊清洗是幂等的（${once}）`);
     /* ⑤ 存档版本号不能变（升版本会让所有老存档走降级提示/被判损坏） */
     const fresh = E.newGame('normal', 0);
-    expect('L4e', fresh && fresh.v === 2, `新存档版本号仍是 v2（实际 v${fresh && fresh.v}）`);
+    /* ★ V14.4：版本号改为跟随 SAVE_VERSION ——
+       原来写死「仍是 v2，不因新特性升版本」，而那正是版本机制失效的根源：
+       不升版本 → 无法判断存档缺什么 → 只能靠默认值兜底 → 漏一个就丢进度。 */
+    expect('L4e', fresh && fresh.v === E.SAVE_VERSION,
+      `新存档版本号跟随 SAVE_VERSION（实际 v${fresh && fresh.v}，应为 v${E.SAVE_VERSION}）`);
   }
 
   /* ---- L5 展示模型：菜系分组视图要给 UI 足够的决策信息 ---- */
@@ -1809,7 +1827,8 @@ console.log('=============== M. 城市菜系与研发树 ===============');
       === norm(E.sanitizeState(E.sanitizeState(JSON.parse(JSON.stringify(s5)))).citiesVisited),
       '城市痕迹清洗是幂等的');
     /* ⑥ 版本号不变 */
-    expect('M6i', E.newGame('normal', 0).v === 2, '存档版本号仍是 v2（不因本批次升版）');
+    expect('M6i', E.newGame('normal', 0).v === E.SAVE_VERSION,
+      `newGame 写当前版本号（v${E.SAVE_VERSION}，不再硬编码）`);
   }
 }
 
@@ -2050,7 +2069,8 @@ console.log('=============== N. 店长与分店编制 ===============');
       === norm(E.sanitizeState(E.sanitizeState(JSON.parse(JSON.stringify(s2)))).managers),
       '店长清洗是幂等的');
     /* ⑥ 版本号不变 */
-    expect('N6l', E.newGame('normal', 0).v === 2, '存档版本号仍是 v2');
+    expect('N6l', E.newGame('normal', 0).v === E.SAVE_VERSION,
+      `存档版本号跟随 SAVE_VERSION（v${E.SAVE_VERSION}）`);
   }
 
   /* ---- N7 店长工资必须真的付 ---- */

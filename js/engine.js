@@ -578,7 +578,9 @@ function newGame(diffKey, bpBonus, sigCarry) {
     }
   }
   const s = {
-    v: 2, diff: d.key, day: 1, cash: d.cash + startBonus, rep: 26,
+    /* ★ V14.4：用 SAVE_VERSION，不再写死 2
+       （原来写死 2，往后每次升版本都要记得改这里，漏一次就存出读不回来的档）。 */
+    v: SAVE_VERSION, diff: d.key, day: 1, cash: d.cash + startBonus, rep: 26,
     inv: { tea: 34, milk: 30, sugar: 24, pearl: 22, fruit: 16 },
     avgCost: {}, prices: {}, prevPrices: {},
     recipes: ['boba'], menu: ['boba'], ratios: { boba: 1.0 },
@@ -4246,8 +4248,8 @@ function cityMapView(s) {
  *   存档是玩家自己的进度，一个不认识的场地类型不该让他打不开游戏。
  *   代价是丢一点点自定义数据，换来的是老存档 100% 可读 —— 这个取舍必须写明。
  *
- * 注意：这里**不校验版本号**（importSave 认的是 s.v === 2，且不该为此升版本 ——
- * 升版本会让所有存量存档直接失效，正是我们要避免的）。
+ * 注意：这里**不校验版本号** —— 版本差异由 migrateSave 逐级处理（V14.4 起）。
+ * 校验版本号当拒绝条件才是问题所在：升一次版本就让所有存量存档失效。
  */
 function sanitizeVenue(raw) {
   const src = obj(raw);
@@ -4720,10 +4722,129 @@ function sanitizeReport(r) {
   };
 }
 
+/**
+ * 存档迁移（V14.4）
+ *
+ * ★ 为什么需要它：
+ *   项目从 v2 一路演到 v14，中途加过招牌基线(V6)、菜系(V9)、
+ *   分店(V12)、店长(V12)、常客(V13.5)、milestoneHit(V14)……
+ *   每加一个字段，**几周前的老存档里就没有它**。
+ *   原来 `s.v = 2` 一行把版本信息抹掉，导致：
+ *     · 没有地方判断"这份存档缺什么"
+ *     · 缺字段只能靠 sanitizeState 里的默认值兜底
+ *     · ★ 而**漏兜一个就是静默丢进度**——
+ *       实测 tools/_compat-probe.js：V2 老存档读出来 milestoneHit 直接 undefined。
+ *
+ * ★ 为什么是「逐级迁移」而不是「一把重建」：
+ *   逐级（v1→v2→…→v14）的好处是**每一级只关心自己那一段的变化**，
+ *   写完就不用再回头看；一把重建则每次都要把全部历史改动重新梳理一遍。
+ *
+ * ★ MIGRATIONS 的写法约定：
+ *   `MIGRATIONS[n]` 把存档从版本 n 升到 n+1，只处理那一段新增的东西。
+ *   只做**补默认值 / 结构补齐**，不要在这里改数值平衡——
+ *   老玩家读档后不该因为平衡调整而凭空多钱少钱。
+ */
+const SAVE_VERSION = 14;
+
+/** 从版本 n升到 n+1 的迁移。缺号不留空位（空位写成 null 占位）。 */
+const MIGRATIONS = {
+  /* v1 → v2：最早的版本连版本标记都没有，招牌基线（V6）就是这样加的 */
+  1(st) {
+    if (!st.sig || typeof st.sig !== 'object') st.sig = {};
+    if (!st.sigRun || typeof st.sigRun !== 'object') st.sigRun = {};
+  },
+  /* v2 → v3：菜系系统（V9）—— 工坊与菜系配方 */
+  2(st) {
+    if (!st.workshops || typeof st.workshops !== 'object') st.workshops = {};
+    if (!st.cuisines) st.cuisines = [];
+    if (!st.cuiFocus) st.cuiFocus = {};
+  },
+  /* v3 → v4：分店与店长（V12）*/
+  4(st) {
+    if (typeof st.shops !== 'number') st.shops = 1;
+    if (!st.venue || typeof st.venue !== 'object') {
+      st.venue = { provId: '11', cityId: '110100', venueType: 'shop', name: '' };
+    }
+    if (!Array.isArray(st.managers)) st.managers = [];
+    if (!Array.isArray(st.formerManagers)) st.formerManagers = [];
+    if (typeof st.nextMgrId !== 'number') st.nextMgrId = 1;
+    if (typeof st.activeShop !== 'number') st.activeShop = 1;
+  },
+  /* v3 → v4：商圈与场地（V10）*/
+  3(st) {
+    if (typeof st.stores !== 'object' || st.stores === null) st.stores = {};
+    if (!st.cityView) st.cityView = null;
+    if (typeof st.activeShop !== 'number') st.activeShop = 1;
+  },
+  /* v4 → v5：常客系统（V13.6）*/
+  5(st) {
+    if (!st.regulars || typeof st.regulars !== 'object') st.regulars = {};
+  },
+  /* v5 → v6：店长专精（V13.7）—— spec 挂在店长上，迁移由 sanitize 逐条清洗 */
+  6(st) {
+    if (!Array.isArray(st.managers)) st.managers = [];
+  },
+  /* v6 → v7：清仓相关（V13.9）不需要额外状态 */
+  7(st) { },
+  /* v7 → v8：分段仪表（V14）*/
+  8(st) {
+    /* milestoneHit 是一次性事件标记，读档时按"未达成"处理即可，
+       但**必须显式写出来** —— 靠 sanitizeState 兜底就等于没有迁移链，
+       以后再加字段还是同样的坑。 */
+    if (typeof st.milestoneHit !== 'boolean') st.milestoneHit = false;
+  },
+  /* v8 → v9~v13：本次无状态变更（留空位以保持版本号连续可读）*/
+  9(st) { }, 10(st) { }, 11(st) { }, 12(st) { }, 13(st) { },
+};
+
+/**
+ * 按版本逐级迁移。
+ * @param {object} st 待迁移的存档（原地修改）
+ * @returns {{from:number, to:number, steps:string[]}}
+ */
+function migrateSave(st) {
+  if (!st || typeof st !== 'object') return { from: 0, to: 0, steps: [] };
+  /* 缺版本号 = v1（最早的存档连版本标记都没有）*/
+  let v = clamp(int(st.v, 1), 1, SAVE_VERSION);
+  const from = v;
+  const steps = [];
+  while (v < SAVE_VERSION) {
+    const fn = MIGRATIONS[v];
+    if (typeof fn === 'function') {
+      try {
+        fn(st);
+        steps.push(`v${v}→v${v + 1}`);
+      } catch (e) {
+        /* ★ 迁移失败**不能中断读档**：
+           一个坏存档不该让玩家连当天的经营都玩不了。
+           记一步日志，继续往下走，后面的清洗会补默认值。 */
+        steps.push(`v${v}→v${v + 1} 失败`);
+      }
+    }
+    v++;
+  }
+  return { from, to: SAVE_VERSION, steps };
+}
+
 function sanitizeState(s) {
   if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
 
-  s.v = 2;
+  /* ★★ V14.4：存档迁移必须在**清洗之前**做。
+   *
+   * 原来这里第一行就是 `s.v = 2` —— 无论读进来的是 v1 还是 v99，
+   * 版本信息在清洗的**第一秒就被抹掉**，于是版本号只是个装饰：
+   * 实测（tools/_compat-probe.js）sanitizeState 与 loadGame 里
+   * **都没有任何对 s.v 的判断**，也就是说：
+   *   「玩家几周前的存档」与「今天的存档」走的是同一条路，
+   *   中间版本加过的字段只能靠「默认值兜底」——
+   *   而漏兜一个，玩家就**静默丢进度**（实测 milestoneHit 就是这样丢的）。
+   *
+   * 现在的流程：读出 → migrateSave()按版本逐级迁移 → 清洗 → 标记为当前版本。
+   * 加新字段时，除了在 sanitizeState 里给默认值，**还要在 MIGRATIONS 里加一条**，
+   * 并跑 tools/check-save-compat.js 确认老存档能跑（CI 已接入）。 */
+  migrateSave(s);
+
+  s.v = SAVE_VERSION;
   s.diff = DIFFICULTY[s.diff] ? s.diff : 'normal';
   /* 天数上界要分两种：普通局跑满 CFG.DAYS 天就该收官（isFinished 判的是
      day > CFG.DAYS），脏存档把 day 写成 9999 会让读档后当场判定结束；
@@ -5274,7 +5395,15 @@ function loadGame(slot) {
   if (!raw) return null;
   try {
     const s = JSON.parse(raw);
-    if (!s || s.v !== 2) return null;
+    if (!s || typeof s !== 'object') return null;
+    /* ★★ V14.4：这里原来写的是 `if (!s || s.v !== 2) return null;`——
+       硬编码版本号当「拒绝理由」，后果有两层：
+         ① 版本一升（这次提到 14），**所有存档都读不出来**（存的是 v14，认的是 v2）
+         ② 即使版本号正好对上，**比它新的存档也会被直接丢弃**——
+            而玩家从旧版升级上来时读的正是旧存档，那才是主要场景。
+       ★ 现在改成：版本只用来**决定迁移路径**，不作为拒绝条件。
+         未来版本（v > SAVE_VERSION）也照读 ——
+         老客户端读新存档本来就该尽力而为，而不是拒绝服务。 */
     return sanitizeState(s);
   } catch (e) { return null; }
 }
@@ -5373,7 +5502,12 @@ function importSave(b64) {
     if (!code) return { ok: false, msg: '请先粘贴存档码' };
     if (code.length > 200000) return { ok: false, msg: '存档码过长，疑似不是有效存档' };
     const raw = JSON.parse(b64decode(code));
-    if (!raw || raw.v !== 2 || typeof raw.day !== 'number') return { ok: false, msg: '存档格式无法识别' };
+    /* ★ V14.4：这里原来写的是 `raw.v !== 2` —— 同样把版本号当拒绝理由。
+       后果：版本一升，玩家从别的设备导入旧存档码会直接被判「格式无法识别」。
+       改成只校验**结构**（有没有 day），版本交给 migrateSave 处理。 */
+    if (!raw || typeof raw !== 'object' || typeof raw.day !== 'number') {
+      return { ok: false, msg: '存档格式无法识别' };
+    }
     const s = sanitizeState(raw);
     if (!s) return { ok: false, msg: '存档数据损坏，无法读取' };
     return { ok: true, state: s };

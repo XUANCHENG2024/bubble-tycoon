@@ -66,6 +66,9 @@ jobs:
       - name: 多分辨率适配（CSS 固定宽度 / 视口 / 关键操作）
         run: node tools/check-responsive.js
 
+      - name: 存档向后兼容（迁移链 / 老存档实跑 / 脏版本输入）
+        run: node tools/check-save-compat.js
+
       - name: 主流程
         run: node tools/e2e-flow.js
 
