@@ -671,6 +671,13 @@ function doAct(act, el) {
       else UI.toast(r.msg, 'err');
       break;
     }
+    case 'mspec': {
+      /* ★ V13.7：设置店长专精方向 */
+      const r = managerSetSpecialty(s, +id, el.dataset.spec);
+      if (r.ok) { UI.toast('🎯 ' + r.msg, 'ok'); SFX.click(); }
+      else UI.toast(r.msg, 'err');
+      break;
+    }
     case 'mmove': {
       const r = moveManager(s, +id, +el.dataset.to);
       if (r.ok) {

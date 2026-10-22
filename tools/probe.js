@@ -75,7 +75,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
-  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,MANAGER_COMBOS,MANAGER_TRAITS,managerComboView,managerComboBonus,REGULAR_CFG,REGULAR_TRAITS,regularView,spawnOne,regularIdentityOf,regularServe,regularBonus,regularPullMul,regularsOf,CUSTOMER_TYPES,CUSTOMER_FACES,SPECIAL_CUSTOMERS,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
+  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,MANAGER_COMBOS,MANAGER_TRAITS,managerComboView,managerComboBonus,MANAGER_SPECIALTY,managerSpecialtyMul,managerCanSpecialty,managerSetSpecialty,REGULAR_CFG,REGULAR_TRAITS,regularView,spawnOne,regularIdentityOf,regularServe,regularBonus,regularPullMul,regularsOf,CUSTOMER_TYPES,CUSTOMER_FACES,SPECIAL_CUSTOMERS,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
   + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
   + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
@@ -3044,6 +3044,113 @@ console.log('=============== W. 常客系统 ===============');
     expect('W5a', before === after && before > 0,
       `存档往返后常客仍在（${before} → ${after}）`);
     E.clearSave(4);
+  }
+}
+
+/* ============================================================
+ *  X 组：店长专精（V13.7）
+ *
+ *  守的是「专精有取舍、切换有代价、脏存档不能白嫖」：
+ *   ① 专精一个方向 → 该方向涨、其余跌（**必须有减益**）
+ *   ② 切换专精要损失能力值
+ *   ③ 等级不够不能专精
+ *   ④ 脏存档塞 spec + 低等级不能白嫖
+ * ============================================================ */
+console.log('=============== X. 店长专精 ===============');
+{
+  const CFGS = E.MANAGER_SPECIALTY;
+  const mk = (lv) => ({ id: 1, branch: 2, lv, skill: 1, trait: 'none', name: '测试' });
+
+  /* ---- X1 专精倍率：涨一个、跌其余 ---- */
+  {
+    const m = mk(3);
+    const before = E.managerSpecialtyMul(m);
+    expect('X1a', before.speed === 1 && before.sat === 1 && before.rep === 1 && before.ops === 1,
+      '未专精时无额外倍率');
+    m.spec = 'ops';
+    const sp = E.managerSpecialtyMul(m);
+    expect('X1b', sp.ops > 1, `客流专精 → 客流 ×${sp.ops.toFixed(2)}`);
+    expect('X1c', sp.speed < 1 && sp.sat < 1 && sp.rep < 1,
+      `其余三项有减益（速度 ×${sp.speed.toFixed(2)} / 满意 ×${sp.sat.toFixed(2)} / 口碑 ×${sp.rep.toFixed(2)}）`);
+    /* ★ 净收益必须为正，否则专精没意义 */
+    const net = (sp.ops - 1) + (sp.speed - 1) + (sp.sat - 1) + (sp.rep - 1);
+    expect('X1d', net > 0, `专精净收益为正（合计 ${(net * 100).toFixed(1)}%）`);
+  }
+
+  /* ---- X2 专精真的进 managerBonus ---- */
+  {
+    const s = E.newGame('normal', 0, null);
+    s.shops = 3;
+    s.managers = [Object.assign(mk(3), { id: 1, branch: 2 })];
+    const base = E.managerBonus(s, 2);
+    s.managers[0].spec = 'ops';
+    const spec = E.managerBonus(s, 2);
+    expect('X2a', spec.ops > base.ops, `专精进了 managerBonus（客流 ${base.ops.toFixed(3)} → ${spec.ops.toFixed(3)}）`);
+    expect('X2b', spec.sat < base.sat, `减益也进了 managerBonus（满意 ${base.sat.toFixed(3)} → ${spec.sat.toFixed(3)}）`);
+  }
+
+  /* ---- X3 切换代价 + 等级门槛 ---- */
+  {
+    const s = E.newGame('normal', 0, null);
+    s.shops = 3;
+    s.managers = [Object.assign(mk(3), { id: 1, branch: 2 })];
+    /* 首次专精免费 */
+    const r1 = E.managerSetSpecialty(s, 1, 'ops');
+    expect('X3a', r1.ok, `首次专精成功（${r1.msg}）`);
+    expect('X3b', Math.abs(s.managers[0].skill - 1) < 1e-6, '首次专精不损失能力值');
+    /* 切换要付代价 */
+    const r2 = E.managerSetSpecialty(s, 1, 'sat');
+    expect('X3c', r2.ok, '切换专精成功');
+    expect('X3d', s.managers[0].skill < 1,
+      `切换损失能力值（1 → ${s.managers[0].skill.toFixed(2)}）`);
+    /* 等级不够 */
+    const s2 = E.newGame('normal', 0, null);
+    s2.shops = 3;
+    s2.managers = [Object.assign(mk(1), { id: 1, branch: 2 })];
+    const r3 = E.managerSetSpecialty(s2, 1, 'ops');
+    expect('X3e', !r3.ok, `等级不够不能专精（${r3.msg}）`);
+  }
+
+  /* ---- X4 脏存档不能白嫖专精 ---- */
+  {
+    /* ★ 字典外方向 → 当没专精 */
+    const s = E.newGame('normal', 0, null);
+    s.shops = 3;
+    s.managers = [Object.assign(mk(5), { id: 1, branch: 2, spec: 'not_a_field' })];
+    const back = E.sanitizeState(JSON.parse(JSON.stringify(s)));
+    expect('X4a', !back.managers[0].spec,
+      '字典外的专精方向被丢弃');
+    /* ★ 等级不够 + 有 spec → 也要丢（否则白得 +20% 还带 -10%，净收益仍正） */
+    const s2 = E.newGame('normal', 0, null);
+    s2.shops = 3;
+    s2.managers = [Object.assign(mk(1), { id: 1, branch: 2, spec: 'ops' })];
+    const back2 = E.sanitizeState(JSON.parse(JSON.stringify(s2)));
+    expect('X4b', !back2.managers[0].spec,
+      '等级不够的专精被丢弃（不白嫖）');
+    /* 正常专精要保留 */
+    const s3 = E.newGame('normal', 0, null);
+    s3.shops = 3;
+    s3.managers = [Object.assign(mk(3), { id: 1, branch: 2, spec: 'ops' })];
+    const back3 = E.sanitizeState(JSON.parse(JSON.stringify(s3)));
+    expect('X4c', back3.managers[0].spec === 'ops',
+      '合法的专精在存档往返后保留');
+  }
+
+  /* ---- X5 专精与组合加成共存 ---- */
+  {
+    /* 两个机制是不同层级：专精=个体层，组合=团队层，应该能同时生效 */
+    const s = E.newGame('normal', 0, null);
+    s.shops = 3;
+    /* ★ 组合要真的激活才谈得上"共存"：品牌组合 = qc + hosp */
+    s.managers = [
+      Object.assign(mk(3), { id: 1, branch: 2, spec: 'ops', trait: 'qc' }),
+      Object.assign(mk(3), { id: 2, branch: 3, trait: 'hosp' }),
+    ];
+    const withBoth = E.managerBonus(s, 2);
+    const sp = E.managerSpecialtyMul(s.managers[0]);
+    const cb = E.managerComboBonus(s);
+    expect('X5a', withBoth.ops > 1 && sp.ops > 1 && cb.sat > 1,
+      `专精与组合可同时生效（ops=${withBoth.ops.toFixed(3)}，组合满意 ×${cb.sat.toFixed(2)}）`);
   }
 }
 }

@@ -1429,6 +1429,43 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
       `Canvas 关店后店长留档且可免费请回（${fmRes}）`);
   }
 
+  /* ---- V13.7 对等：Canvas 店长专精 ---- */
+  {
+    const e5 = makeEnv(390, 844);
+    e5.frames(2); e5.tap('start'); e5.frames(2); e5.tap('tutskip'); e5.frames(1);
+    e5.MG.S.cash = 300000;
+    e5.MG.S.shops = 3;
+    e5.MG.S.managers = [{
+      id: 1, branch: 2, lv: 3, skill: 1, trait: 'none', name: '测试店长', emoji: '🧑‍💼',
+    }];
+    e5.inCtx('__MINIGAME.VIEW.tab = "manage"');
+    e5.frames(3);
+    /* ★★ 管理页很长，店长区在下面 —— 必须**滚动到底**才看得到。
+       （Canvas 端有 VIEW.scroll[tab] 滚动机制）
+       这是 Canvas 端与 H5 端的真实差异：H5 页面原生滚动，Canvas 要自己滚。 */
+    e5.inCtx('__MINIGAME.VIEW.scroll.manage = 2000');
+    e5.frames(2);
+    /* ★ 必须查**真实命中区**——Canvas 端的老坑：
+       GFX.addHit 在裁剪区外不登记 → 画出来但点不到
+       （招牌卡/研发树/出杯位/V13 地图都栽过）。 */
+    console.log('[DIAG] tab:', e5.inCtx('__MINIGAME.VIEW.tab'));
+    console.log('[DIAG] canSpec:', e5.inCtx('managerCanSpecialty(__MINIGAME.S, __MINIGAME.S.managers[0])'));
+    console.log('[DIAG] 命中区 y 分布:', JSON.stringify((e5.G.hits||[]).map(h=>Math.round(h.y))));
+    const specHits = (e5.G.hits || []).filter(h => h.act === 'mspec');
+    check(specHits.length === 4,
+      `Canvas 专精按钮已注册命中区（${specHits.length}/4 个）`);
+    if (specHits.length === 4) {
+      /* 真点一个，看状态有没有变 */
+      const before = e5.inCtx('__MINIGAME.S.managers[0].spec');
+      const target = e5.G.hits.find(h => h.act === 'mspec' && h.extra === 'ops');
+      e5.tapAt(target.x + target.w / 2, target.y + target.h / 2);
+      e5.frames(2);
+      const after = e5.inCtx('__MINIGAME.S.managers[0].spec');
+      check(after === 'ops',
+        `点专精按钮真的生效（${before || '无'} → ${after}）`);
+    }
+  }
+
   /* ---- V13.4 对等：Canvas 团队组合面板 ---- */
   {
     const e4 = makeEnv(390, 844);

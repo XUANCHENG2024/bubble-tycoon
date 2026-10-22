@@ -380,12 +380,81 @@ function managerBonus(s, branch) {
        · 组合加成（brand/leanOps/…） → 所有店都吃到（团队层）
      玩家的决策因此是「**招什么特性**」+「**放谁去哪家店**」两件事。 */
   const cb = managerComboBonus(s);
+  /* ★ V13.7：叠加「专精」（个体层面的取舍）。
+     专精一个方向 → 该方向 ×(1+up)，其余方向 ×(1-down)。
+     ★ 有减益才有决策 —— 全都要等于没专精。
+     ★ 与组合加成的关系：组合是**团队层**（跨店全局），
+       专精是**个体层**（只对他那家店）。两者相乘，互不冲突。 */
+  const sp = managerSpecialtyMul(m);
   return {
-    speed: (1 + lvBonus * 0.20 + (tr === 'ops' ? 0.02 : 0)) * cb.speed,
-    sat: (1 + lvBonus * 0.30 + (tr === 'qc' ? 0.50 : 0)) * cb.sat,
-    rep: (1 + lvBonus * 0.25 + (tr === 'hosp' ? 0.40 : 0)) * cb.rep,
-    ops: (1 + lvBonus * 0.28 + (tr === 'ops' ? 0.08 : 0)) * cb.ops,
+    speed: (1 + lvBonus * 0.20 + (tr === 'ops' ? 0.02 : 0)) * cb.speed * sp.speed,
+    sat: (1 + lvBonus * 0.30 + (tr === 'qc' ? 0.50 : 0)) * cb.sat * sp.sat,
+    rep: (1 + lvBonus * 0.25 + (tr === 'hosp' ? 0.40 : 0)) * cb.rep * sp.rep,
+    ops: (1 + lvBonus * 0.28 + (tr === 'ops' ? 0.08 : 0)) * cb.ops * sp.ops,
   };
+}
+
+/**
+ * 店长专精的倍率（V13.7）
+ *
+ * ★ 脏存档要防：spec 塞一个字典外的方向 id → 找不到就当没专精，
+ *   不能凭乱写就白得 +20%。
+ *
+ * @param {object} mgr 店长
+ * @returns {{speed:number, sat:number, rep:number, ops:number}} 乘数
+ */
+function managerSpecialtyMul(mgr) {
+  const out = { speed: 1, sat: 1, rep: 1, ops: 1 };
+  if (!mgr) return out;
+  const sid = mgr.spec;
+  if (!sid) return out;
+  const f = MANAGER_SPECIALTY.fields.find(x => x.id === sid);
+  if (!f) return out;                 /* 字典外 → 当作没专精 */
+  const cfg = MANAGER_SPECIALTY;
+  out[f.field] = 1 + cfg.up;
+  for (const k of ['speed', 'sat', 'rep', 'ops']) {
+    if (k !== f.field) out[k] = 1 - cfg.down;
+  }
+  return out;
+}
+
+/**
+ * 专精可不可用（V13.7）
+ * @returns {{ok:boolean, why:string}}
+ */
+function managerCanSpecialty(s, mgr) {
+  if (!mgr) return { ok: false, why: '没有店长' };
+  if (num(mgr.lv, 1) < MANAGER_SPECIALTY.minLv) {
+    return { ok: false, why: `Lv.${MANAGER_SPECIALTY.minLv} 起才能专精` };
+  }
+  return { ok: true, why: '' };
+}
+
+/**
+ * 设置店长的专精方向（V13.7）
+ *
+ * ★ 切换要付**能力值代价**（switchCost）——
+ * 这是"专精有取舍"的关键：不能零成本换来换去。
+ * ★ 首次专精免费（还没专精过），切换才收费。
+ */
+function managerSetSpecialty(s, mgrId, specId) {
+  const mgr = managerById(s, mgrId);
+  if (!mgr) return { ok: false, msg: '店长不存在' };
+  const can = managerCanSpecialty(s, mgr);
+  if (!can.ok) return { ok: false, msg: can.why };
+  const f = MANAGER_SPECIALTY.fields.find(x => x.id === specId);
+  if (!f) return { ok: false, msg: '专精方向不存在' };
+  if (mgr.spec === specId) return { ok: false, msg: '已经是这个专精了' };
+  /* 切换代价：能力值 -0.1（首次专精免费） */
+  if (mgr.spec) {
+    const before = num(mgr.skill, 1);
+    mgr.skill = clamp(num(mgr.skill, 1) - MANAGER_SPECIALTY.switchCost, 0.5, 2);
+    pushLog(s, `🔄 ${mgr.name} 改专精为「${f.name}」（能力 ${before.toFixed(2)} → ${num(mgr.skill).toFixed(2)}）`);
+  } else {
+    pushLog(s, `🎯 ${mgr.name} 开始专精「${f.name}」`);
+  }
+  mgr.spec = specId;
+  return { ok: true, msg: `已专精「${f.name}」` };
 }
 
 /**
@@ -4652,6 +4721,19 @@ function sanitizeState(s) {
       lv: mgrLvIds.indexOf(int(m && m.lv, 1)) >= 0 ? int(m.lv, 1) : 1,
       skill: clamp(num(m && m.skill, 1), 0.3, 3),
       trait: mgrTraitIds.indexOf(m && m.trait) >= 0 ? m.trait : 'none',
+      /* ★ V13.7：专精方向清洗。
+         字典外 → null（当没专精）。
+         ★ 而且**等级不够时也要丢掉** ——
+           脏存档塞 spec='ops' + lv=1 就能白得 +20% 客流/满意（还带 -10% 减益，
+           净收益仍为正）—— 所以必须连等级一起校验。 */
+      spec: (function () {
+        const sid = m && m.spec;
+        if (!sid) return null;
+        if (!MANAGER_SPECIALTY.fields.some(x => x.id === sid)) return null;
+        const lv = mgrLvIds.indexOf(int(m && m.lv, 1)) >= 0 ? int(m.lv, 1) : 1;
+        if (lv < MANAGER_SPECIALTY.minLv) return null;
+        return sid;
+      })(),
       wage: posCap(m && m.wage, 120),
       branch: br,
       days: clamp(int(m && m.days, 0), 0, 9999),

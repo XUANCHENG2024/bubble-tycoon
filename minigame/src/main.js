@@ -899,6 +899,13 @@ function doAct(act, id, extra) {
     else toast(mf.msg);
     return;
   }
+  if (act === 'mspec') {
+    /* ★ V13.7：设置店长专精方向 */
+    var ms = managerSetSpecialty(s, +id, extra);
+    if (ms.ok) { beep('tap'); toast('🎯 ' + ms.msg); }
+    else toast(ms.msg);
+    return;
+  }
   if (act === 'mmove') {
     var mv = moveManager(s, +id, +extra);
     if (mv.ok) {

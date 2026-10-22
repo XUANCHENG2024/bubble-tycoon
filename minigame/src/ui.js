@@ -404,6 +404,13 @@ function panelManagers(ctx, x, y, w, s) {
     var staffN = staffOfBranch(s, b).length;
     var cap = branchStaffCap(s, b);
     var ch = mg ? 76 : 0;
+    /* ★ V13.7：有店长时若能专精（Lv.3+），要多留一行按钮的空间。
+       ★★★ 卡片高度必须跟着涨 —— 否则专精按钮会被画到卡片外，
+         而 GFX.addHit 在裁剪区外**不登记** →
+         「画出来了但点不到」（Canvas 端的老坑：
+         招牌卡/研发树/出杯位/V13 地图/团队组合面板都栽过）。
+         minigame-smoke 的「专精按钮已注册命中区」断言就是守这个。 */
+    if (mg && managerCanSpecialty(s, mg).ok) ch += 26;
     var cands = (s.mgrCand && s.mgrCand[b]) || [];
     if (!mg && cands.length) ch += 26 + cands.length * 52;
     if (!mg && !cands.length) ch += 22;
@@ -442,6 +449,20 @@ function panelManagers(ctx, x, y, w, s) {
       GFX.button(ctx, x + w - 10 - bw2, by, bw2, bh2, '卸任',
         { kind: 'ghost', act: 'mfire', id: mg.id, size: FS.xs, r: 7 });
       y += 74;
+      /* ★ V13.7：专精选项行（Lv.3 起）。
+         ★ Canvas 一屏只有约 600px，所以只画 4 个方向按钮（不画说明文字，
+           详情靠长按/tooltip）。行高 22px，与上面按钮行同规格。 */
+      if (managerCanSpecialty(s, mg).ok) {
+        var sf = MANAGER_SPECIALTY.fields;
+        var sw = (w - 20 - (sf.length - 1) * 4) / sf.length;
+        for (var si = 0; si < sf.length; si++) {
+          var on = mg.spec === sf[si].id;
+          GFX.button(ctx, x + 10 + si * (sw + 4), by, sw, 22,
+            (on ? '✔ ' : '') + sf[si].emoji + sf[si].name.replace('专精', ''),
+            { kind: on ? 'primary' : 'ghost', act: 'mspec', id: mg.id, extra: sf[si].id, size: FS.xs, r: 7 });
+        }
+        y += 26;
+      }
     } else if (cands.length) {
       for (var i = 0; i < cands.length; i++) {
         var c = cands[i];

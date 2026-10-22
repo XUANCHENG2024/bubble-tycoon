@@ -829,6 +829,31 @@ function regularPanelHtml(s) {
   return h;
 }
 
+/**
+ * 店长专精选项（V13.7）
+ *
+ * ★ 借鉴开罗「技能升级有代价、不能随便换来换去」——
+ *   切换专精要损失能力值，否则玩家会无脑试最优解，专精就退化成一次点击。
+ */
+function specialtyHtml(mg) {
+  const cfg = MANAGER_SPECIALTY;
+  const can = managerCanSpecialty(window.S, mg);
+  if (!can.ok) {
+    return `<div class="mgr-spec locked">🎯 专精：${can.why}</div>`;
+  }
+  const cur = mg.spec;
+  let h = `<div class="mgr-spec">
+    <div class="mgr-spec-h">🎯 专精${cur ? '（切换要损失能力值）' : ''}</div>
+    <div class="mgr-spec-opts">`;
+  for (const f of cfg.fields) {
+    const on = cur === f.id;
+    h += `<button class="mgr-spec-b${on ? ' on' : ''}" data-act="mspec" data-id="${mg.id}" data-spec="${f.id}"
+      title="${esc(f.desc)}">${f.emoji} ${esc(f.name)}${on ? ' ✔' : ''}</button>`;
+  }
+  h += `</div></div>`;
+  return h;
+}
+
 function managerPanelHtml(s) {
   const shops = Math.max(1, pos(s.shops, 1));
   const left = managerSlotsLeft(s);
@@ -919,6 +944,7 @@ function managerPanelHtml(s) {
           口碑 +${Math.round((mb.rep - 1) * 100)}% ·
           满意 +${Math.round((mb.sat - 1) * 100)}%
         </div>
+        ${specialtyHtml(mg)}
         <div class="mgr-acts">
           ${bnds.join(' ')}
           <button class="btn btn-xs btn-danger" data-act="mfire" data-id="${mg.id}">卸任（补偿 ${money(Math.round(mg.wage * 3))}）</button>
