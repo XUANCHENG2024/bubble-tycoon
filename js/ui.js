@@ -313,6 +313,8 @@ function hudEl() {
     HUD_EL = {
       day: $('hudDay'), cash: $('hudCash'), rep: $('hudRep'), worth: $('hudWorth'),
       goalFill: $('goalFill'), goalText: $('goalText'),
+      /* ★ V13.8：负债警示条（平时 hidden，不占空间） */
+      debtBar: $('debtBar'), debtText: $('debtText'),
     };
   }
   return HUD_EL;
@@ -321,21 +323,76 @@ function hudEl() {
 UI.renderHUD = function () {
   const s = window.S; if (!s) return;
   const h = hudEl();
-  h.day.innerHTML = s.endless
+  /* ★ V13.8：脏检查 —— 值没变就不写 DOM。
+     renderHUD 挂在主循环上（每帧都跑，60fps = 420 次/秒 DOM 写），
+     但营业中 cash/rep/netWorth **只在「完成订单」时才变**，
+     绝大多数帧这些值根本没动 —— 那些 DOM 写是纯浪费。
+     ★ style.width / style.color 尤其贵（触发样式重算，不是单纯赋值），
+       移动端低端机上能明显感觉到。
+     ★ 做法：和上次写入的值比，相同则跳过。
+       注意 innerHTML 的 day 每天都变（无尽模式还有 milestone），
+       所以仍要算 —— 但它只写一次字符串，开销可忽略。 */
+  const dayTxt = s.endless
     ? `${num(s.day, 1)}<i> 无尽·${num(s.milestone)}阶</i>`
     : `${num(s.day, 1)}<i>/${CFG.DAYS}</i>`;
-  h.cash.textContent = money(num(s.cash));
-  h.rep.textContent = Math.round(num(s.rep));
+  if (HUD_CACHE.day !== dayTxt) { h.day.innerHTML = dayTxt; HUD_CACHE.day = dayTxt; }
+
+  const cashTxt = money(num(s.cash));
+  if (HUD_CACHE.cash !== cashTxt) { h.cash.textContent = cashTxt; HUD_CACHE.cash = cashTxt; }
+
+  const repTxt = String(Math.round(num(s.rep)));
+  if (HUD_CACHE.rep !== repTxt) { h.rep.textContent = repTxt; HUD_CACHE.rep = repTxt; }
+
   const nw = num(netWorth(s));
-  h.worth.textContent = money(nw);
+  const worthTxt = money(nw);
+  if (HUD_CACHE.worth !== worthTxt) { h.worth.textContent = worthTxt; HUD_CACHE.worth = worthTxt; }
+
   const goal = Math.max(1, num(goalOf(s), 1));
   const p = pct(nw / goal * 100);
-  h.goalFill.style.width = p + '%';
+  /* ★ style.width 用「实际值」判断，避免字符串精度差异导致每帧都写 */
+  if (HUD_CACHE.goalW !== p) { h.goalFill.style.width = p + '%'; HUD_CACHE.goalW = p; }
+
   const share = num(rivalShare(s));
-  h.goalText.textContent = `目标 ${money(goal)} · ${p.toFixed(0)}%`
+  const goalTxt = `目标 ${money(goal)} · ${p.toFixed(0)}%`
     + (share >= 0.15 ? ` · 🦑对手抢 ${Math.round(share * 100)}%` : '');
-  h.cash.style.color = num(s.cash) < 0 ? 'var(--red)' : '';
+  if (HUD_CACHE.goalT !== goalTxt) { h.goalText.textContent = goalTxt; HUD_CACHE.goalT = goalTxt; }
+
+  /* 负现金标红：同样用脏检查（color 写也会触发样式重算） */
+  const color = num(s.cash) < 0 ? 'var(--red)' : '';
+  if (HUD_CACHE.cashColor !== color) { h.cash.style.color = color; HUD_CACHE.cashColor = color; }
+  /* ★ V13.8：负债提示 —— 之前 debtDays 只存在于数据里，UI 完全不显示。
+     玩家看到红色「¥-450」却不知道：
+       ① 还能撑几天（欠 2 天就破产）
+       ② 怎么才算过关（现金回到 ¥0 以上就解除）
+     这是典型的「异常状态有内部表示、但没告诉玩家」。
+     ★ 用 title（悬停提示）+ 短文案，不占 HUD 横向空间。 */
+  const debtTxt = num(s.debtDays, 0) >= 1
+    ? `负债 ${money(Math.abs(num(s.cash)))} · 还剩 ${2 - num(s.debtDays, 0)} 天破产`
+    : '';
+  if (HUD_CACHE.debt !== debtTxt) {
+    /* 悬停提示（桌面端） */
+    h.cash.title = debtTxt
+      ? `⚠️ ${debtTxt}：连续 2 天现金为负就破产。现金回到 ¥0 以上即可解除。`
+      : (STORAGE_OK ? '' : '⚠️ 浏览器存储不可用，进度无法保存');
+    /* ★ 可见警示条 —— 移动端没有 hover，只有 title 等于没有提示 */
+    if (h.debtBar && h.debtText) {
+      h.debtBar.hidden = !debtTxt;
+      if (debtTxt) h.debtText.textContent = debtTxt + '，现金回到 ¥0 即可解除';
+    }
+    HUD_CACHE.debt = debtTxt;
+  }
   if (!STORAGE_OK) h.cash.title = '⚠️ 浏览器存储不可用，进度无法保存';
+};
+
+/** HUD 上次写入的值（用于脏检查）。
+ *  ★ 切换局面（开局/读档）时必须作废 —— 否则新局面的 HUD 会停留在旧值上，
+ *    而因为「值相同就不写」，旧值恰好等于新值时不更新就对了、
+ *    不等时又会写……看似没问题，但**节点可能已经被替换**（换局重建 HUD），
+ *    缓存里的旧值会让新节点漏更新。所以新局要显式清空。 */
+const HUD_CACHE = { day: '', cash: '', rep: '', worth: '', goalW: '', goalT: '', cashColor: '', debt: '' };
+UI.resetHUDCache = function () {
+  for (const k in HUD_CACHE) HUD_CACHE[k] = (k === 'goalW') ? '' : '';
+  HUD_CACHE.goalW = -1;      /* 进度条用数值，初值 -1 保证首帧一定写 */
 };
 
 /* ---------------- Tab ---------------- */

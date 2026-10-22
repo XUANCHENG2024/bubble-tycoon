@@ -107,6 +107,10 @@ function startGame(diff, loaded, keepSeed) {
      全网同种子必须完全一致，带了继承数据就没法比了）。 */
   const s = loaded || newGame(diff, window.META.bp, keepSeed ? null : window.META.sig);
   window.S = s;
+  /* ★ V13.8：换局面必须作废 HUD 脏检查缓存 ——
+     否则新局面的 HUD 会停留在旧值（renderHUD 靠「值相同就不写」省开销，
+     缓存没清就会漏更新）。 */
+  UI.resetHUDCache();
   if (!loaded) {
     window.META.runs++;
     saveMeta(window.META);
@@ -299,6 +303,8 @@ function doAct(act, el) {
     case 'endless': {
       const g = startEndless(s);
       window.S = s;
+      UI.resetHUDCache();   /* ★ V13.8：同上，进无尽模式也要清 HUD 缓存 */
+
       UI.showScreen('screen-game');
       UI.setTab('manage');
       UI.renderAll();

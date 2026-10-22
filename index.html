@@ -69,6 +69,10 @@
     </div>
     <div class="goal-bar" data-tut="goal"><div class="goal-fill" id="goalFill"></div><span class="goal-text" id="goalText"></span></div>
   </header>
+  <!-- ★ V13.8：负债警示条（平时 display:none，不占空间）
+       之前 debtDays 只存在于数据里，UI 完全不显示：
+       玩家看到红色「¥-450」却不知道还能撑几天、怎么才算过关。 -->
+  <div id="debtBar" class="debt-bar" hidden>⚠️ <b id="debtText"></b></div>
 
   <nav class="tabs" id="tabs">
     <button class="tab active" data-tab="manage">🧋 经营</button>

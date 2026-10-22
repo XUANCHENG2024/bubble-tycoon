@@ -254,13 +254,36 @@ function drawHUD(ctx, L, s) {
     bx -= bs + gap;
   }
 
-  /* 目标进度条：宽度让出图标区，文字改到进度条下方左对齐（原来右对齐会顶到图标） */
+/* 目标进度条：宽度让出图标区，文字改到进度条下方左对齐（原来右对齐会顶到图标） */
   var barW = Math.max(60, W - 32 - iconW - 10);
+  /* ★ V13.8：负债警示（与 H5 端对等）。
+     之前 debtDays 只存在于数据里，两版 UI 都不显示：
+     玩家看到红色「¥-450」却不知道还能撑几天、怎么才算过关。
+
+     ★ 位置选择踩了一次坑：
+       初版画在「目标文字右侧」，实测 390 宽时 room = 4px —— **根本放不下**
+       （barW 已经吃掉了除图标外的全部宽度）。
+       所以改成：**负债时把 barW 收窄，给提示腾出一段**。
+       只在负债时收窄 —— 平时不浪费那 90px。
+     ★ 空间仍然不够（超窄屏）时降级为不画：
+       宁可少提示，也不能让文字重叠/溢出（HUD 是固定高度，重叠会盖住 tab 栏）。 */
+  var debtDays = num(s.debtDays, 0);
+  var dTxt = debtDays >= 1 ? ('⚠ 负债 · 还剩 ' + (2 - debtDays) + ' 天') : '';
+  var dW = 0;
+  if (dTxt) {
+    /* 「⚠ 负债 · 还剩 1 天」在 FS.xs 下约需 104px，留 8px 间隙 */
+    dW = 112;
+    barW = Math.max(60, barW - dW);
+  }
   GFX.bar(ctx, 16, y + 2, barW, 5, num(netWorth(s)) / goal, { color: T.cyan });
   var share = num(rivalShare(s));
   var gt = '目标 ' + money(goal) + ' · ' + Math.round(num(netWorth(s)) / goal * 100) + '%'
     + (share >= 0.15 ? ' · 🦑对手抢 ' + Math.round(share * 100) + '%' : '');
   text(ctx, gt, 16, y + 12, { size: FS.xs, color: T.txt3, maxW: barW });
+  if (dTxt && barW >= 60) {
+    text(ctx, dTxt, 16 + barW + 8, y + 12,
+      { size: FS.xs, weight: 700, color: T.red, maxW: dW - 8 });
+  }
 }
 
 function drawTabs(ctx, L) {

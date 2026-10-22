@@ -29,7 +29,7 @@ jobs:
           set -e
           for t in probe dom-smoke browser-smoke minigame-smoke mobile-smoke \
                    symbol-check xss-verify e2e-flow verify-checklist \
-                   diag-coupling diag-edge diag-ui check-doc-refs check-escape check-leak; do
+                   diag-coupling diag-edge diag-ui check-doc-refs check-escape check-leak check-extreme; do
             printf '%-20s ' "$t"
             node tools/$t.js > /dev/null
             echo "PASS"

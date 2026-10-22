@@ -1429,6 +1429,40 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
       `Canvas 关店后店长留档且可免费请回（${fmRes}）`);
   }
 
+  /* ---- V13.8 对等：Canvas 负债提示 ---- */
+  {
+    const e6 = makeEnv(390, 844);
+    e6.frames(2); e6.tap('start'); e6.frames(2); e6.tap('tutskip'); e6.frames(1);
+    /* 先确认不负债时不显示 */
+    e6.MG.S.debtDays = 0; e6.MG.S.cash = 5000;
+    e6.frames(2);
+    drawnTexts.length = 0;
+    e6.frames(1);
+    check(!drawnTexts.join(' ').includes('负债'),
+      'Canvas 不负债时无警示');
+    /* 负债时应显示「还剩 N 天」 */
+    e6.MG.S.debtDays = 1; e6.MG.S.cash = -450;
+    e6.frames(2);
+    drawnTexts.length = 0;
+    e6.frames(1);
+    const dt6 = drawnTexts.join(' ');
+    check(/负债/.test(dt6) && /还剩\s*1\s*天/.test(dt6),
+      `Canvas 负债时显示「还剩 1 天」（实际：${(dt6.match(/[^\n]*负债[^\n]*/) || ['无'])[0].slice(0, 40)}）`);
+    /* ★ 窄屏：空间不够时必须「不画」而不是画歪/溢出 */
+    const e7 = makeEnv(320, 480);
+    e7.frames(2); e7.tap('start'); e7.frames(2); e7.tap('tutskip'); e7.frames(1);
+    e7.MG.S.debtDays = 2; e7.MG.S.cash = -900;
+    e7.frames(2);
+    drawnTexts.length = 0;
+    e7.frames(1);
+    const dt7 = drawnTexts.join(' ');
+    check(/还剩\s*0?\s*天/.test(dt7) || !/负债/.test(dt7),
+      `窄屏 320 宽：提示要么正确显示、要么降级不画（不重叠）`);
+    /* ★ 关键：不能既没画、又画了一半（比如只剩「⚠」或乱码） */
+    check(!/⚠\s*$/.test(dt7.trim()),
+      '窄屏下提示不会画成半截');
+  }
+
   /* ---- V13.7 对等：Canvas 店长专精 ---- */
   {
     const e5 = makeEnv(390, 844);

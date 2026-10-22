@@ -541,7 +541,16 @@ function stationTime(s, st, sim) {
   const base = serviceTimeOf(s, st.worker, sim);
   if (!st || !(st.branchIdx >= 2)) return base;      /* 总店不受店长影响 */
   const mb = managerBonus(s, st.branchIdx);
-  return Math.max(CFG.MIN_SERVICE, base / mb.speed);
+  /* ★ mb.speed 必须先夹到 >0 再做除法 ——
+     原来的写法是 `Math.max(MIN_SERVICE, base / mb.speed)`，
+     它防住了「结果太小」但没防住「除数为 0」：
+     mb.speed 一旦变成 0（脏存档 / 将来组合带减益 / 专精减益叠加到极限），
+       就是 Infinity → `progress += dt / Infinity` → 出杯永远卡住，
+       而且**不报错**（Infinity 不抛异常，只是工位再也不出杯）。
+     实测当前最小值 0.49（专精 -5%），暂时安全 —— 但那是"恰好安全"不是"设计安全"。
+     ★ 所以在除**之前**夹住分母。 */
+  const spd = Math.max(0.05, num(mb.speed, 1));
+  return Math.max(CFG.MIN_SERVICE, base / spd);
 }
 
 /* ---------------- 新游戏 ---------------- */

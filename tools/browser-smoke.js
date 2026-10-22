@@ -1041,6 +1041,42 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
       'V12.1 有留档店长时面板显示待聘区');
   }
 
+  /* ---- V13.8 HUD 脏检查：值没变就不写 DOM ---- */
+  {
+    /* ★ 不能只测「HUD 显示对了」—— 那在有没有脏检查时都一样。
+       要测的是「值没变时 DOM 写次数不增加」。 */
+    const s2 = window.S;
+    s2.cash = 5000;
+    window.UI.resetHUDCache();
+    window.UI.renderHUD();
+    const cashEl = doc.getElementById('hudCash');
+    /* ★ 用「读到的值变化」来判定有没有写 ——
+       比 mock 原型链可靠（jsdom 的 textContent 定义在更上层原型上，
+         getOwnPropertyDescriptor(Object.getPrototypeOf(el)) 取不到会抛），
+       也比 MutationObserver 可靠（后者是**异步**回调，同帧内还没跑，
+         「值变了要写 1 次」那条会永远判 0 —— 判据错了，测试就是噪音）。 */
+    let writes = 0;
+    let seen = cashEl.textContent;
+    const track = () => {
+      if (cashEl.textContent !== seen) { seen = cashEl.textContent; writes++; }
+    };
+    /* 连续渲染 30 帧，cash 不变 → 不该有任何 DOM 写 */
+    for (let i = 0; i < 30; i++) { window.UI.renderHUD(); track(); }
+    check(writes === 0,
+      `值未变时 HUD 不重写 DOM（30 帧改动 ${writes} 次）`);
+    /* cash 变了 → 必须改1 次 */
+    s2.cash = 6000;
+    window.UI.renderHUD(); track();
+    check(writes === 1,
+      `值变了才更新 DOM（改动 ${writes} 次）`);
+    /* 换局后缓存要清 —— 否则新局面 HUD 停在旧值 */
+    s2.cash = 7000;
+    window.UI.resetHUDCache();
+    window.UI.renderHUD();
+    check(/7,000/.test(cashEl.textContent),
+      `resetHUDCache 后 HUD 立即反映新值（${cashEl.textContent}）`);
+  }
+
   /* ---- V13.4 店长组合加成面板 ---- */
   {
     const s = window.S;

@@ -60,6 +60,9 @@ jobs:
       - name: 源码注释是否泄漏到界面
         run: node tools/check-leak.js
 
+      - name: 极端状态扫描（NaN / 死循环 / 存档往返）
+        run: node tools/check-extreme.js
+
       - name: 主流程
         run: node tools/e2e-flow.js
 

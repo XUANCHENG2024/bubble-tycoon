@@ -1396,3 +1396,20 @@ body::before {
   background: rgba(53, 229, 240, .14); color: var(--cyan);
   border-color: rgba(53, 229, 240, .38);
 }
+
+/* ---------- V13.8：负债警示条 ---------- */
+.debt-bar {
+  padding: 5px 12px; font-size: var(--fs-sm); line-height: 1.5;
+  color: var(--red); background: rgba(255, 107, 107, .14);
+  border-bottom: 1px solid rgba(255, 107, 107, .32);
+  animation: debtPulse 2s ease-in-out infinite;
+}
+.debt-bar b { font-weight: 800; }
+@keyframes debtPulse {
+  0%, 100% { background: rgba(255, 107, 107, .14); }
+  50% { background: rgba(255, 107, 107, .24); }
+}
+/* 尊重「减少动态效果」的系统设置 */
+@media (prefers-reduced-motion: reduce) {
+  .debt-bar { animation: none; }
+}
