@@ -708,12 +708,27 @@ function storeUpgradeHtml(s, store) {
   const ups = STORE_UPGRADES;
   const anyBought = ups.some(u => storeUpLevel(s, store, u.id) > 0);
   const totalLv = ups.reduce((a, u) => a + storeUpLevel(s, store, u.id), 0);
-  let h = `<div class="store-up" data-act="stoggleup" data-b="${store.branch}">
+  /* ★ V17 修 bug：这个折叠箭头**以前点了没反应**。
+     排查方式是把 UI 里所有 data-act 与 main.js 的 case 做差集：
+       `stoggleup` 是唯一真正没有处理分支的按钮
+       （mkt/ratio/scity/vcity/vprov 走的是 change/input 事件，不是死按钮）。
+     ★ 根因：只画了箭头与折叠样式，但没有「收起时隐藏列表」的逻辑，
+       也没有 case 分支 —— 属于**做了一半的功能**。
+     ★ 现在补上：展开态存 UI.storeUpOpen（按门店号），
+       已有投入时默认展开（玩家刚买了东西，得看得见），
+       没投入时默认收起（不然每家店都摊开一长串，占满商圈页）。 */
+  const open = UI.storeUpOpen
+    ? (UI.storeUpOpen[store.branch] !== undefined
+      ? !!UI.storeUpOpen[store.branch] : anyBought)
+    : anyBought;
+  let h = `<div class="store-up${open ? ' open' : ''}"
+    data-act="stoggleup" data-b="${store.branch}">
     <span class="store-up-t">🏗️ 店铺升级</span>
     <span class="store-up-s">${anyBought ? `已投入 ${totalLv} 级` : '未升级'}</span>
-    <span class="store-up-arrow">${anyBought ? '' : '›'}</span>
+    <span class="store-up-arrow">${open ? '▾' : '›'}</span>
   </div>`;
-  if (!anyBought) return h;
+  /* ★ 收起时**不渲染列表** —— 靠 CSS 隐藏不够（DOM 还在，仍可被 tab 聚焦到） */
+  if (!open) return h;
   h += `<div class="store-up-list">`;
   for (const u of ups) {
     const lv = storeUpLevel(s, store, u.id);
@@ -762,7 +777,7 @@ function storeCandidatesHtml(s, branch) {
     return `<div style="font-size:11.5px;color:var(--txt3);padding:8px 0">
       暂无候选人（次日刷新，或在经营页用「刷新」付费重抽）</div>`;
   }
-  const fee = managerCost(s);
+  const fee = managerCost(s);   /* ★ managerCost 是**全局**费用（按已招店长数递增），不按门店 */
   let h = `<div style="font-size:11.5px;color:var(--txt3);margin-bottom:8px">
     任命费用 ${money(fee)} · 每家店至多一名店长</div>`;
   for (let i = 0; i < cands.length; i++) {
@@ -1630,6 +1645,28 @@ function sigCardHtml(s) {
 UI.renderLab = function () {
   const s = window.S; if (!s) return;
 
+  /* ★ V17：初始化折叠状态 —— 非本店分组默认收起。
+     切城市后要把「当前城市那组」展开（否则玩家切了城市还看到一堆折叠行，
+     以为没生效）。cityBarHtml 的切换会走 setCity → 那里会重置。 */
+  if (!UI.collapsed) UI.collapsed = {};
+  if (!UI.collapsedInit) {
+    for (const g of researchTree(s)) {
+      const k = g.cityName.indexOf('成就') >= 0 ? 'ach'
+        : (g.city ? ('c' + g.city) : 'univ');
+      if (g.city && !g.isHere) UI.collapsed[k] = true;
+    }
+    UI.collapsedInit = true;
+  }
+  /* ★ 换过城市后，把「当前城市」那组强制展开 ——
+     否则玩家切了城市，看到的还是一堆折叠行，会以为没生效。
+     ★ 在 UI 层处理而不是改引擎：这个状态是**浏览状态**，
+       引擎不该知道 UI 怎么折叠。 */
+  const _curKey = 'c' + currentCityId(s);
+  if (UI._lastFoldCity !== currentCityId(s)) {
+    if (UI._lastFoldCity) UI.collapsed[_curKey] = false;
+    UI._lastFoldCity = currentCityId(s);
+  }
+
   /* V6 招牌配方：跨局继承的成长线。放在实验室页最上面——
      这里是"长期目标"该待的地方：玩家看到某款已经 142/150 杯，
      下一局就会想专门练它。 */
@@ -1649,6 +1686,7 @@ UI.renderLab = function () {
     </div>
     ${UI.jumpFromHtml()}
     ${cityBarHtml(s)}
+    ${labFoldNavHtml(s)}
   </div>`;
 
   /* ---- 研发树主体：按城市分组 ---- */
@@ -1666,10 +1704,33 @@ UI.renderLab = function () {
              ? `${g.nodes.length} 道本地菜 · 专属原料 ${ingsOfCity(g.city).length} 种`
              : '需切换经营城市才能研发'}</span>`;
 
-    h += `<div class="cui-group tree${g.isHere ? '' : ' away'}">
-      <div class="cui-head">${head}
+    /* ★ V17：分组头可点折叠。
+       体检实测：研发页 16 个分组（其中 **14 个是非本店**）+ 64 张配方卡
+       + 48 个阶段标题，HTML 体积 93669 字符 / 1839 个标签 ——
+       是第二名（升级页 26916）的 3.5 倍，玩家要滚很久。
+       ★ 而那 14 个非本店分组**当前城市根本研发不了**
+         （提示就写着「需切换经营城市」）——
+         把它们全展开等于让玩家滚过14 屏不能点的内容。
+       ★ 所以：默认只展开「本店 + 通用 + 成就」三组，
+         非本店折叠成一行（仍能看到「有 3 道本地菜，想做要换城市」）。
+         ★ 折叠状态存 UI.collapsed（不存档）——
+           这是临时浏览状态，刷新后回到默认更符合直觉。 */
+    const groupKey = isAch ? 'ach' : (g.city ? ('c' + g.city) : 'univ');
+    const collapsed = UI.collapsed && UI.collapsed[groupKey];
+    h += `<div class="cui-group tree${g.isHere || !g.city || isAch ? '' : ' away'}${collapsed ? ' fold' : ''}"
+      data-fold="${groupKey}">
+      <div class="cui-head foldable" data-act="foldtree" data-id="${groupKey}">
+        ${head}
         ${!g.isHere && !isAch ? `<span class="cui-ws off">不在本店</span>` : ''}
+        <span class="fold-arrow${collapsed ? '' : ' open'}">▾</span>
       </div>`;
+    /* ★ 折叠时只显示摘要行，不铺卡片 */
+    if (collapsed) {
+      h += `<div class="fold-sum">${g.nodes.length} 道${
+        !g.isHere && g.city ? ' · 切换到' + esc((cityById(g.city) || {}).name || '') + '后开放' : ''}</div>
+      </div>`;
+      continue;
+    }
 
     /* 按阶段分组，阶段之间有明确先后感 */
     const byStage = new Map();
@@ -1823,6 +1884,45 @@ function marketIngUsesHtml(s, g) {
     <div class="ing-uses-t">能做 <b>${ready.length}</b> 道${
       locked.length ? ` · <i>研发中 ${locked.length}</i>` : ''}${warn}</div>
     <div class="ing-use-list">${chips.slice(0, showN).join('')}${more}</div>
+  </div>`;
+}
+
+/**
+ * 研发树的分组导航条（V17）
+ *
+ * ★ 为什么需要它：
+ *   折叠解决了「默认不铺开」，但引入了一个新问题 ——
+ *   玩家想看「杭州有哪几道菜」时，得先在 16 行里找到那行、点开它。
+ *   折叠把「长页面」换成了「多点几次」，那不算真的优化。
+ *   ★ 所以配一条**常驻的锚点导航**：一眼看到所有分组、
+ *     点一下就跳过去。16 个城市缩成一排横向标签。
+ *
+ * ★ 横向滚动是**导航条内部**的，不是页面的：
+ *   `overflow-x: auto` 限在导航条自己身上，
+ *   页面主体不横��� —— 窄屏下主体横滚是明确的 bug，
+ *   而导航条横滚是常见的移动端模式（分段控件就是这么做的）。
+ *   ★ 这点要在 CSS 里写清楚，否则后来者可能误改。
+ *
+ * @returns {string} HTML
+ */
+function labFoldNavHtml(s) {
+  const tree = researchTree(s);
+  if (tree.length <= 1) return '';
+  const chips = [];
+  for (const g of tree) {
+    const isAch = g.cityName.indexOf('成就') >= 0;
+    const key = isAch ? 'ach' : (g.city ? ('c' + g.city) : 'univ');
+    const folded = UI.collapsed && UI.collapsed[key];
+    /* ★ 本店 / 通用 / 成就 用高亮色，非本店用暗色 ——
+       玩家一眼知道哪些现在能点，哪些要先换城市。 */
+    const cls = g.isHere || !g.city || isAch ? 'here' : 'away';
+    const label = isAch ? '🏅 成就' : (!g.city ? '🌐 通用' : g.cityName.replace(/市$/, ''));
+    chips.push(`<button class="navchip ${cls}${folded ? ' fold' : ''}"
+      data-act="foldtree" data-id="${key}"
+      title="${esc(g.cityName)}：${g.nodes.length} 道${folded ? '（点击展开）' : ''}">${esc(label)}</button>`);
+  }
+  return `<div class="labnav" role="tablist">
+    <div class="labnav-in">${chips.join('')}</div>
   </div>`;
 }
 
@@ -1991,24 +2091,80 @@ UI.renderUp = function () {
      而末尾（分店 / 品牌声望之后）在小游戏端会被推出首屏 —— 面板内容一高，
      越靠后的卡片玩家越看不到，等于白做。语义与可见性在这里是一致的。 */
   let h = venuePanelHtml(s);
+  /* ★ V17：升级总览条 —— 让玩家第一眼就知道「还要花多少、能升几项」，
+     不用逐行加。三个数字：可升级项数 / 已满级项数 / 当前现金。 */
+  {
+    let canUp = 0, maxed = 0, cheapest = null;
+    for (const u of UPGRADES) {
+      const lv = s.up[u.id];
+      const c = upgradeCost(s, u.id);
+      if (c == null) { maxed++; continue; }
+      if (s.cash >= c) canUp++;
+      if (cheapest == null || c < cheapest) cheapest = c;
+    }
+    h += `<div class="upsum">
+      <div class="upsum-i${canUp ? ' good' : ''}">
+        <b>${canUp}</b><span>可升级</span></div>
+      <div class="upsum-i">
+        <b>${maxed}</b><span>已满级</span></div>
+      <div class="upsum-i">
+        <b>${money(s.cash)}</b><span>现金</span></div>
+      <div class="upsum-i${canUp ? '' : ' dim'}">
+        <b>${cheapest == null ? '—' : money(cheapest)}</b><span>最便宜一项</span></div>
+    </div>`;
+  }
   h += `<div class="card"><div class="card-h">⬆️ 设备与门店</div>`;
+  /* ★ V17：设备升级行改成「三层信息」结构 ——
+     原来一行里挤着：名称+等级 / 静态描述 / 当前效果 / 消耗，
+     四样东西没有视觉层次，玩家要逐字读才知道
+     「现在几级」「升到下一级会怎样」「要花多少」「买不买得起」。
+
+     现在的三��（对应玩家的三个问题）：
+       ① 现状：现在几级 + 当前效果（已拿到什么）
+       ② 变化：下一级**具体**多给什么（不是抽象的 +5%，
+          而是从 u.detail(lv) 里取下一级的描述做对比）
+       ③ 决策：消耗 + 买不买得起（买不起时说清差多少）
+     ★ 第③层最关键：原来钱不够时按钮只是灰掉，
+       玩家不知道还差多少 —— 直接问「差多少」比让他心算更快。 */
   for (const u of UPGRADES) {
     const lv = s.up[u.id];
     const cost = upgradeCost(s, u.id);
     let pips = '';
     for (let i = 0; i < u.max; i++) pips += `<span class="up-pip ${i < lv ? 'on' : ''}"></span>`;
-    h += `<div class="up-row">
+
+    /* ① 现状 */
+    let row = `<div class="up-row up-v17">
       <div class="up-e">${u.emoji}</div>
       <div class="up-body">
-        <div class="up-n">${u.name} <span style="font-size:var(--fs-sm);color:var(--txt3)">Lv.${lv}/${u.max}</span></div>
-        <div class="up-d">${u.desc}</div>
-        <div class="up-d" style="color:var(--cyan)">${u.detail(lv)}</div>
-        <div class="up-lv">${pips}</div>
-      </div>
-      ${cost == null
-        ? `<span style="font-size:var(--fs-md);color:var(--green);font-weight:800">满级</span>`
-        : `<button class="btn btn-sm ${s.cash >= cost ? 'btn-primary' : 'btn-ghost'}" data-act="upgrade" data-id="${u.id}" ${s.cash >= cost ? '' : 'disabled'}>${money(cost)}</button>`}
-    </div>`;
+        <div class="up-n">${u.name}
+          <span class="up-lvnow">Lv.${lv}<i>/${u.max}</i></span></div>
+        <div class="up-have">当前：<span>${esc(u.detail(lv))}</span></div>`;
+
+    /* ② 变化：下一级的具体收益（满级则不显示） */
+    if (lv < u.max) {
+      const next = u.detail(lv + 1);
+      /* ★ 只写「下一级多什么」，不重复「当前是什么」——
+         两行都写反而更难扫。 */
+      row += `<div class="up-next">升级后：<span>${esc(next)}</span></div>`;
+    }
+    row += `</div>`;
+
+    /* ③ 决策 */
+    if (cost == null) {
+      row += `<span class="up-max">满级</span>`;
+    } else {
+      const afford = s.cash >= cost;
+      const gap = cost - s.cash;
+      row += `<div class="up-buy">
+        <button class="btn btn-sm ${afford ? 'btn-primary' : 'btn-ghost'}"
+          data-act="upgrade" data-id="${u.id}" ${afford ? '' : 'disabled'}
+          title="${afford ? '升级 ' + u.name : `还差 ${money(gap)}`}">
+          ${money(cost)}</button>
+        ${afford ? '' : `<div class="up-gap">差 ${money(gap)}</div>`}
+      </div>`;
+    }
+    row += `</div>`;
+    h += row;
   }
   h += `</div>`;
 
@@ -2119,22 +2275,105 @@ UI.renderStaff = function () {
   }
   h += `</div>`;
 
-  h += `<div class="card"><div class="card-h">🎯 今日候选人</div>`;
+/* ============================================================
+   *  V17 招聘区：店员与店长**完全拆开**
+   * ============================================================
+   *
+   * ★ 原来为什么混在一起是个问题：
+   *   店员候选人是「效率 / 日薪 / 聘用费」，一按就进编制；
+   *   店长候选人是「等级 / 专精 / 招募费」，一按要选一家店任命。
+   *   ★ 两种岗位的**决策维度根本不同**（员工看性价比，店长看专精匹配），
+   *     字段也不重叠，却塞在同一个「今日候选人」列表里 ——
+   *     玩家要在一堆信息里分辨「这条是招人的还是招店长的」。
+   *
+   * ★ 现在拆成两个独立区块，各用各的表单与字段：
+   *     店员区：效率 / 日薪 / 特质 → 雇佣（直接进编制）
+   *     店长区：等级 / 专精 / 招募费 → 任命（要去选店）
+   *
+   * ★ 顺带补上「刷新」按钮（原来完全没有）：
+   *   候选人是每日自动刷的，玩家想换一批只能等隔天 ——
+   *   而「手上有几个候选」是每天该做的决策。
+   *   ★ 必须带冷却（引擎侧 candCd），否则连点刷到 SSR 为止。
+   */
+
+  /* ---------- ① 店员招聘 ---------- */
+  h += `<div class="card hirecard">
+    <div class="card-h">🧑‍🍳 店员招聘
+      <span class="ch-sub">${s.candidates.length} 位在招</span></div>`;
+  if (!s.candidates.length) {
+    h += `<div class="hire-empty">今天还没有候选人，<b>点下方刷新</b>看看。</div>`;
+  }
   s.candidates.forEach((c, i) => {
     const tr = traitById(c.trait);
-    h += `<div class="cand">
-      <span style="font-size:var(--fs-display)">${esc(c.emoji)}</span>
-      <div style="flex:1;min-width:0">
-        <div style="font-weight:800;font-size:13.5px">${esc(c.name)} ${tr ? `<span style="font-size:var(--fs-xs);padding:1px 6px;border-radius:99px;background:rgba(139,92,255,.3)">${esc(tr.emoji)}${esc(tr.name)}</span>` : ''}</div>
-        <div style="font-size:var(--fs-sm);color:var(--txt3);margin-top:2px">
-          效率 ×${num(c.skill, 1).toFixed(2)} · 日薪 ${money(num(c.wage))} · 聘用费 ${money(num(c.fee))}
-          ${tr ? `<br>${esc(tr.desc)}` : ''}</div>
+    const afford = num(s.cash) >= num(c.fee);
+    h += `<div class="cand hire-cand">
+      <span class="cand-e">${esc(c.emoji)}</span>
+      <div class="cand-b">
+        <div class="cand-n">${esc(c.name)}
+          ${tr ? `<span class="cand-tr">${esc(tr.emoji)}${esc(tr.name)}</span>` : ''}</div>
+        <div class="cand-f">
+          <span class="cf-k">效率</span><span class="cf-v">×${num(c.skill, 1).toFixed(2)}</span>
+          <span class="cf-k">日薪</span><span class="cf-v">${money(num(c.wage))}</span>
+          <span class="cf-k">聘用费</span><span class="cf-v">${money(num(c.fee))}</span>
+        </div>
+        ${tr ? `<div class="cand-desc">${esc(tr.desc)}</div>` : ''}
       </div>
-      <button class="btn btn-sm ${num(s.cash) >= num(c.fee) ? 'btn-green' : 'btn-ghost'}" data-act="hire" data-i="${i}" ${num(s.cash) >= num(c.fee) ? '' : 'disabled'}>雇佣</button>
+      <button class="btn btn-sm ${afford ? 'btn-green' : 'btn-ghost'}"
+        data-act="hire" data-i="${i}" ${afford ? '' : 'disabled'}
+        title="${afford ? '雇佣入职' : `还差 ${money(num(c.fee) - num(s.cash))}`}">雇佣</button>
     </div>`;
   });
-  h += `<button class="btn btn-ghost" style="width:100%;margin-top:4px" data-act="teambuild">🎉 团建（全员体力回满）</button>`;
+  /* 刷新按钮：冷却中禁用并显示剩余秒数 */
+  const cd = num(s.candCd, 0);
+  const cdTxt = cd > 0 ? `${Math.ceil(cd)}s` : '';
+  h += `<div class="hire-actions">
+    <button class="btn btn-cyan" style="flex:1"
+      data-act="candrefresh" ${cd > 0 ? 'disabled' : ''}
+      title="${cd > 0 ? '冷却中' : '换一批候选人'}">
+      ${cd > 0 ? `🔄 刷新中 ${cdTxt}` : '🔄 刷新候选人'}</button>
+    <button class="btn btn-ghost" data-act="teambuild">🎉 团建（体力回满）</button>
+  </div>`;
   h += `</div>`;
+
+  /* ---------- ② 店长招聘（独立区块，字段完全不同） ---------- */
+  {
+    /* 找出还缺店长的门店 —— 店长必须挂在具体门店上 */
+    const shops = pos(s.shops, 1);
+    const freeShops = [];
+    for (let b = 1; b <= shops; b++) {
+      if (!managerOfBranch(s, b)) freeShops.push(b);
+    }
+    if (freeShops.length) {
+      h += `<div class="card hirecard">
+        <div class="card-h">🎩 店长招募
+          <span class="ch-sub">${freeShops.length} 家店缺店长</span></div>
+        <div class="hire-note">店长是<b>加成不是门票</b>—— 不配也能开店，
+          但配了能拿客流与营收加成。招募要花钱，且每次刷新费用递增。</div>`;
+      /* 列出每家缺店长的门店，一行一个入口 */
+      for (const b of freeShops) {
+        const st = storeByBranch(s, b);
+        const fee = managerCost(s);
+        const afford = num(s.cash) >= num(fee);
+        h += `<div class="cand hire-cand">
+          <span class="cand-e">🏪</span>
+          <div class="cand-b">
+            <div class="cand-n">${esc((st && st.name) || `第 ${b} 店`)}
+              <span class="cand-tr">第 ${b} 店</span></div>
+            <div class="cand-f">
+              <span class="cf-k">招募费</span><span class="cf-v">${money(fee)}</span>
+              <span class="cf-k">岗位</span><span class="cf-v">店���</span>
+            </div>
+          </div>
+          <button class="btn btn-sm ${afford ? 'btn-primary' : 'btn-ghost'}"
+            data-act="smgrh" data-br="${b}" ${afford ? '' : 'disabled'}
+            title="${afford ? '挑选店长' : `还差 ${money(fee - num(s.cash))}`}">挑选</button>
+        </div>`;
+      }
+      h += `</div>`;
+    }
+  }
+
+  $('panel-staff').innerHTML = h;
   $('panel-staff').innerHTML = h;
 };
 
@@ -2315,22 +2554,143 @@ UI.showChart = function () {
 };
 
 /* ---------------- 成就面板 ---------------- */
+/* ============================================================
+ *  V17 成就页：主线 + 支线两层结构
+ * ============================================================
+ *
+ * ★ 原来为什么难用：
+ *   44 个成就**平铺成一张列表**，没有任何分类字段（实测
+ *   ACHIEVEMENTS 的字段只有 id/name/emoji/desc/reward/check）。
+ *   ★ 玩家打开这一页看到的是 44 行平铺 —— 既看不出
+ *     「我整体走到哪了」，也找不到「我现在该冲哪个」。
+ *
+ * ★ 分类依据不是拍脑袋定的，是**从 check 函数里探测出来的**：
+ *   实测各系统被多少成就引用：
+ *     st(门店经营) 13 · stats(统计) 9 · flags 9
+ *     recipes(配方) 5 · rep(声望) 4 · shops/staff/up/rival 各 2
+ *   ★ 所以主线 = **经营推进类**（门店/配方/声望/升级/分店）
+ *     —— 它们天然有前后关系，是这局的「主线任务」；
+ *     支线 = **单点技巧类**（统计里程碑/竞速/一次性挑战）
+ *     —— 达成与否不影响局内节奏，独立挂在旁边。
+ *
+ * ★ 分类函数是**数据驱动**的（读 check 的源码），不是硬编码 id 列表：
+ *   新加成就时只要它引用了主线系统，就自动归主线 ——
+ *   硬编码 id 列表会在下一次加成就时立刻过期。
+ */
+
+/**
+ * 判定一个成就是主线还是支线（V17）
+ * @param {object} a 成就
+ * @returns {boolean} true = 主线
+ */
+function isMainAch(a) {
+  if (!a || typeof a.check !== 'function') return false;
+  let src;
+  try { src = a.check.toString(); } catch (e) { return false; }
+  /* ★ 主线判据：**引用了经营推进类的系统**。
+     这些字段的变化直接对应「这局在推什么」；
+     而 stats/flags 那类多是统计里程碑与一次性挑战（支线）。 */
+  return /s\.(st|shop|venue|recipes|rep|up|managers|staff)\b/.test(src);
+}
+
+/** 主线/支线的展示元数据 */
+const ACH_TIERS = {
+  main: {
+    key: 'main', label: '主线 · 经营推进', emoji: '🎯',
+    /* 主线的作用是回答「这局走到哪了」，所以要给整体进度 */
+    desc: '跟着这局的节奏推进：开店、做配方、提声望、扩规模。',
+  },
+  side: {
+    key: 'side', label: '支线 · 单点挑战', emoji: '✨',
+    desc: '独立的小目标，达成与否都不影响本局节奏 —— 顺手就做。',
+  },
+};
+
+/**
+ * 一个 tier 的区块（V17）
+ *
+ * ★ 真正压缩高度的关键：**已达成的一批折叠起来**。
+ *   只做「主线/支线两层」的话，44 行还是一个不少地铺开 ——
+ *   分层只是让它们「有顺序」，并没有让页面变短。
+ *   而玩家打开成就页的典型场景是「找下一个能做的」，
+ *   已达成的对那一刻**没有参考价值**。
+ *   ★ 所以：未达成平铺（那是待办），已达成折成一行摘要
+ *     （那是成就墙，随时可展开看）。
+ *   ★ 这也解释了为什么不能只靠「精简文案」——
+ *     文案省不了几行，折叠才省得了。
+ */
+function achTierHtml(s, tier, list) {
+  const got = list.filter(a => s.ach[a.id]);
+  const wait = list.filter(a => !s.ach[a.id]);
+  const meta = ACH_TIERS[tier];
+  /* 玩家手动展开过就一直展开（尊重主动操作） */
+  const key = 'ach' + tier;
+  const showGot = UI.achShowGot && UI.achShowGot[tier];
+  const foldGot = got.length > 0;
+
+  let h = `<div class="card ach-tier ${tier}">
+    <div class="card-h">${meta.emoji} ${meta.label}
+      <span class="ch-sub">${got.length}/${list.length}</span></div>
+    <div class="ach-tier-d">${meta.desc}</div>`;
+
+  /* 待办：平铺 */
+  for (const a of wait) h += achRowHtml(s, a);
+  if (!wait.length) {
+    h += `<div class="ach-all-done">🎉 全部达成</div>`;
+  }
+
+  /* 已达成：折叠成一行 */
+  if (foldGot) {
+    h += `<button class="ach-fold" data-act="achfold" data-id="${tier}">
+      <span>✅ 已达成 ${got.length} 个</span>
+      <span class="ach-fold-a">${showGot ? '收起 ▴' : '展开 ▾'}</span>
+    </button>`;
+    if (showGot) for (const a of got) h += achRowHtml(s, a);
+  }
+  h += `</div>`;
+  return h;
+}
+
 UI.renderAch = function () {
   const s = window.S; if (!s) return;
   const got = ACHIEVEMENTS.filter(a => s.ach[a.id]).length;
-  let h = `<div class="card"><div class="card-h">🏅 成就 <span class="ch-sub">${got}/${ACHIEVEMENTS.length}</span></div>
-    <div style="font-size:var(--fs-md);color:var(--txt3);margin-bottom:10px">本局达成给现金；<b>跨局首次</b>达成额外给品牌声望 ★（${achStarText()}，永久保留）。</div>`;
-  for (const a of ACHIEVEMENTS) {
-    const on = !!s.ach[a.id];
-    h += `<div class="ach ${on ? 'got' : ''}">
-      <div class="ach-e">${a.emoji}</div>
-      <div class="ach-b"><div class="ach-n">${a.name}</div><div class="ach-d">${a.desc}</div></div>
-      <div class="ach-r">${on ? '✅ 已达成' : (a.reward.cash ? money(a.reward.cash) : '') + (a.reward.bp ? ' · ' + a.reward.bp + '★' : '')}</div>
-    </div>`;
-  }
-  h += `</div>`;
+
+  const main = ACHIEVEMENTS.filter(isMainAch);
+  const side = ACHIEVEMENTS.filter(a => !isMainAch(a));
+
+  /* ★ 进度条放最上面：一屏之内要回答「我完成了多少」 */
+  const pct = ACHIEVEMENTS.length ? Math.round(got / ACHIEVEMENTS.length * 100) : 0;
+  let h = `<div class="card ach-top">
+    <div class="card-h">🏅 成就
+      <span class="ch-sub">${got}/${ACHIEVEMENTS.length} · ${pct}%</span></div>
+    <div class="ach-bar"><i style="width:${pct}%"></i></div>
+    <div class="ach-note">本局达成给现金；<b>跨局首次</b>达成额外给品牌声望 ★
+      （${achStarText()}，永久保留）。</div>
+  </div>`;
+
+  h += achTierHtml(s, 'main', main);
+  h += achTierHtml(s, 'side', side);
+
   $('panel-ach').innerHTML = h;
 };
+
+/**
+ * 单个成就的行（V17 精简）
+ * ★ 压缩点：原来 desc 是完整一句话，直接占一整行；
+ *   现在未达成时 desc 只在 title 里（悬停可见），
+ *   行内只留「名字 + 奖励」——玩家扫列表时看的是这两个。
+ */
+function achRowHtml(s, a) {
+  const on = !!s.ach[a.id];
+  const reward = (a.reward.cash ? money(a.reward.cash) : '')
+    + (a.reward.bp ? (a.reward.cash ? ' · ' : '') + a.reward.bp + '★' : '');
+  return `<div class="ach ${on ? 'got' : ''}" title="${esc(a.desc)}">
+    <div class="ach-e">${a.emoji}</div>
+    <div class="ach-b"><div class="ach-n">${esc(a.name)}</div>
+      ${on ? '' : `<div class="ach-d">${esc(a.desc)}</div>`}</div>
+    <div class="ach-r">${on ? '✅' : reward}</div>
+  </div>`;
+}
 
 /* ---------------- 营业舞台 ---------------- */
 UI.stageInit = function () {

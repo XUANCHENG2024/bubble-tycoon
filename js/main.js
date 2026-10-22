@@ -306,6 +306,16 @@ function doAct(act, el) {
   const s = window.S;
   /* 部分分支可以不带元素调用（如再次送礼），这里兜住避免出现 TypeError */
   const id = (el && el.dataset) ? el.dataset.id : undefined;
+  /* ★ V17 修商圈页「点了没反应」的根因：
+     商圈页有一批按钮用 `data-b="门店号"` 传参
+     （smgrh / smgrfire / srename / sfund / stoggleup），
+     而这里**从来没取过 dataset.b**——
+     于是一旦某个分支里写 `+br`，读到的就是一个**未定义标识符**，
+     直接抛 ReferenceError。表现为：按钮存在、能看见、点了毫无反应。
+     ★ 为什么会长期没人发现：这些 case 从没被自动化点过
+       （smoke 只测「面板能否渲染」，不测「每个按钮点了会怎样」）。
+     ★ 这里补上就一次修好全部 5 个，不必逐个改 case。 */
+  const br = (el && el.dataset) ? el.dataset.b : undefined;
 
   switch (act) {
     /* --- 标题页 ---
@@ -497,6 +507,58 @@ function doAct(act, el) {
     }
 
     /* --- 研发 --- */
+    case 'achfold': {
+      /* ★ V17：展开/收起「已达成」那批成就。
+         折叠不是为了省体积，是为了**对焦**：玩家打开成就页
+         是来找下一个能做的，已达成的那一屏对那一刻没参考价值。 */
+      UI.achShowGot = UI.achShowGot || {};
+      UI.achShowGot[id] = !UI.achShowGot[id];
+      UI.renderPanel(UI.tab);
+      SFX.click();
+      break;
+    }
+    case 'stoggleup': {
+      /* ★ V17 修 bug：商圈页「店铺升级」的折叠箭头以前点了没反应。
+         根因：UI 画了箭头，但没有 case 分支也没有收起逻辑 —— 做了一半。
+         ★ 状态放 UI.storeUpOpen（按门店号），不存档：
+           折叠是临时浏览状态，不该占存档位。 */
+      UI.storeUpOpen = UI.storeUpOpen || {};
+      const cur = UI.storeUpOpen[br];
+      /* 没记录过就按「有没有投入」定初值：
+         有投入默认展开（刚买完要看得见），没投入默认收起（不占版面）。 */
+      const store = storeByBranch(s, +br);
+      const had = store && STORE_UPGRADES.some(u => storeUpLevel(s, store, u.id) > 0);
+      UI.storeUpOpen[br] = cur === undefined ? !had : !cur;
+      UI.renderPanel(UI.tab);
+      SFX.click();
+      break;
+    }
+    case 'candrefresh': {
+      /* ★ V17：手动刷新候选人。
+         冷却检查在引擎侧（candCd）—— UI 只是把结果说出来。
+         ★ 冷却期间按钮在 UI 层已 disabled，这里仍要兜一层：
+           事件可能被合成派发绕过 disabled（也为了脏存档安全）。 */
+      const r = refreshCandidates(s);
+      if (r && r.ok) {
+        SFX.coin();
+        UI.toast(`🔄 换到 ${r.n} 位新候选人`, 'ok');
+      } else {
+        UI.toast((r && r.msg) || '暂时不能刷新', 'err');
+      }
+      UI.renderPanel(UI.tab);
+      break;
+    }
+    case 'foldtree': {
+      /* ★ V17：研发树分组折叠。
+         体检实测研发页 HTML 体积 93669 字符 / 1839 标签，是第二名的 3.5 倍；
+         而其中 14 个分组是非本店的 —— 提示就写着「需切换经营城市」，
+         把它们全展开等于让玩家滚过不能点的内容。 */
+      UI.collapsed = UI.collapsed || {};
+      UI.collapsed[id] = !UI.collapsed[id];
+      UI.renderPanel(UI.tab);
+      SFX.click();
+      break;
+    }
     case 'toing': {
       /* ★ V16：配方卡上的原料 →跳到原料市场并高亮。
          ★ 目标可能在市场列表的中后段（20+ 行），
@@ -1148,6 +1210,11 @@ function loop(now) {
   const dt = (now - lastT) / 1000;
   lastT = now;
   const s = window.S;
+  /* ★ V17：候选人刷新冷却**必须与阶段无关**地递减 ——
+     放在 `if (phase==='open')` 外面的话，
+     玩家在备货阶段点了刷新，冷却永远不减 ——
+     表现为「按钮一直灰着但不知道为什么」。 */
+  if (s) tickCooldowns(s, dt);
   if (s && s.phase === 'open' && s.sim) {
     tick(s, dt);
     UI.stageSync();

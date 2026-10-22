@@ -591,6 +591,7 @@ function newGame(diffKey, bpBonus, sigCarry) {
        ★ 初始只有总店（branch 1，主店）。 */
     stores: [], nextStoreId: 1,
     staff: [], candidates: [], nextStaffId: 1,
+    candCd: 0,          /* V17 候选人手动刷新冷却（秒）*/
     /* V11 店长系统：已招店长 / 各分店候选池 / 店长 id 计数器 */
     managers: [], mgrCand: {}, nextMgrId: 1,
     /* V13.6：常客档案 id → { id, type, face, fav, name } */
@@ -833,8 +834,28 @@ function refreshMarket(s) {
     s.prices[g.id] = Math.round(clamp(p, g.base * 0.45, g.base * 2.3) * 100) / 100;
   }
 }
-function refreshCandidates(s, force) {
-  if (!force && RNG.next() < 0.25) return;
+function refreshCandidates(s, auto) {
+  /* ★ V17：手动刷新的冷却。
+   * 原来只有 `if (force && RNG.next() < 0.25) return;` ——
+   * 也就是说**每天自动刷新有 75% 概率触发**。
+   * ★ 一旦给玩家一个「刷新」按钮而没有冷却，
+   *   玩家会连点刷到出 SSR（skill 1.35 + 有特质）为止 ——
+   *   招聘就变成了「按刷新键直到中奖」，经营决策被瓦解。
+   *
+   * ★ 参数语义改了（原来叫 force，现在叫 auto）：
+   *   auto=true  → 系统行为（每日刷新、店长兜底招人）——
+   *                 **不受冷却限制**，否则可能出现
+   *                 「冷却中 → 每天不刷 → 店长永远招不到人」
+   *   auto=undefined → 玩家手动点刷新 —— 走冷却
+   * ★ 改名是必须的：原来那个 force 的字面意思
+   *   「强制」会让人以为能绕过一切检查，那是错的。 */
+  if (!s) return { ok: false, msg: '无局面' };
+  if (!auto) {
+    const cd = num(s.candCd, 0);
+    if (cd > 0) {
+      return { ok: false, msg: `还要等 ${Math.ceil(cd)} 秒`, cd: cd };
+    }
+  }
   const n = rndInt(2, 3);
   s.candidates = [];
   for (let i = 0; i < n; i++) {
@@ -848,7 +869,22 @@ function refreshCandidates(s, force) {
       fee: Math.round(260 * Math.pow(1.45, s.staff.length) * diffOf(s).costMult),
     });
   }
+  /* ★ 只有**手动**刷新才进入冷却。
+   ★ 系统刷新（每日自动 / 店长兜底 / 开局初始化）**不设冷却** ——
+     否则玩家开局点第一下刷新就看到「还要等 8 秒」，
+     而此时玩家根本没刷新过 —— 表现为「按钮是坏的」，
+     第一次交互就坏掉是最差的体验。
+   ★ 8 秒的取法：
+     · 短到不会觉得「按不动」（3 秒以下会像坏了）
+     · 长到连点 8 次才能凑出一屏候选（否则就是纯刷运气）
+   ★ 冷却期间 hireStaff 仍能招已有候选人 ——
+     冷却只限制「换一批」，不该限制「用手上这批」。 */
+  if (!auto) s.candCd = CAND_REFRESH_CD;
+  return { ok: true, n: s.candidates.length, cd: num(s.candCd, 0) };
 }
+
+/** 候选人手动刷新冷却（秒） */
+const CAND_REFRESH_CD = 8;
 
 /* ---------------- 采购 / 库存 ---------------- */
 function buyIng(s, id, qty, markup) {
@@ -2821,6 +2857,24 @@ function togglePause(s, force) {
   return s.sim.paused;
 }
 
+/**
+ * 候选人刷新冷却递减（V17）
+ *
+ * ★ 为什么单独一个函数而不是塞进 tick()：
+ *   tick 只在「营业中且未暂停」时跑 —— 而玩家在**备货阶段**（开门前）
+ *   也会看员工页、点刷新。冷却不递减的话，
+ *   玩家在备货阶段点一次刷新，接下来一整天都转不出来
+ *   —— 表现为「按钮灰了但不知道为什么」。
+ *   ★ 所以冷却必须**与阶段无关**地走真实时间。
+ *
+ * @param {object} s 状态
+ * @param {number} dt 秒
+ */
+function tickCooldowns(s, dt) {
+  if (!s) return;
+  if (s.candCd > 0) s.candCd = Math.max(0, s.candCd - dt);
+}
+
 function tick(s, dt) {
   const sim = s.sim;
   if (!sim || s.phase !== 'open') return;
@@ -3129,7 +3183,7 @@ function nextDay(s) {
   rollNews(s);
   refreshMarket(s);
   for (const st of s.staff) st.stamina = clamp(st.stamina + 34, 0, 100);
-  refreshCandidates(s, false);
+  refreshCandidates(s, true);   /* V17：系统行为，不受手动刷新冷却限制 */
   /* V11 店长日常：新候选补货 + 每日自动补员。
      放在 refreshCandidates 之后 —— 店长招人要用候选人池，
      池子必须先刷新过，否则店长会永远招不到人（候选人被招空后不补）。 */

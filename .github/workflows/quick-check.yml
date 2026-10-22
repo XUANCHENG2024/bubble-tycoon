@@ -78,6 +78,9 @@ jobs:
       - name: 原料↔配方双向关联（反向索引 / 跳转 / 状态提示）
         run: node tools/check-crosslink.js
 
+      - name: 死按钮（每个 data-act 都有处理路径且点得动）
+        run: node tools/check-deadbtn.js
+
       - name: 主流程
         run: node tools/e2e-flow.js
 

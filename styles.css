@@ -1554,3 +1554,145 @@ body::before {
 @media (prefers-reduced-motion: reduce) {
   .jump-hl { animation: none; }
 }
+
+/* ---------- V17：折叠 ---------- */
+/* 分组头可点：给手型光标 + hover 反馈，让玩家知道「能点」 */
+.cui-head.foldable { cursor: pointer; user-select: none; }
+.cui-head.foldable:hover { background: rgba(255, 255, 255, .05); }
+/* 箭头：默认收起（▸），展开时旋转（▾） */
+.fold-arrow {
+  margin-left: auto; font-size: var(--fs-sm); color: var(--txt3);
+  transition: transform .2s ease; flex: 0 0 auto;
+}
+.fold-arrow.open { transform: rotate(180deg); }
+/* 折叠态：隐藏内部卡片，只留摘要 */
+.cui-group.fold .cui-grid,
+.cui-group.fold .tree-stage { display: none; }
+.cui-group.fold .cui-head { border-bottom: none; }
+.fold-sum {
+  padding: 0 10px 8px 30px; font-size: var(--fs-xs); color: var(--txt3);
+}
+@media (prefers-reduced-motion: reduce) {
+  .fold-arrow { transition: none; }
+}
+
+/* ---------- V17：升级页信息层级 ---------- */
+/* 总览条：四个数字一屏看完，不用逐行加 */
+.upsum {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px;
+  margin-bottom: 10px;
+}
+.upsum-i {
+  padding: 7px 4px; border-radius: 9px; text-align: center;
+  background: rgba(255, 255, 255, .045); border: 1px solid rgba(255, 255, 255, .07);
+}
+.upsum-i b {
+  display: block; font-size: var(--fs-lg); font-weight: 800;
+  color: var(--txt); line-height: 1.15;
+}
+.upsum-i span { font-size: var(--fs-xs); color: var(--txt3); }
+.upsum-i.good b { color: var(--green); }
+.upsum-i.dim { opacity: .5; }
+
+/* 三层行：现状 / 变化 / 决策 */
+.up-row.up-v17 { align-items: center; }
+.up-lvnow {
+  font-size: var(--fs-sm); color: var(--cyan); font-weight: 700; margin-left: 4px;
+}
+.up-lvnow i { font-style: normal; color: var(--txt3); font-weight: 400; }
+/* ① 现状：灰调，表示「已经拿到手的东西」 */
+.up-have {
+  font-size: var(--fs-xs); color: var(--txt3); margin-top: 2px;
+}
+.up-have span { color: var(--txt2); }
+/* ② 变化：青色 + 箭头前缀，表示「还没拿到的增量」 */
+.up-next {
+  font-size: var(--fs-xs); color: var(--cyan); margin-top: 2px; font-weight: 600;
+}
+/* ③ 决策：按钮 + 缺口 */
+.up-buy { text-align: right; flex: 0 0 auto; }
+.up-gap { font-size: var(--fs-xs); color: var(--red); margin-top: 2px; }
+.up-max { font-size: var(--fs-md); color: var(--green); font-weight: 800; flex: 0 0 auto; }
+
+/* 窄屏：总览条改 2×2，避免数字被压变形 */
+@media (max-width: 340px) {
+  .upsum { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ---------- V17：招聘区（店员/店长分开）---------- */
+.hirecard { border-left: 2px solid rgba(53, 229, 240, .3); }
+/* 店长区用琥珀色边，跟店员区一眼能分开 */
+.hirecard + .hirecard { border-left-color: rgba(255, 194, 71, .3); }
+.hire-empty {
+  font-size: var(--fs-sm); color: var(--txt3); padding: 6px 0 8px;
+}
+.hire-note {
+  font-size: var(--fs-xs); color: var(--txt3); line-height: 1.6;
+  padding: 5px 7px; margin-bottom: 7px; border-radius: 7px;
+  background: rgba(255, 255, 255, .035);
+}
+.hire-note b { color: var(--amber); }
+
+/* 候选人行：固定头像列 + 可伸缩信息列 + 操作列 */
+.hire-cand { align-items: flex-start; gap: 8px; }
+.cand-e { font-size: var(--fs-display); flex: 0 0 auto; line-height: 1; }
+.cand-b { flex: 1; min-width: 0; }
+.cand-n {
+  font-weight: 800; font-size: 13.5px;
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+}
+.cand-tr {
+  font-size: var(--fs-xs); padding: 1px 6px; border-radius: 99px;
+  background: rgba(139, 92, 255, .3); color: var(--txt);
+}
+.cand-f {
+  display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 3px;
+  font-size: var(--fs-xs);
+}
+.cf-k { color: var(--txt3); }
+.cf-v { color: var(--txt2); font-weight: 700; margin-right: 4px; }
+.cand-desc {
+  font-size: var(--fs-xs); color: var(--txt3); margin-top: 3px; line-height: 1.5;
+}
+
+/* 操作行：刷新 + 团建 */
+.hire-actions { display: flex; gap: 7px; margin-top: 9px; }
+
+/* 冷却中的刷新按钮：给一点视觉提示，让玩家知道「在等」而不是「坏了」 */
+.btn:disabled[data-act="candrefresh"] { opacity: .6; }
+
+/* ---------- V17：成就页两层结构 ---------- */
+.ach-top { padding-bottom: 10px; }
+/* 顶部总进度条：一屏之内回答「完成了多少」 */
+.ach-bar {
+  height: 6px; border-radius: 99px; overflow: hidden;
+  background: rgba(255, 255, 255, .08); margin-bottom: 7px;
+}
+.ach-bar i {
+  display: block; height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--cyan), var(--green), var(--amber));
+  transition: width .4s cubic-bezier(.2, .9, .3, 1);
+}
+.ach-note { font-size: var(--fs-sm); color: var(--txt3); line-height: 1.6; }
+
+/* 主线 / 支线：左边框色区分 */
+.ach-tier.main { border-left: 2px solid rgba(53, 229, 240, .4); }
+.ach-tier.side { border-left: 2px solid rgba(139, 92, 255, .32); }
+.ach-tier-d { font-size: var(--fs-xs); color: var(--txt3); margin-bottom: 8px; }
+.ach-all-done {
+  font-size: var(--fs-sm); color: var(--green); padding: 6px 0; text-align: center;
+}
+/* 已达成批次的折叠条 */
+.ach-fold {
+  display: flex; justify-content: space-between; align-items: center; width: 100%;
+  margin-top: 8px; padding: 7px 9px; border-radius: 8px; cursor: pointer;
+  background: rgba(255, 255, 255, .05); color: var(--txt3);
+  border: 1px solid rgba(255, 255, 255, .09);
+  font-size: var(--fs-sm);
+}
+.ach-fold:hover { background: rgba(255, 255, 255, .09); color: var(--txt2); }
+.ach-fold-a { color: var(--cyan); font-size: var(--fs-xs); }
+
+/* 已达成的行更淡（它们是背景，不是待办） */
+.ach.got { opacity: .6; }
+.ach.got .ach-d { display: none; }

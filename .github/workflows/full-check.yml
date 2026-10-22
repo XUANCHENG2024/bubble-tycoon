@@ -29,7 +29,7 @@ jobs:
           set -e
           for t in probe dom-smoke browser-smoke minigame-smoke mobile-smoke \
                    symbol-check xss-verify e2e-flow verify-checklist \
-                   diag-coupling diag-edge diag-ui check-doc-refs check-escape check-leak check-extreme check-save-compat check-iso check-iso-stage check-crosslink; do
+                   diag-coupling diag-edge diag-ui check-doc-refs check-escape check-leak check-extreme check-save-compat check-iso check-iso-stage check-crosslink check-deadbtn; do
           # 重复代码：8 行以上且非数据表
           node tools/check-dup.js 8 || exit 1
             printf '%-20s ' "$t"
