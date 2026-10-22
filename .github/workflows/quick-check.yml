@@ -69,6 +69,12 @@ jobs:
       - name: 存档向后兼容（迁移链 / 老存档实跑 / 脏版本输入）
         run: node tools/check-save-compat.js
 
+      - name: 等距投影数学（互逆 / 排序 / 性能）
+        run: node tools/check-iso.js
+
+      - name: 伪 3D 舞台（多视口可达 / 深度顺序 / 输入不变）
+        run: node tools/check-iso-stage.js
+
       - name: 主流程
         run: node tools/e2e-flow.js
 

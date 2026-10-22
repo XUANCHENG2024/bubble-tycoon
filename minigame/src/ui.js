@@ -1692,14 +1692,185 @@ var STATION_GRIDS = [
   { cols: 2, sh: 76 }, { cols: 3, sh: 76 }, { cols: 4, sh: 76 },
   { cols: 4, sh: 62 }, { cols: 4, sh: 52 },
 ];
+/**
+ * 挑一套装得下的工位网格（V15 改成等距口径）
+ *
+ * ★ 原判定是 `rows * (g.sh + 8) - 8 <= viewH`（矩形占高）。
+ *   等距下纵向占高 = maxDepth × (TH/2) + 常数，TH 又由 TW 决定 ——
+ *   两套公式的量级不同，用矩形判据会**选错列数**：
+ *   9 个工位在 390 屏上，矩形判据说「2 列 3 行 = 252px 装得下」，
+ *   而等距实际只占约 170px（装得下却显得空）；
+ *   反过来 20 个工位在小屏上，矩形判据偏乐观，选出横向挤爆的列数。
+ *
+ * ★ 现在按等距占高判：遍历候选网格时用**同款公式**估一遍，
+ *   装不下的就往后试（更多列 → 每行更窄）。
+ *   TH 用候选 sh 反推（TH ≈ sh*0.5，等距纵向占高的经验比例）。
+ */
 function pickStationGrid(n, w, viewH) {
   if (!(n > 0)) return { cols: 2, sh: 76 };
   for (var i = 0; i < STATION_GRIDS.length; i++) {
     var g = STATION_GRIDS[i];
     var rows = Math.ceil(n / g.cols);
-    if (rows * (g.sh + 8) - 8 <= viewH) return g;
+    /* ★ 真实最大深度（不是最后一行 —— 等距下「最后一个」未必最靠下）*/
+    var md = 0;
+    for (var q = 0; q < n; q++) {
+      var d = (q % g.cols) + Math.floor(q / g.cols);
+      if (d > md) md = d;
+    }
+    /* 等距纵向占高：深度每加 1，屏幕 y 下移 TH/2 */
+    var thEst = g.sh * 0.5;
+    var isoH = md * (thEst / 2) + thEst * 2.4 + g.sh * 0.5;
+    if (Math.max(g.sh, isoH) <= viewH) return g;
   }
   return STATION_GRIDS[STATION_GRIDS.length - 1];
+}
+
+/* ============================================================
+ *  V15 伪 3D 舞台（等距俯视斜角）
+ * ============================================================
+ *
+ * ★ 改造范围严格限定在**表现层**：
+ *   引擎（js/engine.js）、玩法数值、关卡、输入 action 一律没动。
+ *   数据结构不变（sim.stations / sim.queue 照旧），
+ *   只是把「矩形网格 + 矩形卡片」换成「菱形地面 + 立方体工位」。
+ *
+ * ★ 为什么工位用**立方体**而不是贴图：
+ *   等距视角下手写一张斜角贴图在两种分辨率下都会糊；
+ *   而立方体是**参数化**的（TW/TH/TZ），改一个数就适配所有屏幕。
+ *   代价只是每个工位多画 3 个面（顶 + 两个侧）。
+ *
+ * ★ 深度顺序：工位**按 gx+gy 排**（越靠前越晚画）。
+ *   等距里「屏幕 y 大的 = 更靠前」，而 y ∝ (gx+gy)。
+ *   ★ 同深度按工位序稳定 —— 两个工位斜对着时不会在帧间跳变。
+ *
+ * ★ 拾取：**不用反投影**，仍给 GFX.addHit 一个矩形。
+ *   ★ 为什么：反投影只能给出菱形的**中心归属格**，
+ *     而点在立方体侧面（屏幕上偏下偏左）会算到别的格子；
+ *     更根本的是「玩家点哪都要有反应」，菱形反投影会漏掉边缘。
+ *   ★ 矩形重叠的处理：addHit 的 hitAt 是**从后往前找**（后登记优先，
+ *     见 gfx.js:229），所以**按绘制顺序正序登记**即可——
+ *     后画的（更靠前的）先被测到，与视觉遮挡一致。
+ */
+
+/** 工位的深度排序器（复用数组，不逐帧分配） */
+var ISO_STAGE_SORT = isoSorter(48);
+
+/**
+ * 画一个工位（立方体 + 顶面信息 + 进度）。
+ *
+ * @param {object} ctx canvas
+ * @param {number} cx,cy 立方体底面中心的屏幕坐标
+ * @param {number} w     立方体宽（像素）
+ * @param {number} h     立方体高（像素）
+ * @param {number} pulse V14.2 的点击脉冲 0~1（0 = 无）
+ * @param {boolean} compact 小尺寸模式（省掉次要信息）
+ * @param {object} T2 颜色表
+ * @returns {{x:number,y:number,w:number,h:number}} 建议的命中区
+ */
+function drawStationIso(ctx, cx, cy, st, w, h, pulse, compact, T2) {
+  var busy = !!st.order;
+  var a = w / 2;
+  /* ★ 忙碌时立方体更高（"在忙"），空闲时矮 ——
+     高度差本身就是状态信号，不用读文字就知道哪个在出杯。 */
+  var boxH = (busy ? h * 0.62 : h * 0.34);
+  var lift = 1 + 0.18 * pulse;          /* 刚被点击时轻微「弹起」*/
+  var topY = cy - boxH * lift;
+  var p = a * (1 + 0.18 * pulse);
+  var b = ISO.TH * 0.5;
+
+  /* ① 阴影贴地（先画，会被立方体压住一半——这才是正确的层次）*/
+  isoShadow(ctx, (cx - ISO.ox) / (ISO.TW / 2), 0, a * 0.95, ISO.TH * 0.40,
+    busy ? 0.30 : 0.18);
+
+  /* ② 两个侧面（光从右上来：右面比左面亮）*/
+  var col = busy
+    ? { top: 'rgba(53,229,240,.30)', right: 'rgba(53,229,240,.22)', left: 'rgba(53,229,240,.12)', edge: 'rgba(53,229,240,.55)' }
+    : { top: 'rgba(255,255,255,.10)', right: 'rgba(255,255,255,.05)', left: 'rgba(0,0,0,.22)', edge: T2.line };
+
+  ctx.beginPath();
+  ctx.moveTo(cx + p, topY); ctx.lineTo(cx + p, cy);
+  ctx.lineTo(cx, cy + b); ctx.lineTo(cx, topY + b);
+  ctx.closePath();
+  ctx.fillStyle = col.right; ctx.fill();
+
+  ctx.beginPath();
+  ctx.moveTo(cx - p, topY); ctx.lineTo(cx - p, cy);
+  ctx.lineTo(cx, cy + b); ctx.lineTo(cx, topY + b);
+  ctx.closePath();
+  ctx.fillStyle = col.left; ctx.fill();
+
+  /* ③ 顶面 */
+  ctx.beginPath();
+  ctx.moveTo(cx, topY - b); ctx.lineTo(cx + p, topY);
+  ctx.lineTo(cx, topY + b); ctx.lineTo(cx - p, topY);
+  ctx.closePath();
+  ctx.fillStyle = col.top; ctx.fill();
+  if (col.edge) { ctx.strokeStyle = col.edge; ctx.lineWidth = 1; ctx.stroke(); }
+
+  /* ④ 顶面内容 */
+  if (st.order) {
+    var rr = recipeById(st.order.rid) || { emoji: '🥤' };
+    var n = num(st.order.cups, 1);
+    text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji,
+      cx, topY - b * 0.2, { size: compact ? FS.md : FS.lg, align: 'center' });
+  } else {
+    var nm = st.isBoss ? '👑' : (st.worker ? st.worker.emoji : '·');
+    text(ctx, nm, cx, topY - b * 0.2,
+      { size: compact ? FS.md : FS.lg, align: 'center' });
+  }
+
+  /* ⑤ 进度条贴在正面偏下，像台面上的出杯进度 */
+  if (st.order) {
+    var pw = a * 1.5, ph = 4;
+    GFX.bar(ctx, cx - pw / 2, cy - boxH * lift * 0.32, pw, ph,
+      num(st.order.progress), { color: T2.cyan });
+  }
+
+  /* ⑥ 员工名（紧凑模式省略——挤不下）*/
+  if (!compact && st.worker) {
+    text(ctx, st.worker.name, cx, cy + b + 3,
+      { size: FS.xs, align: 'center', color: T2.txt3, maxW: w });
+  }
+
+  /* ⑦ 命中区：立方体外接矩形 + 2px 余量 */
+  var hitTop = topY - b - 2;
+  return { x: cx - p - 2, y: hitTop, w: p * 2 + 4, h: (cy + b) - hitTop + 2 };
+}
+
+/**
+ * 画一个排队顾客（站在地面上的小人 + 脚下耐心条）。
+ *
+ * ★ 特殊顾客用**金框**而不是角标 —— 等距小图上角标会糊成一个点。
+ */
+function drawGuestIso(ctx, cx, cy, c, T2) {
+  var r = recipeById(c.rid) || { emoji: '🥤' };
+  var face = c.face || '🙂';
+  var bob = Math.sin((c.wait || 0) * 3.2) * 1.5;   /* 轻微上下浮动：有等待感 */
+  var col = c.special
+    ? { body: 'rgba(255,194,71,.30)', edge: 'rgba(255,194,71,.85)', shadow: 0.32 }
+    : { body: 'rgba(255,255,255,.16)', edge: T2.line, shadow: 0.26 };
+  var hgt = 20 + bob;
+  var topY = cy - hgt;
+  /* 阴影画在 (cx,cy) 处：用反投影把它换算回世界坐标，
+     这样阴影的横向压缩比例与地面一致（看起来是贴在斜面上）。 */
+  isoShadow(ctx, (cx - ISO.ox) / (ISO.TW / 2), 0, 11, ISO.TH * 0.24, col.shadow);
+
+  ctx.beginPath();
+  ctx.moveTo(cx - 11, topY + ISO.TH * 0.2);
+  ctx.lineTo(cx + 11, topY + ISO.TH * 0.2);
+  ctx.lineTo(cx + 11, cy);
+  ctx.lineTo(cx - 11, cy);
+  ctx.closePath();
+  ctx.fillStyle = col.body; ctx.fill();
+  ctx.strokeStyle = col.edge; ctx.lineWidth = 1; ctx.stroke();
+
+  text(ctx, face, cx, topY - 2, { size: FS.lg, align: 'center' });
+  text(ctx, c.special ? r.emoji + ' ★' : r.emoji,
+    cx, topY + 12,
+    { size: c.special ? FS.xs : FS.sm, align: 'center', color: c.special ? T2.amber : 0 });
+  var left = 1 - num(c.wait) / Math.max(0.001, num(c.patience));
+  GFX.bar(ctx, cx - 10, cy + 2, 20, 3, left, { color: left < 0.3 ? T2.red : T2.green });
+  return { cx: cx, cy: cy, top: topY };
 }
 
 function drawStage(ctx, L, s) {
@@ -1731,33 +1902,54 @@ function drawStage(ctx, L, s) {
   }
   y += 48;
 
-  /* 队列
-     队伍长的时候不能让它无限往下长：队列每多一行，出杯位区就少 58px，
-     而点位才是玩家要点的东西。这里最多显示 3 行（约 15~18 人，已覆盖等位座上限），
-     多出来的人数在标题里体现，不再继续挤占下面的工位区。 */
+  /* 队列（V15 等距）
+     ★ 队列沿**斜边**排（每往右上一格 = 队伍往后一位），
+       这样「队伍往门口走」变成了可见的纵深，而不只是横向一排头像。
+       · 斜向单位是 (ISO.TW/2, -ISO.TH/2) —— 与等距的主轴一致
+       · 首排贴左下（离观众最近），后排往右上退
+     ★ 人数上限沿用原来的「最多 3 排」策略：
+       队伍一屏放不下不是问题，玩家要点的是工位而不是队列。 */
   var q = sim.queue || [];
-  var qw = 46, per = Math.max(1, Math.floor((w + 6) / (qw + 6)));
   var QROWS = 3;
+  /* 每排的斜向步长：横向 (TW/2)，纵向 -TH/2（即往右上退）*/
+  var qStepX = ISO.TW * 0.5;
+  var qStepY = -ISO.TH * 0.5;
+  var per = Math.max(3, Math.floor(w / Math.max(8, qStepX)) + 1);
   var qShow = Math.min(q.length, per * QROWS);
   text(ctx, '🚶 排队中 ' + q.length + '/' + queueCap(s)
-    + (q.length > qShow ? '（下方显示前 ' + qShow + ' 位）' : ''),
+    + (q.length > qShow ? '（下方显示前 ' + qShow + '位）' : ''),
     x, y, { size: FS.sm, color: T.txt3 });
-  y += 18;
-  for (var qi = 0; qi < qShow; qi++) {
-    var c = q[qi];
-    var cx = x + (qi % per) * (qw + 6);
-    var cy = y + Math.floor(qi / per) * 58;
-    var r = recipeById(c.rid) || { emoji: '🥤' };
-    /* V7 事件型顾客：金色描边 + ★ 角标，一眼认出该优先伺候谁 */
-    GFX.fillRR(ctx, cx, cy, qw, 50, 10, c.special ? 'rgba(255,194,71,.14)' : T.card,
-      c.special ? 'rgba(255,194,71,.75)' : T.line);
-    text(ctx, c.face || '🙂', cx + qw / 2, cy + 2, { size: FS.xl, align: 'center' });
-    if (c.special) text(ctx, '★', cx + qw - 8, cy + 1, { size: FS.xs, align: 'right', color: T.amber });
-    text(ctx, r.emoji, cx + qw / 2, cy + 24, { size: FS.sm, align: 'center' });
-    var left = 1 - num(c.wait) / Math.max(0.001, num(c.patience));
-    GFX.bar(ctx, cx + 4, cy + 42, qw - 8, 4, left, { color: left < 0.3 ? T.red : T.green });
+  y += 16;
+
+  /* 画一条「队伍斜带」作为地面引导线 —— 没有它顾客像浮在半空 */
+  if (qShow) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,.10)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    var gx0 = x + 14, gy0 = y + 44;
+    ctx.moveTo(gx0, gy0);
+    ctx.lineTo(gx0 + (per - 1) * qStepX, gy0 + (per - 1) * qStepY);
+    ctx.stroke();
+    ctx.restore();
   }
-  y += Math.ceil(qShow / per) * 58 + (qShow ? 6 : 0);
+
+  /* ★ 深度排序：按 (排, 列) 的斜向深度排。
+     靠后排（col 小）先画，靠前排（col 大）后画 → 形成正确遮挡。 */
+  isoSortReset(ISO_STAGE_SORT);
+  for (var qi = 0; qi < qShow; qi++) {
+    /* 深度 = 排*per + 列（越大越靠前）*/
+    isoSortPush(ISO_STAGE_SORT, qi, qi);
+  }
+  for (var qk = 0; qk < isoSortLen(ISO_STAGE_SORT); qk++) {
+    var qIdx = isoSortAt(ISO_STAGE_SORT, qk).p;
+    var cq = q[qIdx];
+    var col2 = qIdx % per, row2 = Math.floor(qIdx / per);
+    var qx = x + 14 + col2 * qStepX;
+    var qy = y + 44 + row2 * 38 + col2 * qStepY;
+    drawGuestIso(ctx, qx, qy, cq, T);
+  }
+  y += 60 + (Math.ceil(qShow / per) - 1) * 38 + (qShow ? 4 : 0);
 
   /* 出杯位 —— 核心交互区
      旧写法是写死 2 列 + `if (sy + sh > L.H - 96) break;`：
@@ -1775,7 +1967,53 @@ function drawStage(ctx, L, s) {
   var sw = (w - (cols - 1) * 10) / cols;
   var compact = sh < 68;
   var rows = Math.ceil(stn.length / cols);
-  var contentH = rows * (sh + 8) - 8;
+
+  /* ★ V15：等距参数**先定好**，因为滚动量要按实际占高算。
+     · TW 由可用宽度决定（格子太宽会横向溢出）
+     · 纵向占高按「最后一行 gx+gy 的投影」算 —— 等距下每行往右下斜，
+       最后一行的 y 比矩形公式算出来的大。
+     ★ 不按实际占高算的后果：**最后一个工位落在可滚动范围之外**，
+       玩家看得见却点不到 —— 那正是「不修就不能玩」的级别
+       （smoke 的「全部工位可达」断言直接抓到，少 1 个）。 */
+  isoSetScale(Math.max(44, Math.min(76, (w / Math.max(2, cols)) - 6)));
+
+  /* ★★★ 等距布局的**横向跨度**是个坑：
+     屏幕上 x ∝ (gx - gy)，而 gx∈[0,cols)、gy∈[0,rows)，
+     所以 x 的跨度是 (gx_max - gy_min) 与 (gx_min - gy_max) 两端之差
+     ≈ (cols + rows) × (TW/2)，**远大于 cols × (TW/2)**。
+     9 工位 / 4 列时跨度 ≈ (3+2)×TW/2 = 2.5×TW，而视口只有 cols×(TW/2)=2×TW
+     —— 左右各溢出 0.5×TW。
+     ★ 而 clipPush 只裁剪**垂直**方向，横向不裁 →
+       横向溢出的工位既画出去又被裁掉，玩家看不全也点不到。
+     ★ 修法：按**实际跨度**反推 TW，而不是按「每列多宽」定 TW。 */
+  var spanG = Math.max(1, Math.max(cols - 1, rows - 1)) + Math.min(cols, stn.length);
+  /*★ TW 反推：横向总跨度 = spanG × (TW/2)，要正好等于可用宽度。
+     · 跨度系数 spanG 用「gx 与 gy 的极差」而不是 cols+rows ——
+       估大了会让 TW 偏小、工位挤成一小团（实测 320 屏 20 工位时
+       只用掉 53% 宽度，白白浪费）。
+     · 再乘 1.06 的余量：菱形之间留一点缝，不然看起来是连成一片的墙。 */
+  var needTW = (w - 12) / Math.max(1, spanG / 2) * 1.06;
+  /* ★ 下限 44 而不是更小：
+     实测 320×568 + 20 工位时 needTW 约 55，取下限后工位 44px 宽，
+     emoji 与进度条都还看得清。
+     ★ 取下限的代价是**横向略溢出**，靠上面居中原点吸收；
+       纵向多出的高度正好变成 stageScroll 的可滚范围。 */
+  isoSetScale(Math.max(44, Math.min(76, needTW)));
+
+  /* ★ 占高要按**真实最大深度**算，不能用「最后一行」的深度。
+     矩形的旧假设「最后一个 = 最靠下」在等距下**不成立**：
+     9 个工位排 4 列时，si=7 (gx=3,gy=1) 深度 4，
+     而最后的 si=8 (gx=0,gy=2) 深度只有 2——
+     最靠下的那个是**中间**那个，不是最后一个。
+     ★ 算错的后果：占高偏小 → 最后一个工位落在可滚动范围外 →
+       玩家看得见却点不到（smoke 的「全部工位可达」断言直接抓到，少 1 个）。 */
+  var isoMaxDepth = 0;
+  for (var q0 = 0; q0 < stn.length; q0++) {
+    var d0 = (q0 % cols) + Math.floor(q0 / cols);
+    if (d0 > isoMaxDepth) isoMaxDepth = d0;
+  }
+  var isoContentH = isoMaxDepth * (ISO.TH / 2) + ISO.TH * 2.4 + sh * 0.5;
+  var contentH = Math.max(sh, isoContentH);
 
   VIEW.stageMax = Math.max(0, contentH - viewH);
   if (!(VIEW.stageScroll > 0)) VIEW.stageScroll = 0;
@@ -1786,70 +2024,77 @@ function drawStage(ctx, L, s) {
     + (VIEW.stageMax > 0 ? '　↕ 可上下滑动' : ''),
     x, y, { size: FS.sm, color: VIEW.stageMax > 0 ? T.cyan : T.txt3 });
 
-  GFX.clipPush(ctx, x - 2, viewTop, w + 4, viewH);
-  for (var si = 0; si < stn.length; si++) {
+GFX.clipPush(ctx, x - 2, viewTop, w + 4, viewH);
+  /* ★ V15：工位改为**等距立方体**，并按 (gx+gy) 做深度排序。
+     *
+     * 坐标：工位从「矩形网格」搬到「菱形地面」上。
+     *   列 col → gx = col，  行 row → gy = row
+     *   屏幕位置由 isoProject 算出：sx ∝ (gx-gy)，sy ∝ (gx+gy)
+     *   → 屏幕位置由 isoProject 算出：sx ∝ (gx-gy)，sy ∝ (gx+gy)
+     *   → 同一"行"在屏幕上往右下斜，天然形成 2.5D 的"纵深列"。
+     *
+     * ★ 深度：直接用 gx+gy。等距里屏幕 y 大的就是更靠前的，
+     *   而 y ∝ (gx+gy)，所以按它排即可，不需要额外算。
+     *
+     * ★ 滚动：stageScroll 沿用原逻辑（纵向滑动看更多工位），
+     *   斜角下仍然成立 —— 因为整块地面就是一个 (gx+gy) 的偏移。
+     */
+  isoSetScale(Math.max(44, Math.min(76, (w / Math.max(2, cols)) - 6)));
+  /* ★★ 原点必须按**实际的 x 极值**定位，而不是「网格左上角」。
+     x ∝ (gx-gy)，而 gx∈[0,cols)、gy∈[0,rows)：
+       · 最左的格子是 (gx=0, gy=rows-1) → 屏幕 x 偏移 = -(rows-1)×TW/2
+       · 最右的格子是 (gx=cols-1, gy=0) → 偏移 = +(cols-1)×TW/2
+     ★ 所以要把 [-left, +right] 这一段**居中到视口**，
+       ISO.ox 就是「这段的中点」在屏幕上的位置：
+         ISO.ox = 视口左 + TW/2 - minOffset + 总跨度/2
+       ★ 踩过的坑：先按「网格左上角」估 ox，再减一个 span/2，
+         结果整块地面被推到右边 —— 实测 320 屏 20 工位时最右工位
+         超出视口 62px，那个工位既画出去又被 clipPush 裁掉，
+         玩家看不见也点不到（smoke 的「全部可达」断言直接抓到少 1 个）。 */
+  var isoOffMin = 0;               /* (gx=0, gy=rows-1) 的偏移 */
+  var isoOffMax = (cols - 1) * (ISO.TW / 2);
+  if (rows > 1) isoOffMin = -(rows - 1) * (ISO.TW / 2);
+  var isoOffMid = (isoOffMin + isoOffMax) / 2;
+  ISO.ox = x + (ISO.TW / 2) - isoOffMin + isoOffMid;
+  ISO.oy = viewTop + ISO.TH * 1.6 - sc;
+
+  /* ① 地面网格：先铺一层淡淡的菱形，玩家才知道"下面有地板" */
+  for (var gg = 0; gg < stn.length; gg++) {
+    var tcx = ISO.ox + (gg % cols) * (ISO.TW / 2);
+    var tcy = ISO.oy + Math.floor(gg / cols) * (ISO.TH / 2);
+    /* ★ 菱形「地板」：颜色极淡，只提供空间暗示，不抢主体 */
+    ctx.beginPath();
+    ctx.moveTo(tcx, tcy - ISO.TH / 2);
+    ctx.lineTo(tcx + ISO.TW / 2, tcy);
+    ctx.lineTo(tcx, tcy + ISO.TH / 2);
+    ctx.lineTo(tcx - ISO.TW / 2, tcy);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255,255,255,.035)';
+    ctx.fill();
+  }
+
+  /* ② 深度排序后绘制（插入排序，复用数组，稳态零分配）*/
+  isoSortReset(ISO_STAGE_SORT);
+  for (var si0 = 0; si0 < stn.length; si0++) {
+    var gx0 = si0 % cols, gy0 = Math.floor(si0 / cols);
+    isoSortPush(ISO_STAGE_SORT, gx0 + gy0, si0);
+  }
+  for (var sk = 0; sk < isoSortLen(ISO_STAGE_SORT); sk++) {
+    var si = isoSortAt(ISO_STAGE_SORT, sk).p;
     var st = stn[si];
-    var sx = x + (si % cols) * (sw + 10);
-    var sy = viewTop + Math.floor(si / cols) * (sh + 8) - sc;
-    /* 卡片整体被裁掉时 addHit 会自动放弃登记，无需在这里再判断可见性 */
-    var busy = !!st.order;
-    /* ★ V14.2：工位被点击的脉冲（与 H5 端对等）。
-       VIEW.hitAt[工位号] 在 main.js 点击时置为 0.16（秒），
-       这里按「剩余时间 / 总时长」算出进度并换算成缩放——
-       Canvas 没有 CSS 动画，用这种衰减计时器最省（每帧只算一次减法）。
-       ★ t=1 → 刚点（缩到 0.82 + 高亮），t=0 → 恢复原状。 */
-    var tHit = 0;
-    if (VIEW.hitAt && VIEW.hitAt[si] > 0) {
-      tHit = VIEW.hitAt[si] / 0.16;
-    }
-    /* 0 → 1 → 0 的三角波：前 60% 挤压回弹，后 40% 归位 */
-    var pulse = tHit > 0.4 ? (1 - tHit) / 0.6 : tHit / 0.4;
-    var sc2 = 1 - 0.18 * pulse;
-    var bx = sw / 2, by = sh / 2;
-    ctx.save();
-    if (pulse > 0.01) {
-      ctx.translate(sx + bx, sy + by);
-      ctx.scale(sc2, sc2);
-      ctx.translate(-bx, -by);
-    }
-    GFX.fillRR(ctx, sx, sy, sw, sh, 12,
-      busy ? 'rgba(53,229,240,.10)' : T.card,
-      busy ? 'rgba(53,229,240,.4)' : T.line);
-    /* 脉冲高亮：刚点时描一圈亮边，然后淡出 */
-    if (pulse > 0.01) {
-      GFX.fillRR(ctx, sx - 1, sy - 1, sw + 2, sh + 2, 13, null,
-        'rgba(53,229,240,' + (pulse * 0.9).toFixed(3) + ')');
-    }
-    var nm = st.isBoss ? '👑 老板' : (st.branch ? '🏪 分店位'
-      : (st.worker ? st.worker.emoji + ' ' + st.worker.name : '空位'));
-    text(ctx, nm, sx + 8, sy + 5,
-      { size: compact ? 9.5 : 10.5, weight: 700, color: T.txt, maxW: sw - 16 });
-    if (st.order) {
-      var rr = recipeById(st.order.rid) || { emoji: '🥤', tags: [] };
-      var n = num(st.order.cups, 1);
-      var hit = (rr.tags || []).indexOf(s.trend) >= 0;
-      var pay = '¥' + Math.round(num(st.order.price) * n) + (hit ? ' 🔥' : '');
-      if (compact) {
-        text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + 8, sy + 16, { size: FS.lg });
-        text(ctx, pay, sx + sw - 8, sy + 18,
-          { size: FS.xs, align: 'right', color: hit ? T.amber : T.txt2, maxW: sw - 34 });
-        GFX.bar(ctx, sx + 8, sy + sh - 16, sw - 16, 5, num(st.order.progress), { color: T.cyan });
-      } else {
-        text(ctx, n > 1 ? rr.emoji + '×' + n : rr.emoji, sx + sw / 2, sy + 22, { size: FS.xl, align: 'center' });
-        GFX.bar(ctx, sx + 8, sy + 46, sw - 16, 6, num(st.order.progress), { color: T.cyan });
-        text(ctx, pay, sx + sw / 2, sy + 56, { size: FS.xs, align: 'center', color: hit ? T.amber : T.txt2 });
-      }
-    } else {
-      text(ctx, '—', sx + sw / 2, sy + (compact ? 16 : 24),
-        { size: compact ? 12 : 15, align: 'center', color: T.txt3 });
-      text(ctx, st.worker && num(st.worker.stamina) <= 0 ? '😴 累瘫' : '空闲',
-        sx + sw / 2, sy + (compact ? sh - 15 : 46),
-        { size: compact ? 9.5 : 10, align: 'center', color: T.txt3 });
-    }
-    /* 整个出杯位都是可点区域：手指不需要瞄准小控件 */
-    GFX.addHit(sx, sy, sw, sh, 'rush', String(si), null);
-    /* ★ 闭合 V14.2 开的 save（脉冲缩放用了变换矩阵） */
-    ctx.restore();
+    var gx = si % cols, gy = Math.floor(si / cols);
+    var scx = ISO.ox + (gx - gy) * (ISO.TW / 2);
+    var scy = ISO.oy + (gx + gy) * (ISO.TH / 2);
+    /* ★ V14.2 的点击脉冲（0~1）*/
+    var pulse = 0;
+    if (VIEW.hitAt && VIEW.hitAt[si] > 0) pulse = VIEW.hitAt[si] / 0.16;
+
+    var bw2 = ISO.TW * 0.82;
+    var bh2 = compact ? ISO.TH * 1.5 : ISO.TH * 2.2;
+    var hitBox = drawStationIso(ctx, scx, scy, st, bw2, bh2, pulse, compact, T);
+    /* ★ 命中区：画在哪点哪（含顶面与底面）。
+       ★ addHit 在裁剪区外会自动放弃登记，所以超出视口的不用自己判。 */
+    GFX.addHit(hitBox.x, hitBox.y, hitBox.w, hitBox.h, 'rush', String(si), null);
   }
   GFX.clipPop(ctx);
   /* 右侧一条细滚动条，让玩家知道下面还有工位 */

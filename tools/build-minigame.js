@@ -22,6 +22,9 @@ const PARTS = [
   ['js/engine.js（与 H5 版共用）', path.join(root, 'js', 'engine.js')],
   ['minigame/src/caps.js', path.join(src, 'caps.js')],
   ['minigame/src/gfx.js', path.join(src, 'gfx.js')],
+  /* V15 等距投影：依赖 gfx 的绘制习惯，但**不依赖它的任何函数** ——
+     放在 gfx 之后、ui 之前，ui.js 与 main.js 都能用。 */
+  ['minigame/src/iso.js', path.join(src, 'iso.js')],
   ['minigame/src/ui.js', path.join(src, 'ui.js')],
   ['minigame/src/main.js', path.join(src, 'main.js')],
 ];
