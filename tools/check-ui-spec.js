@@ -192,6 +192,64 @@ console.log('\n--- ④ 交互状态 ---');
   check(/prefers-reduced-motion/.test(css), '尊重 prefers-reduced-motion');
 }
 
+/* ---------- ⑤ 招牌配方栏（V19）---------- */
+console.log('\n--- ⑤ 招牌配方栏 ---');
+{
+  const { window, doc } = buildH5Env();
+  window.eval('window.S = newGame("normal", 0, null); window.S.cash = 300000;');
+  /* 用引擎自己的配方 id（不要手编 —— 手编的 id 多数不存在，
+     实测编了 5 个只有 2 个真实存在，浪费了两轮排查） */
+  window.eval('(function(){var S=window.S;'
+    + 'S.recipes = S.recipes.concat(RECIPES.slice(0, 6).map(function(r){ return r.id; }));'
+    + '})()');
+  window.eval('UI.setTab("lab"); UI.renderAll();');
+
+  const rows = window.eval(q('button.sig-row'));
+  const lockedMsg = window.eval(q('.sig-locked'));
+  const divRows = window.eval(q('div.sig-row'));
+
+  /* ★ 核心：只列已解锁的。开局玩家只解锁 1 款，
+     原来却列了全部 57 款 —— 56 行是玩家没见过的配方，纯噪音。 */
+  const ownCount = window.eval('(function(){var m={};window.S.recipes.forEach(function(r){m[r]=1;});return Object.keys(m).length;})()');
+  check(rows === ownCount,
+    '只列已解锁的配方（' + rows + ' 行 = 已解锁 ' + ownCount + ' 款）');
+  check(lockedMsg === 1, '未解锁的有单独说明行（不再逐行列出）');
+  check(divRows === 0, '每行都是 button（可聚焦），残留 div ' + divRows);
+
+  /* ★ 一行都点不了是最浪费的 —— 旁边就是研发树 */
+  const ids = window.eval('(function(){return Array.prototype.map.call('
+    + 'document.querySelectorAll("#panel-lab .sig-row"),'
+    + 'function(b){ return b.getAttribute("data-id"); });})()')
+    || '[]'.split(']').slice(0, -1);
+  let jumpOk = 0;
+  for (const id of ids) {
+    const btn = doc.querySelector('#panel-lab .sig-row[data-id="' + id + '"]');
+    if (!btn) continue;
+    btn.click();
+    if (window.eval('UI.nav.focus') === id) jumpOk++;
+  }
+  check(ids.length > 0 && jumpOk === ids.length,
+    '每行都能跳到对应配方（' + jumpOk + '/' + ids.length + '）');
+
+  /* ★ 进度排序：玩家来这栏是问「离下一级还差多少」 */
+  const order = window.eval('(function(){'
+    + 'var rs = document.querySelectorAll("#panel-lab .sig-row");'
+    + 'var last = -1, ok = true, maxedSeen = false;'
+    + 'Array.prototype.forEach.call(rs, function(r){'
+    + '  if (r.className.indexOf("maxed") >= 0) { maxedSeen = true; return; }'
+    + '  if (maxedSeen) return;'
+    + '  var w = parseFloat((r.querySelector(".sg-bar i").style.width) || "0");'
+    + '  if (w < last - 0.5) ok = false;'
+    + '  last = w;'
+    + '});'
+    + 'return ok;})()');
+  check(order, '按进度降序（最接近升级的排最前）');
+
+  /* ★ 「还差 N 杯」比「250/250」直接 —— 玩家要的是那个数 */
+  check(/还差\s*\d+\s*杯/.test(window.eval('document.querySelector("#panel-lab .sig-card").innerHTML')),
+    '显示「还差 N 杯」而不只是 x/N');
+}
+
 console.log('');
 if (fails === 0) {
   console.log('✔ 研发界面规范全部通过（' + checks + ' 项）');

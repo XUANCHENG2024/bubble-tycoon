@@ -382,19 +382,45 @@ body::before {
 
 /* 招牌配方卡（V6）：青色系，和研发卡区分 */
 .sig-card { border: 1px solid rgba(53, 229, 240, .35); }
+.sig-desc {
+  font-size: var(--fs-sm); color: var(--txt3);
+  margin-bottom: var(--sp-2); line-height: 1.6;
+}
+.sig-desc b { color: var(--txt2); }
+/* ★ V19：整行变button（可点跳研发树）。
+   必须重置 button 默认样式 —— border/background/font/text-align，
+   不重置就会变成灰色凸起方块而不是设计好的行。 */
 .sig-row {
-  display: flex; align-items: center; gap: 7px;
-  padding: 5px 0; border-bottom: 1px solid rgba(255, 255, 255, .06);
-  font-size: var(--fs-md);
+  display: flex; align-items: center; gap: 7px; width: 100%;
+  padding: 5px 6px; margin: 0 -6px;          /* 负 margin 让 hover 背景铺满整卡 */
+  border: none; border-bottom: 1px solid rgba(255, 255, 255, .06);
+  background: none; color: inherit; font: inherit; text-align: left;
+  cursor: pointer; border-radius: var(--r-xs);
+  transition: background-color .15s ease, transform .12s ease;
 }
 .sig-row:last-child { border-bottom: none; }
+.sig-row:hover { background: rgba(53, 229, 240, .09); }
+.sig-row:active { transform: scale(.99); }
+/* ★ 两种状态分层（原来「未成招牌」和「已 Lv.2」视觉上几乎一样）：
+   · on    已成招牌 → 正常显示，最接近升级的会被看到
+   · maxed 满级     → 压暗 + 金色，传达「已完成、别管了」 */
+.sig-row.maxed { opacity: .55; }
+.sig-row.maxed .sg-c { color: var(--amber); font-weight: 700; }
 .sg-e { font-size: var(--fs-lg); flex: none; }
 .sg-n { flex: 1; min-width: 62px; color: var(--txt); font-weight: 700; }
 .sg-lv { font-size: var(--fs-sm); color: var(--cyan); flex: none; min-width: 52px; }
 .sg-lv.none { color: var(--txt3); }
 .sg-c { font-size: var(--fs-sm); color: var(--txt3); flex: none; min-width: 54px; text-align: right; }
-.sg-bar { width: 54px; height: 5px; border-radius: 9px; background: rgba(255, 255, 255, .1); overflow: hidden; flex: none; }
-.sg-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--purple)); border-radius: 9px; }
+/* V19：「还差 N 杯」需要更多空间 —— 54px 会挤到换行 */
+.sig-row .sg-c { min-width: 104px; }
+/* V19：未解锁配比的说明行（代替原来的 56 行）*/
+.sig-locked {
+  margin-top: var(--sp-2); padding: 6px 8px; border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, .03);
+  font-size: var(--fs-xs); color: var(--txt3); line-height: 1.5;
+}
+.sg-bar { width: 54px; height: 5px; border-radius: var(--r-pill); background: rgba(255, 255, 255, .1); overflow: hidden; flex: none; }
+.sg-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--purple)); border-radius: var(--r-pill); }
 
 /* 配方卡上的招牌徽章（V6） */
 .rc-badge.sig { background: rgba(53, 229, 240, .9); color: #06202a; left: auto; right: 6px; }

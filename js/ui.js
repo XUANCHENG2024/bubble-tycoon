@@ -1619,26 +1619,79 @@ for (const g of buyable) {
 /** V6 招牌配方卡：10 款配方的跨局累计进度。返回一段 HTML 字符串。 */
 function sigCardHtml(s) {
   const sgs = sigViews(s);
-  const maxed = sgs.filter(x => x.maxed).length;
-  const anyLv = sgs.filter(x => x.lv > 0).length;
-  let h = `<div class="card sig-card"><div class="card-h">🏷️ 招牌配方
-    <span class="ch-sub">${anyLv}/${sgs.length} 款已成招牌 · ${maxed} 款满级</span></div>
-    <div style="font-size:var(--fs-md);color:var(--txt3);margin-bottom:9px;line-height:1.6">
-      累计卖出杯数<b>跨局继承</b>：这一局卖得多，下一局该款永久更强。<br>
-      专精一款（Lv.3）比铺开十款更划算 —— 招牌加成只对<b>那一款</b>生效。</div>`;
-  for (const g of sgs) {
-    h += `<div class="sig-row">
-      <span class="sg-e">${g.emoji}</span>
-      <span class="sg-n">${esc(g.name)}</span>
-      ${g.lv > 0
-        ? `<span class="sg-lv">${g.tierEmoji} ${esc(g.tierName)}</span>`
-        : `<span class="sg-lv none">未成招牌</span>`}
-      <span class="sg-c">${g.cups}${g.maxed ? '' : `/${g.nextCups}`} 杯</span>
-      <span class="sg-bar"><i style="width:${(g.ratio * 100).toFixed(1)}%"></i></span>
+  /* ★★ V19：原来 sigViews 返回**全部 57 款配方**（含未解锁的），
+     开局实测：玩家已解锁 1 款 → **56 行是玩家根本没见过的配方**。
+     那些行的 emoji 和名字玩家根本不认识，进度条全是 0/250 ——
+     纯噪音，却占掉研发页 **33% 的体积**（14446 / 44337 字符）。
+     ★ 招牌是「已解锁配方卖得越多越强」，
+       没解锁的配方根本卖不了，列出来没有意义。*/
+  const own = sgs.filter(x => s.recipes.indexOf(x.id) >= 0);
+  const locked = sgs.length - own.length;
+
+  const maxed = own.filter(x => x.maxed).length;
+  const anyLv = own.filter(x => x.lv > 0).length;
+
+  let h = `<div class="card sig-card">
+    <div class="card-h">🏷️ 招牌配方
+      <span class="ch-sub">${anyLv}/${own.length} 款已成招牌${maxed ? ` · ${maxed} 满级` : ''}</span></div>
+    <div class="sig-desc">累计卖出杯数<b>跨局继承</b>—— 这一局卖得多，下一局该款永久更强。<br>
+      专精一款（Lv.3）比铺开十款更划算：招牌加成只对<b>那一款</b>生效。</div>`;
+
+  /* ★ 一行都点不了是最大的浪费：旁边就是研发树，点一下应该能跳过去。
+     复用 V16 的 torecipe（统一跳转模式：切页 + 滚动 + 高亮）。*/
+  /* ★ 排序：最接近升级的排最前。
+     玩家来这个栏是问「我的招牌离下一级还差多少」，
+     而不是「按字母序看一遍」。满级的沉到最后。 */
+  const sorted = own.slice().sort((a, b) => {
+    if (a.maxed !== b.maxed) return a.maxed ? 1 : -1;
+    /* ratio 大的在前 —— 越接近升级越该被看见 */
+    return b.ratio - a.ratio;
+  });
+
+  if (!own.length) {
+    h += `<div class="empty">
+      <div class="empty-e">🏷️</div>
+      <div class="empty-t">还没有可培养的配方</div>
+      <div class="empty-d">研发并上架任意一款配方后，<br>它就会出现在这里开始累计销量。</div>
     </div>`;
+  } else {
+    for (const g of sorted) h += sigRowHtml(g);
+  }
+
+  /* ★ 未解锁的不列行，只给一句说明 ——
+     省下 56 行，同时告诉玩家「还有多少在前面等着」，
+     不至于以为系统漏了东西。*/
+  if (locked) {
+    h += `<div class="sig-locked">🔒 还有 ${locked} 款配方未解锁，研发后自动出现在这里</div>`;
   }
   h += `</div>`;
   return h;
+}
+
+/**
+ * 单个招牌行（V19）
+ * ★ 改动：
+ *   ① 整行可点 → 跳到该配方的研发树节点（V16 的 torecipe）
+ *   ② 满级/未成招牌两种状态用不同的视觉层级（别混在一起）
+ *   ③ 进度条旁补「还差 N 杯」—— 原来只有 x/N 杯，玩家要自己算
+ */
+function sigRowHtml(g) {
+  const cls = g.maxed ? ' maxed' : (g.lv > 0 ? ' on' : '');
+  /* ★ 「还差 N 杯」比「250/250」直接得多：
+     前者是玩家要的那个数，后者要心算。 */
+  const gap = g.maxed ? '' : ` 还差 ${Math.max(0, g.nextCups - g.cups)} 杯`;
+  return `<button type="button" class="sig-row${cls}"
+    data-act="torecipe" data-id="${esc(g.id)}"
+    title="${esc(g.desc)}（点击跳到研发树）"
+    aria-label="${esc(g.name)}，${g.maxed ? '已满级' : (g.lv > 0 ? g.tierName : '未成招牌')}，${g.cups} 杯${gap}">
+    <span class="sg-e">${g.emoji}</span>
+    <span class="sg-n">${esc(g.name)}</span>
+    ${g.lv > 0
+      ? `<span class="sg-lv">${g.tierEmoji} ${esc(g.tierName)}</span>`
+      : `<span class="sg-lv none">未成招牌</span>`}
+    <span class="sg-c">${g.maxed ? '🏆 满级' : `${g.cups}/${g.nextCups} 杯${gap}`}</span>
+    <span class="sg-bar"><i style="width:${(g.ratio * 100).toFixed(1)}%"></i></span>
+  </button>`;
 }
 
 /* ============== 研发页（研发树视图 · V10） ============== */
