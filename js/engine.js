@@ -611,7 +611,7 @@ function newGame(diffKey, bpBonus, sigCarry) {
     citiesVisited: [], stayDays: 0,
     flags: {}, ach: {}, log: [], cards: [], cardOffer: null,
     tut: { active: false, step: 0, done: false },
-    history: [], endless: false, milestone: 0, daily: false,
+    history: [], endless: false, milestone: 0, daily: false, milestoneHit: false,
     quests: [], questDay: 1, newQuests: [],
     contract: null,           /* 每日合同（V1）：{ id, done }，备货阶段可见 */
     /* V5 章节关卡：{ diff: 难度档 id, done: { 关卡 id: true } } */
@@ -2963,12 +2963,23 @@ function endDay(s) {
   }
 
   /* 中期目标：达成一次记一次，结算成声望点（见 prestigeGain）。
-     只在当天达成时记，之后即使净资产回落也不撤销 —— 它是节奏提示，不是持续 buff。 */
+     只在当天达成时记，之后即使净资产回落也不撤销 —— 它是节奏提示，不是持续 buff。
+     ★ V14.3：达成时记一个 `milestoneHit` 标记，让 UI 层能放音效 + 提示。
+       原来只有一行 pushLog —— 玩家达成 5 天锚点（这是 30 天里少数几个
+       "我确实做到了"的时刻）却听不到任何声音，成就感被白白丢掉。
+       ★ 引擎层不直接调音效（那属于表现层），只写标记。 */
+  /* ★★ 清零必须在**判定之前**：
+     初版我把它写在判定后面（下面 debtDays 旁边），结果标记刚置上就被清掉，
+     UI 永远收不到 —— 而且 engine 层测试全绿，只有实际点击才知道。
+     ★ 「一次性事件标记」的清零要在本次事件的判定**之前**做，
+       否则自己把自己清了。 */
+  s.milestoneHit = false;
   const ms = milestoneOf(s);
   if (ms && ms.hit) {
     if (!Array.isArray(s.msHit)) s.msHit = [];
     if (s.msHit.indexOf(ms.day) < 0) {
       s.msHit.push(ms.day);
+      s.milestoneHit = true;
       pushLog(s, `🏁 达成中期目标：Day ${ms.day} 前净资产 ${money(ms.worth)} · 声望 +1`);
     }
   }

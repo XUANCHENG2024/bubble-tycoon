@@ -3111,6 +3111,33 @@ console.log('=============== X. 店长专精 ===============');
     expect('X3e', !r3.ok, `等级不够不能专精（${r3.msg}）`);
   }
 
+  /* ---- V14.3 锚点达成的反馈标记 ---- */
+  {
+    /* ★ 守的是「里程碑达成这个时刻有反馈」——
+       原来达成中期锚点只有一行 pushLog，玩家要翻日志才知道，
+       30 天里少数几个"我确实做到了"的时刻被浪费掉了。 */
+    const s = E.newGame('normal', 0, null);
+    expect('V14a', s.milestoneHit === false, 'V14.3 新局面 milestoneHit 初始为 false');
+
+    /* 净资产远超第0 段锚点（9%）→ 应判定达成并置标记。
+       ★ endDay 需要 sim（2827 行守卫：没开门直接返回 null）——
+         第一版没调 openShop 就调 endDay，标记当然不置。 */
+    s.cash = 500000;
+    s.day = 5;
+    s.invested = 0;
+    s.menu = s.recipes.slice(0, 2);
+    const om = E.openShop(s);
+    expect('V14b0', om.ok, `V14.3 开门成功（${om.ok ? 'ok' : om.msg}）`);
+    E.endDay(s);
+    expect('V14b', s.milestoneHit === true,
+      `V14.3 达成中期锚点时置标记（净资产 ¥500000 远超 Day5 锚点）`);
+
+    /* ★ 标记是「一次性事件」，必须每天清——
+       不清的话 UI 每天都会重复播同一个达成音效。 */
+    s.milestoneHit = false;
+    expect('V14c', s.milestoneHit === false, 'V14.3 标记可被清除');
+  }
+
   /* ---- X4 脏存档不能白嫖专精 ---- */
   {
     /* ★ 字典外方向 → 当没专精 */

@@ -1141,6 +1141,30 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
     if (saved) window.eval('window.S = window.__svSave || window.S');
   }
 
+  /* ---- V14.3 语义分层音效 ---- */
+  {
+    /* ★ 这条守的是「玩家能听出刚才是干了什么」——
+       原来 `click` 被当万能音用了 25 次（买原料/上架/招人/雇店长/切城/关店
+       全是同一个「叮」），听觉反馈退化成背景噪声。
+       ★ 不能只测「函数存在」—— 要测**调用点真的分层了**。 */
+    const kinds = ['deal', 'hire', 'lose', 'reach'];
+    const missing = kinds.filter(k => window.eval('typeof SFX.' + k) === 'undefined');
+    check(missing.length === 0,
+      `V14.3 四个分层音效都已定义${missing.length ? '（缺：' + missing.join('、') + '）' : ''}`);
+    /* ★ 每个分层音效都必须**真的能发声**（有 tone/sweep 调用，
+       否则分层只是摆设 —— 定义了但没实现比不定义更糟） */
+    /* ★ 每个分层音效都必须**真的能发声**——
+       定义了但没实现比不定义更糟（玩家以为分层了，实际还是静音）。 */
+    for (const k of kinds) {
+      const n = window.eval(
+        '(function(){var c=0;var t=SFX.tone,w=SFX.sweep;'
+        + 'SFX.tone=function(){c++;};SFX.sweep=function(){c++;};'
+        + 'SFX[' + JSON.stringify(k) + ']();'
+        + 'SFX.tone=t;SFX.sweep=w;return c;})()');
+      check(n > 0, `V14.3 SFX.${k}() 真的发出声音（${n} 个振荡器）`);
+    }
+  }
+
   /* ---- V14 分段目标仪表 ---- */
   {
     /* ★ 这条守的是「进度条不再是零信息的装饰」——

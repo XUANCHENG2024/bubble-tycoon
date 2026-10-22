@@ -191,6 +191,16 @@ function onDayEnd() {
   if (isBankrupt(s)) { finishRun('bankrupt'); return; }
   if (isFinished(s)) { finishRun('finish'); return; }
   if (s.endlessLevelUp) UI.toast(`🏆 里程碑达成！新目标 ${money(goalOf(s))}`, 'gold');
+  /* ★ V14.3：中期锚点达成 —— 30 天里少数几个"我确实做到了"的时刻，
+     原来只有一行 pushLog（玩家要翻日志才看得到），没有任何即时反馈。
+     现在给三层：专属音效 + toast + 撒彩带。
+     ★ 引擎层只写 s.milestoneHit 标记，音效与彩带属于表现层，
+       两版（H5/Canvas）都能各自决定怎么呈现。 */
+  if (s.milestoneHit) {
+    SFX.reach();
+    UI.toast('🏁 中期目标达成！声望 +1', 'gold');
+    UI.confetti(40);
+  }
   UI.showReport();
 }
 
@@ -427,14 +437,14 @@ function doAct(act, el) {
     case 'toggle': {
       const r = toggleMenu(s, id);
       if (r === false) UI.toast(`上架位已满（${menuSlots(s)} 个），去升级「招牌展位」`, 'err');
-      else { UI.toast(`${recipeById(id).name} ${r}`, 'ok'); SFX.click(); TUT.notify('toggle'); }
+      else { UI.toast(`${recipeById(id).name} ${r}`, 'ok'); SFX.deal(); TUT.notify('toggle'); }
       break;
     }
     /* --- 营销快捷键：原来只有 data-act="mktset"，switch 里没有这个 case，
            点下去一路落到末尾的 pump()，既不改值也不报错 —— 四个按钮全是死键。 --- */
     case 'mktset': {
       s.marketing = clamp(+el.dataset.v || 0, 0, 2000);
-      SFX.click();
+      SFX.deal();
       UI.toast(`📣 营销预算设为 ${money(s.marketing)}`, 'ok');
       break;
     }
@@ -591,7 +601,7 @@ function doAct(act, el) {
         UI.closeModal();
         const st = storeByBranch(s, +br);
         UI.toast(`🎩 ${r.manager.name} 入驻「${st ? st.name : ''}」`, 'ok');
-        SFX.up();
+        SFX.hire();
       } else UI.toast(r.msg, 'err');
       break;
     }
@@ -601,7 +611,7 @@ function doAct(act, el) {
       const m = st ? managerById(s, st.managerId) : null;
       if (!m) { UI.toast('该店没有店长', 'err'); break; }
       const r = fireManager(s, m.id);
-      if (r.ok) { UI.toast('🎩 店长已撤下，该店员工留在原编制', 'ok'); SFX.click(); }
+      if (r.ok) { UI.toast('🎩 店长已撤下，该店员工留在原编制', 'ok'); SFX.lose(); }
       else UI.toast(r.msg, 'err');
       break;
     }
@@ -625,7 +635,7 @@ function doAct(act, el) {
       const amt = prompt(`向「${st ? st.name : ''}」注资多少？（总部现金 ${money(s.cash)}）`, '2000');
       if (amt == null) break;
       const r = fundStore(s, +br, parseFloat(amt));
-      if (r.ok) { UI.toast(`💰 已注资 ${money(r.amount)}`, 'ok'); SFX.click(); }
+      if (r.ok) { UI.toast(`💰 已注资 ${money(r.amount)}`, 'ok'); SFX.deal(); }
       else UI.toast(r.msg, 'err');
       break;
     }
@@ -693,7 +703,7 @@ function doAct(act, el) {
       const r = closeStore(s, +br);
       if (r.ok) {
         UI.toast(`🏚️「${st.name}」已关闭（遣散 ${r.staffOut} 人）`, 'gold');
-        SFX.click();
+        SFX.lose();
       } else UI.toast(r.msg, 'err');
       break;
     }
@@ -702,7 +712,7 @@ function doAct(act, el) {
       const amt = prompt(`从「${st ? st.name : ''}」提现多少？（店铺现金 ${money(st ? st.cash : 0)}）`, '1000');
       if (amt == null) break;
       const r = withdrawStore(s, +br, parseFloat(amt));
-      if (r.ok) { UI.toast(`💵 已提现 ${money(r.amount)}`, 'ok'); SFX.click(); }
+      if (r.ok) { UI.toast(`💵 已提现 ${money(r.amount)}`, 'ok'); SFX.lose(); }
       else UI.toast(r.msg, 'err');
       break;
     }
@@ -712,13 +722,13 @@ function doAct(act, el) {
       if (r.ok) {
         const m = r.manager;
         UI.toast(`🎩 ${m.name}（Lv.${m.lv} ${managerRank(m.lv).name}）入职第 ${m.branch} 分店`, 'ok');
-        SFX.up();
+        SFX.hire();
       } else UI.toast(r.msg, 'err');
       break;
     }
     case 'mfire': {
       const r = fireManager(s, +id);
-      if (r.ok) { UI.toast('🎩 店长已卸任，该店员工留在原编制', 'ok'); SFX.click(); }
+      if (r.ok) { UI.toast('🎩 店长已卸任，该店员工留在原编制', 'ok'); SFX.lose(); }
       else UI.toast(r.msg, 'err');
       break;
     }
@@ -733,7 +743,7 @@ function doAct(act, el) {
       const r = moveManager(s, +id, +el.dataset.to);
       if (r.ok) {
         UI.toast(`🔀 店长调往第 ${r.to} 分店（带走 ${r.moved} 名员工${r.left ? `，${r.left} 名留下` : ''}）`, 'ok');
-        SFX.click();
+        SFX.hire();
       } else UI.toast(r.msg, 'err');
       break;
     }
@@ -779,7 +789,7 @@ function doAct(act, el) {
     /* --- 员工 --- */
     case 'hire': {
       const r = hireStaff(s, +el.dataset.i);
-      if (r.ok) { UI.toast(`👤 ${r.staff.emoji} ${r.staff.name} 加入！出杯位 +1`, 'ok'); SFX.up(); }
+      if (r.ok) { UI.toast(`👤 ${r.staff.emoji} ${r.staff.name} 加入！出杯位 +1`, 'ok'); SFX.hire(); }
       else UI.toast(r.msg, 'err');
       break;
     }

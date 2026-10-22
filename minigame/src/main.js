@@ -583,7 +583,7 @@ function doAct(act, id, extra) {
     if (!sr.ok) { toast(sr.msg); return; }
     var unitNow = num(s.prices[id], 0) * CFG.LIQUID_RATE;
     var lostNow = Math.max(0, Math.round((num(s.avgCost[id], unitNow) - unitNow) * sr.qty));
-    beep('up', 420, 0.05);
+    beep('down', 240, 0.18);
     toast('清仓 ' + sr.qty + ' 个 · +¥' + sr.got
       + (lostNow > 0 ? '（比成本少 ¥' + lostNow + '）' : ''));
     return;
@@ -599,7 +599,7 @@ function doAct(act, id, extra) {
       var rr2 = sellIng(s, gg.id);
       if (rr2.ok) { got2 += rr2.got; qty2 += rr2.qty; n2++; }
     }
-    beep('up', 420, 0.05);
+    beep('down', 240, 0.18);
     toast(n2 ? ('清理 ' + qty2 + ' 个（' + n2 + ' 种）· +¥' + got2) : '没有本地买不到的原料');
     return;
   }
@@ -716,7 +716,7 @@ function doAct(act, id, extra) {
   if (act === 'smgrre') {
     /* 重新启用留档店长（免费） */
     var rh = rehireManager(s, +extra, +id);
-    if (rh.ok) { beep('up', 760, 0.12); toast('\uD83C\uDFA9 ' + rh.manager.name + ' 重新入职'); }
+    if (rh.ok) { beep('tap', 980, 0.12); toast('\uD83C\uDFA9 ' + rh.manager.name + ' 重新入职'); }
     else toast(rh.msg);
     return;
   }
@@ -741,7 +741,7 @@ function doAct(act, id, extra) {
     VIEW.modal = null;
     if (mco && mco.type === 'confirm') {
       var cr3 = closeStore(s, mco.branch);
-      if (cr3.ok) { beep('tap'); toast('🏚️ 店铺已关闭（遣散 ' + cr3.staffOut + ' 人）'); }
+      if (cr3.ok) { beep('down', 240, 0.2); toast('🏚️ 店铺已关闭（遣散 ' + cr3.staffOut + ' 人）'); }
       else toast(cr3.msg);
     }
     return;
@@ -901,7 +901,7 @@ function doAct(act, id, extra) {
     /* Canvas 无弹窗列表，用「循环挑选」：点一次任命当前第一位，
        若想换人先撤下。 */
     var hr2 = hireManager(s, b12, 0);
-    if (hr2.ok) { beep('up', 760, 0.12); toast('🎩 ' + hr2.manager.name + ' 入驻'); }
+    if (hr2.ok) { beep('tap', 980, 0.12); toast('🎩 ' + hr2.manager.name + ' 入驻'); }
     else toast(hr2.msg);
     return;
   }
@@ -910,7 +910,7 @@ function doAct(act, id, extra) {
     var m12 = st12 ? managerById(s, st12.managerId) : null;
     if (!m12) { toast('该店没有店长'); return; }
     var fr2 = fireManager(s, m12.id);
-    if (fr2.ok) { beep('tap'); toast('🎩 店长已撤下，员工留在原编制'); }
+    if (fr2.ok) { beep('down', 240, 0.2); toast('🎩 店长已撤下，员工留在原编制'); }
     else toast(fr2.msg);
     return;
   }
@@ -924,7 +924,7 @@ function doAct(act, id, extra) {
   if (act === 'mhire') {
     var mh = hireManager(s, +id || 2, +extra || 0);
     if (mh.ok) {
-      beep('up', 760, 0.12);
+      beep('tap', 980, 0.12);
       toast('🎩 ' + mh.manager.name + '（Lv.' + mh.manager.lv + ' ' + managerRank(mh.manager.lv).name
         + '）入职第 ' + mh.manager.branch + ' 分店');
     } else toast(mh.msg);
@@ -1211,6 +1211,18 @@ function onDayEnd() {
   if (isBankrupt(s)) { finishRun('bankrupt'); return; }
   if (isFinished(s)) { finishRun('finish'); return; }
   if (s.endlessLevelUp) toast('🏆 里程碑达成！新目标 ' + money(goalOf(s)));
+  /* ★ V14.3：中期锚点达成 —— 与 H5 端对等。
+     原来只有 pushLog（要翻日志才看得到），没有任何即时反馈。
+     ★ 三音上行 beep（980 → 1175 → 1405）是本作最高音档，
+       刻意区别于普通成功的 760Hz —— 这是 30 天里少数几个
+       "我确实做到了"的时刻，听觉上就该不一样。 */
+  if (s.milestoneHit) {
+    beep('up', 980, 0.1);
+    beep('up', 1175, 0.1);
+    beep('up', 1405, 0.16);
+    toast('🏁 中期目标达成！声望 +1');
+    confetti(40);
+  }
   VIEW.modal = { type: 'report', day: s.day };
 }
 

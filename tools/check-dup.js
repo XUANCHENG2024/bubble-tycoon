@@ -129,6 +129,46 @@ for (const f of FILES) {
   }
 }
 
+/* ---------- 语义分层守卫（V14.3）----------
+ * ★ 为什么加这个：
+ *   `click` 曾经被当万能音用了 25 次（买原料/上架/招人/雇店长/切城/关店
+ *   全是同一个「叮」），听觉反馈退化成背景噪声。
+ *   光靠 code review 守不住 —— 新加功能的人不知道该用哪一层，
+ *   默认就会写 SFX.click()。
+ *   ★ 所以做成机器守卫：click 的占比过高就报错。 */
+console.log('\n=== 音效语义分层 ===');
+{
+  const fs2 = require('fs');
+  const files = [
+    path.join(root, 'js/main.js'),
+    path.join(root, 'minigame/src/main.js'),
+  ];
+  const cnt = {};
+  for (const f of files) {
+    if (!fs2.existsSync(f)) continue;
+    const src2 = fs2.readFileSync(f, 'utf8');
+    for (const m of src2.matchAll(/SFX\.([a-zA-Z]+)\(\)|beep\('[a-z]+'/g)) {
+      const k = m[1] || ('beep_' + (m[0].match(/beep\('([a-z]+)/) || [])[1]);
+      cnt[k] = (cnt[k] || 0) + 1;
+    }
+  }
+  const click = cnt.click || 0;
+  const layers = ['deal', 'hire', 'lose', 'reach', 'beep_tap', 'beep_down', 'beep_up'];
+  const layerTotal = layers.reduce((n, k) => n + (cnt[k] || 0), 0);
+  console.log(`  click（纯操作层）: ${click} 次`);
+  console.log(`  分层音效合计      : ${layerTotal} 次（deal ${cnt.deal || 0} / hire ${cnt.hire || 0} / lose ${cnt.lose || 0} / reach ${cnt.reach || 0}）`);
+  const total = click + layerTotal;
+  const ratio = total > 0 ? click / total : 1;
+  /* ★ 阈值 0.6：click 是"兜底层"，不该成为主体。
+     改之前实测 25/25 = 1.00（全部都是 click），改后 15/28 ≈ 0.54。 */
+  if (ratio > 0.6) {
+    console.log(`  ✘ click 占比 ${(ratio * 100).toFixed(0)}%（> 60%）—— 音效又退回"万能音"了`);
+    found++;
+  } else {
+    console.log(`  ✔ click 占比 ${(ratio * 100).toFixed(0)}%（≤ 60%，语义分层有效）`);
+  }
+}
+
 console.log('');
 if (found) {
   console.log(`✘ 共发现 ${found} 处「连续 ${MIN_LINES} 行完全相同」的重复代码`);
