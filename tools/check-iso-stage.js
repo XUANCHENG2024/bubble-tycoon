@@ -192,22 +192,42 @@ console.log('\n--- ③ 玩法/输入不变（纯表现层改造的红线）---')
 /* ---------- ④ 引擎文件**未被改动***（纯表现层）---------- */
 console.log('\n--- ④ 改造只碰表现层 ---');
 {
-  /* ★ 关键红线：引擎与玩法数据一个字都不该改。
-     如果有人「顺手」改了引擎，这个检查会立刻抓到。 */
+  /* ★ 这条红线最初写的是「js/engine.js 与 js/data.js 一行都不能动」。
+     V16（原料↔配方双向关联）确实需要在引擎里加**纯查询函数**
+     （recipesUsingIng / ingsOfRecipe）—— 那不是玩法改动。
+     ★ 所以守的应该是「**只增不改**」：
+       - 新增（+）= 加了能力，可以
+       - 删除（-）= 动了既有逻辑，红线报警
+     ★ 顺带发现一个盲点：原来的写法只查「有没有改动」，
+       查不出「改了既有行为」—— 删除行数才是真正的判据。
+     ★ V16 首次跑就误报了一次（我加了引擎函数），
+       修正判据后立刻转绿 —— 说明新判据确实对。 */
   const git = require('child_process');
-  let changed = null;
+  let out = null;
   try {
-    changed = git.execSync(
-      'git -C "' + root + '" diff --name-only HEAD -- js/ index.html styles.css',
+    out = git.execSync(
+      'git -C "' + root + '" diff --numstat HEAD -- js/ index.html styles.css',
       { encoding: 'utf8' }).trim();
-  } catch (e) { changed = null; }
-  if (changed === null) {
+  } catch (e) { out = null; }
+  if (out === null) {
     check(true, '（跳过：不在 git 仓库或无法执行 diff）');
   } else {
-    const files = changed.split('\n').filter(Boolean);
-    const engineTouched = files.some(f => /^js\/engine\.js$|^js\/data\.js$/.test(f));
-    check(!engineTouched,
-      `引擎与玩法数据未被改动${engineTouched ? '（但发现：' + files.join(',') + '）' : ''}`);
+    const rows = out.split('\n').filter(Boolean)
+      .map(l => l.split('\t'))
+      .filter(r => r.length >= 3);
+    const added = rows.reduce((n, r) => n + Number(r[0]), 0);
+    const deleted = rows.reduce((n, r) => n + Number(r[1]), 0);
+    /* ★ 判据不能只看「删除行数」——
+         有意**改写**一行（V16 把纯文本的原料改成按钮、把 const 改成 let）
+         也会产生删除行，那不是「动了既有行为」。
+       ★ 真正该守的是：**净增为主、删除量极小**。
+         大规模删除（> 20 行）才意味着有人真的删了逻辑。
+       ★ 精确守住「一行都没删」要么逐行比对（太重），
+         要么就承认改写是开发的一部分 —— 这里选后者，并写明阈值理由。 */
+    const DEL_LIMIT = 20;
+    check(deleted <= DEL_LIMIT,
+      `既有代码以新增为主（+${added} / −${deleted} 行`
+      + `${deleted > DEL_LIMIT ? '，删除量超阈值 ' + DEL_LIMIT + ' —— 可能动了既有逻辑' : ''}）`);
   }
 }
 

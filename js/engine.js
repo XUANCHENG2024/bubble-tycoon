@@ -1232,6 +1232,79 @@ function researchTree(s, cityFilter) {
 }
 
 /* ---------------- 研发 ---------------- */
+
+/**
+ * 反向索引：某个原料能被**哪些配方**用（V16）
+ *
+ * ★ 为什么需要它：
+ *   原料市场原来只显示「价格 / 库存 / 买入」——
+ *   玩家看着一堆原料，**完全不知道该买什么**。
+ *   「五种原料价格每天波动，看到绿色就囤」的教学也因此落不了地：
+ *     囤来的料到底能做什么，不看研发树是不知道的。
+ *   而研发树里���原料又是**纯文本**（🍵3(5)），点不了。
+ *   ★ 两处合起来就是：原料↔配方这条关联链**两头都断**。
+ *
+ * ★ 返回的每条包含**两套不同的用量**，别混：
+ *   perCup  配方 req里写的「每杯消耗」—— 影响毛利与能不能做
+ *   rschFor 配方 research.ing 里写的「研发一次需要多少」—— 影响研发进度
+ *   同一款配方上这两个数经常不同（研发要得多，做只用一点）。
+ *
+ * @param {string} ingId 原料 id
+ * @returns {Array<{rid, emoji, name, perCup, rschFor, unlocked, available, cuisine}>}
+ *   unlocked  = 玩家是否已解锁该配方
+ *   available = 当前城市能否做（城市绑定配方在别处做不了）
+ */
+function recipesUsingIng(ingId) {
+  const out = [];
+  for (const r of RECIPES) {
+    if (!r) continue;
+    const perCup = r.req ? num(r.req[ingId], 0) : 0;
+    const rschFor = r.research && r.research.ing ? num(r.research.ing[ingId], 0) : 0;
+    if (!(perCup > 0) && !(rschFor > 0)) continue;
+    /* ★ 这里**不判断**「是否已解锁 / 当前城市能不能做」——
+       那是**局面相关**的（要看 s），而本函数是纯数据查询。
+       早期版本在这里读全局状态，是错的设计：同一个原料在不同局面下
+       答案不同，纯函数给不出正确答案。
+       调用方（ui.js）拿到 s 后自己判断即可 —— 见 marketIngUsesHtml。 */
+    out.push({
+      rid: r.id, emoji: r.emoji, name: r.name,
+      perCup, rschFor,
+      cuisine: r.cuisine || null,
+      city: r.city || null,
+    });
+  }
+  /* ★ 排序：研发用料优先（研发是「现在就要买」的事），
+     再按每杯消耗从大到小（用量大的更值得囤）。
+     ★ 不按名称排 —— 玩家看的是"哪个更重要"，不是字母序。 */
+  out.sort((a, b) => (b.rschFor - a.rschFor) || (b.perCup - a.perCup));
+  return out;
+}
+
+/**
+ * 正向查询：某个配方用哪些原料（V16）
+ * @returns {Array<{id, emoji, name, perCup, rschFor, need}>}
+ *   need = 研发所需（0 = 不参与研发，仅制作消耗）
+ */
+function ingsOfRecipe(rid) {
+  const r = recipeById(rid);
+  if (!r) return [];
+  const out = [];
+  const seen = {};
+  const keys = Object.keys(r.req || {}).concat(Object.keys((r.research && r.research.ing) || {}));
+  for (const k of keys) {
+    if (seen[k]) continue;
+    seen[k] = 1;
+    const g = ingById(k);
+    if (!g) continue;
+    out.push({
+      id: k, emoji: g.emoji, name: g.name,
+      perCup: r.req ? num(r.req[k], 0) : 0,
+      rschFor: (r.research && r.research.ing) ? num(r.research.ing[k], 0) : 0,
+    });
+  }
+  return out;
+}
+
 function researchCost(s, rid) {
   const r = recipeById(rid);
   const base = r.research ? r.research.cash : 300;

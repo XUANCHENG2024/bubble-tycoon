@@ -497,6 +497,52 @@ function doAct(act, el) {
     }
 
     /* --- 研发 --- */
+    case 'toing': {
+      /* ★ V16：配方卡上的原料 →跳到原料市场并高亮。
+         ★ 目标可能在市场列表的中后段（20+ 行），
+           所以不只是切 tab，还要滚动 + 闪烁定位（UI.jumpTo 统一处理）。 */
+      if (!ingById(id)) { UI.toast('原料不存在', 'err'); break; }
+      UI.jumpTo('manage', 'ing', id);
+      SFX.click();
+      break;
+    }
+    case 'torecipe': {
+      /* ★ V16：跳到某款配方（前置配方链）。
+         ★ 同页跳转也走 UI.jumpTo —— 统一模式，
+           玩家不需要记「哪些跳转会切页、哪些不会」。 */
+      if (!recipeById(id)) { UI.toast('配方不存在', 'err'); break; }
+      UI.jumpTo('lab', 'recipe', id);
+      SFX.click();
+      break;
+    }
+    case 'inguse': {
+      /* ★ V16：市场行的配方徽章 → 跳到研发树并高亮那款配方。 */
+      if (!recipeById(id)) { UI.toast('配方不存在', 'err'); break; }
+      UI.jumpTo('lab', 'recipe', id);
+      SFX.click();
+      break;
+    }
+    case 'ingexpand': {
+      /* ★ V16：展开「+N」—— 32 种原料 × 十几道菜，全列出来市场会长到没法看。 */
+      UI.toggleIngUses(id);
+      SFX.click();
+      break;
+    }
+    case 'ingshowall': {
+      /* ★ V16：取消跳转过滤，回到完整市场列表。 */
+      UI.ingFilter = false;
+      UI.nav.tab = null; UI.nav.focus = null; UI.nav.kind = null;
+      UI.nav.from = null; UI.nav.fromLabel = null;
+      UI.renderPanel(UI.tab);
+      SFX.click();
+      break;
+    }
+    case 'navback': {
+      /* ★ V16：统一的返回方式（所有跳转共用这一个按钮）。 */
+      UI.navBack();
+      SFX.click();
+      break;
+    }
     case 'research': {
       /* V9：先问「能不能研」再研 —— 无工坊时给出**具体原因**
          （缺工坊 / 缺钱 / 缺原料），而不是笼统的"无法研发"。 */

@@ -75,6 +75,9 @@ jobs:
       - name: 伪 3D 舞台（多视口可达 / 深度顺序 / 输入不变）
         run: node tools/check-iso-stage.js
 
+      - name: 原料↔配方双向关联（反向索引 / 跳转 / 状态提示）
+        run: node tools/check-crosslink.js
+
       - name: 主流程
         run: node tools/e2e-flow.js
 

@@ -257,6 +257,123 @@ UI.showScreen = function (id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
 };
 
+/* ============================================================
+ *  V16 跨页跳转状态
+ * ============================================================
+ *
+ * ★ 要解决的问题：
+ *   「点原料跳到市场」「点配方跳到研发树」这类需求，
+ *   光切 tab 是不够的 —— 目标可能**不在首屏**（研发树按城市分了好几组，
+ *   市场可能有 20+ 行），切过去之后玩家还得自己找。
+ *
+ * ★ 三个状态缺一不可：
+ *   jumpTab     要跳到哪个面板
+ *   jumpFocus   要高亮什么（配方 id / 原料 id）
+ *   jumpFrom    来源（决定返回按钮写什么、有没有返回按钮）
+ *
+ * ★ 为什么放在 UI 而不是引擎：
+ *   这是**纯导航状态**，不参与玩法计算，也不需要存档
+ *   （刷新页面后回到首屏本来就是合理的）。
+ */
+UI.nav = {
+  tab: null,      /* 待跳转的 tab */
+  focus: null,    /* 待高亮的 id */
+  kind: null,     /* 'recipe' | 'ing' | null */
+  from: null,     /* 来源 tab */
+  fromLabel: null,/* 来源的中文名（返回按钮上写） */
+};
+
+/**
+ * 跳转到一个面板并高亮某一项（V16）
+ *
+ * @param {string} tab    目标面板
+ * @param {string} kind   'recipe' | 'ing'
+ * @param {string} id     高亮目标的 id
+ * @param {object} [opt] { from, fromLabel }
+ */
+UI.jumpTo = function (tab, kind, id, opt) {
+  const o = opt || {};
+  UI.nav.tab = tab;
+  UI.nav.kind = kind;
+  UI.nav.focus = id;
+  UI.nav.from = UI.tab || o.from || null;
+  UI.nav.fromLabel = o.fromLabel || TAB_LABEL(UI.nav.from);
+  UI.setTab(tab);
+  /* 高亮要等 DOM 重建后再打，所以放到下一帧 */
+  if (UI._hlTimer) clearTimeout(UI._hlTimer);
+  UI._hlTimer = setTimeout(() => UI.applyHighlight(), 40);
+};
+
+/** 返回跳转前的面板（返回按钮） */
+UI.navBack = function () {
+  const back = UI.nav.from;
+  UI.nav.tab = null; UI.nav.focus = null; UI.nav.kind = null;
+  if (UI._hlTimer) clearTimeout(UI._hlTimer);
+  if (back) UI.setTab(back);
+  else UI.toast('已经在最初的页面了', 'err');
+};
+
+/** tab 的中文名（返回按钮用） */
+function TAB_LABEL(t) {
+  return { manage: '经营页', lab: '研发页', up: '升级页', staff: '员工页', rival: '商圈页', ach: '成就页' }[t] || '上一页';
+}
+
+/**
+ * 跳转来源条（V16）—— 统一的返回方式
+ *
+ * ★ 为什么必须有：
+ *   跨页跳转后玩家会失去位置感 ——「我在哪、怎么回去」。
+ *   少了这个，他只能靠浏览器返回（移动端根本没有）或乱点 tab 找路。
+ *
+ * ★ 模式统一：所有跳转共用这一条、同一套文案、同一个按钮，
+ *   玩家学一次就能一直用 —— 这才是交互一致性，
+ *   而不是每个跳转各写一个提示。
+ */
+UI.jumpFromHtml = function () {
+  if (!UI.nav || !UI.nav.from) return '';
+  return `<div class="jump-from">
+    <button class="btn btn-sm btn-ghost" data-act="navback">← 回到${esc(UI.nav.fromLabel)}</button>
+    <span>从 <b>${esc(UI.nav.fromLabel)}</b> 跳来</span>
+  </div>`;
+};
+
+/**
+ * 给目标元素打上高亮类（V16）
+ * ★ 必须在 DOM 重建之后调用 —— 面板内容是整块 innerHTML 重写的。
+ */
+UI.applyHighlight = function () {
+  const k = UI.nav.kind, id = UI.nav.focus;
+  if (!k || !id) return false;
+  /* 两种选择器：配方卡用 data-rid，原料行用 data-ing */
+  const sel = k === 'recipe'
+    ? `.rc[data-rid="${id}"], .cui-card[data-rid="${id}"]`
+    : `.mkt-row[data-ing="${id}"]`;
+  let el = document.querySelector(sel);
+  /* 配方卡可能还没带 data-rid（V16 才加的）→ 退回到按文本找 */
+  if (!el) {
+    el = Array.prototype.find.call(document.querySelectorAll('.rc, .mkt-row'), (n) =>
+      n.querySelector('[data-rid="' + id + '"]') || n.getAttribute('data-rid') === id);
+  }
+  if (!el) return false;
+  /* 滚动到可见 */
+  try {
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  } catch (e) {
+    /* 老浏览器没有 scrollIntoView 选项 —— 直接 scrollTop 也行 */
+    try { el.scrollIntoView(); } catch (e2) { /* 真的不支持就算了，只高亮 */ }
+  }
+  el.classList.add('jump-hl');
+  setTimeout(() => el && el.classList.remove('jump-hl'), 2200);
+  return true;
+};
+
+/** 展开某个原料的用途列表（V16 的 +N 按钮） */
+UI.toggleIngUses = function (ingId) {
+  UI.expandUses = UI.expandUses || {};
+  UI.expandUses[ingId] = !UI.expandUses[ingId];
+  UI.renderPanel(UI.tab);
+};
+
 /* ---------------- Toast ---------------- */
 UI.toast = function (msg, kind) {
   const box = $('toasts');
@@ -1124,6 +1241,11 @@ UI.renderManage = function () {
   const nextTag = TAGS[s.nextTrend];
   let h = '';
 
+  /* ★ V16：从别处跳来时的来源条（统一的返回方式）。
+     玩家从研发页点原料跳到市场，得知道「我在哪、怎么回去」——
+     没有这个他只能靠浏览器/系统返回，或者乱点 tab 找路。 */
+  h += UI.jumpFromHtml();
+
   /* 已持有的经营策略卡（没有则整块不渲染） */
   h += UI.cardsChipsHtml(s);
 
@@ -1270,12 +1392,26 @@ UI.renderManage = function () {
      本地原料单独提示，让"为什么别的地方看不到"这件事有解释。 */
   const mktCity = currentCityId(s);
   const localSet = new Set(ingsOfCity(mktCity).map(g => g.id));
-  const buyable = ING.filter(g => ingAvailableAt(g.id, mktCity));
+  let buyable = ING.filter(g => ingAvailableAt(g.id, mktCity));
+  /* ★ V16：跳转过滤 —— 从配方跳过来时只看那一项，
+     否则玩家在 20+ 行里还要自己找（市场是本次改造里最长的列表）。
+     ★ 一旦展开/搜索就取消过滤，否则玩家会以为「其他原料不见了」。 */
+  if (UI.nav.kind === 'ing' && UI.nav.focus && !UI.ingFilter) {
+    const focus = UI.nav.focus;
+    const hit = buyable.filter(g => g.id === focus);
+    if (hit.length) {
+      buyable = hit;
+      h += `<div class="jump-from">
+        <button class="btn btn-sm btn-ghost" data-act="ingshowall">← 显示全部原料</button>
+        <span>已定位到 <b>${esc(hit[0].emoji + hit[0].name)}</b></span>
+      </div>`;
+    }
+  }
   if (localSet.size) {
     h += `<div style="font-size:var(--fs-sm);color:var(--txt3);margin-bottom:8px">
       🗺️ 本地特产：${esc(ingsOfCity(mktCity).map(g => g.emoji + g.name).join('、'))}</div>`;
   }
-  for (const g of buyable) {
+for (const g of buyable) {
     const p = s.prices[g.id], pv = s.prevPrices[g.id] || p;
     const dir = p > pv + .001 ? 'up' : (p < pv - .001 ? 'down' : '');
     const arrow = dir === 'up' ? '▲' : (dir === 'down' ? '▼' : '—');
@@ -1285,14 +1421,13 @@ UI.renderManage = function () {
        ② **相对基准价便不便宜**（徽章）——
           没有第②个时，玩家只能看到「比昨天贵了」，
           却不知道「其实比基准价便宜很多，值得囤」。
-          ★ 而「值得囤」正是教学第③步想教的事，
-            界面却不给这个信息 —— 教学与界面脱节了。
        ★ 阈值与「抄底大师」成就共用 CFG.BARGAIN_RATIO：
           徽章亮了却没触发成就（或反之）会让玩家困惑。 */
     const vsBase = p / g.base;
     const bargain = vsBase <= CFG.BARGAIN_RATIO;
     const pctTxt = Math.round((vsBase - 1) * 100);
-    h += `<div class="mkt-row${localSet.has(g.id) ? ' local' : ''}${bargain ? ' bargain' : ''}">
+    h += `<div class="mkt-row${localSet.has(g.id) ? ' local' : ''}${bargain ? ' bargain' : ''}"
+      data-ing="${esc(g.id)}">
       <div class="mkt-e">${g.emoji}</div>
       <div class="mkt-n">${g.name}
         ${bargain ? `<span class="mkt-tag" title="低于基准价 ${Math.round((1 - CFG.BARGAIN_RATIO) * 100)}% · 现在买很划算">📉 抄底</span>` : ''}</div>
@@ -1307,6 +1442,7 @@ UI.renderManage = function () {
           title="按当前价${Math.round(CFG.LIQUID_RATE * 100)}% 回购（清仓腾仓位）"
           ${(s.inv[g.id] || 0) > 0 ? '' : 'disabled'}>清仓</button>
       </div>
+      ${marketIngUsesHtml(s, g)}
     </div>`;
   }
   /* ★ V13.9：一键补货要说清「做了什么」。
@@ -1508,8 +1644,10 @@ UI.renderLab = function () {
     <div style="font-size:var(--fs-md);color:var(--txt3);margin-bottom:10px;line-height:1.6">
       配方按<b>阶段</b>推进：先做前面的，才能解锁后面的。每款配方属于一个菜系，
       建好对应<b>制作工坊</b>后研发费打折、销量权重更高（可选加成，不建也能做）。<br>
-      <b>本地特色菜系只在所属城市可研发与上架</b>—— 换个城市就是换一套产品线。
+      <b>本地特色菜系只在所属城市可研发与上架</b>—— 换个城市就是换一套产品线。<br>
+      <b>点配方上的原料</b>可以跳到原料市场查看价格与库存。
     </div>
+    ${UI.jumpFromHtml()}
     ${cityBarHtml(s)}
   </div>`;
 
@@ -1544,16 +1682,26 @@ UI.renderLab = function () {
       if (st === 99) {
         h += `<div class="tree-stage ach">📜 成就专属 · 不在研发树中</div>`;
       } else if (st > 0) {
+        /* ★ V16：前置配方从纯文本改成可点 ——
+           玩家看到「需先做『柠檬茶』」时的下一步一定是去看那道菜，
+           让他自己在一屏卡片里找是多余的动作。
+           ★ 收集时去重（多道配方可能共用同一个前置）。 */
         const names = [];
+        const links = [];
         for (const n of nodes) {
           for (const pid of (n.prereq || [])) {
             const pn = treeNodeById(pid);
             const pr = pn && recipeById(pn.recipe);
-            if (pr && names.indexOf(pr.name) < 0) names.push(pr.name);
+            if (!pr) continue;
+            if (names.indexOf(pr.name) < 0) {
+              names.push(pr.name);
+              links.push(`<button class="ing-link" data-act="torecipe" data-id="${esc(pr.id)}"
+                title="跳到该配方">${pr.emoji}${esc(pr.name)}</button>`);
+            }
           }
         }
         h += `<div class="tree-stage">第 ${st} 阶段${names.length
-          ? ` · 需先做「${esc(names.join('、'))}」` : ''}</div>`;
+          ? ` · 需先做 ${links.join('、')}` : ''}</div>`;
       }
       h += `<div class="cui-grid">`;
       for (const n of nodes) h += recipeNodeCardHtml(s, n);
@@ -1565,6 +1713,119 @@ UI.renderLab = function () {
 };
 
 /** 城市条：明确标示当前城市 + 可用菜系 + 专属原料（需求「界面标示当前城市及其可用菜系」） */
+/**
+ * 已解锁配方的「每杯消耗」行（V16）
+ *
+ * ★ 为什么已解锁的也要显示：
+ *   未解锁时显示的是「研发需要多少」——那是**未来的需求**；
+ *   但解锁之后玩家真正关心的是「每杯要烧多少料、库存撑不撑得住」。
+ *   原来解锁后这块就没了，玩家只能回到市场自己对照。
+ *
+ * ★ 缺料时标红但**仍可点**（跳去市场）——
+ *   红是提示不是禁用，而且这正是玩家最需要跳转的时刻。
+ */
+function recipePerCupHtml(s, rid) {
+  const ings = ingsOfRecipe(rid).filter(x => x.perCup > 0);
+  if (!ings.length) return '';
+  const parts = ings.map(x => {
+    const need = x.perCup;
+    /* 一杯的量太小，说"能做 N 杯"没意义；直接按"够不够做一杯"提示 */
+    const have = Math.round(num(s.inv[x.id], 0));
+    const ok = have >= need;
+    return `<button class="ing-link${ok ? '' : ' short'}"
+      data-act="toing" data-id="${esc(x.id)}"
+      title="${esc(x.name)}：现有 ${have} 个，每杯需 ${need} 个（点击去市场）">
+      ${x.emoji}每杯${need}<span style="color:${
+        ok ? 'var(--green)' : 'var(--red)'}">(${have})</span></button>`;
+  });
+  const short = ings.filter(x => Math.round(num(s.inv[x.id], 0)) < x.perCup);
+  return `<div class="rc-tip" style="margin-top:6px">
+    每杯消耗 ${parts.join(' ')}
+    ${short.length ? `<span style="color:var(--red)"> · ${short.length} 种料不够</span>` : ''}
+  </div>`;
+}
+
+/**
+ * 原料行的「能做什么」面板（V16）
+ *
+ * ★ 为什么必须有这个（补的是关联链的另一半）：
+ *   市场原来只显示「价格 / 库存 / 买入」。玩家看着一堆原料，
+ *   **完全不知道该买什么** ——「看到绿色就囤」的教学因此落不了地，
+ *   因为囤来的料能做什么，不翻研发树是不知道的。
+ *   而研发树里的原料又是纯文本点不了 → 这条链两头都断。
+ *
+ * ★ 三种状态要分清（混在一起会让玩家误判）：
+ *   已解锁且本地能做→ 直接可做，显示「每杯耗 N」
+ *   已解锁但城市不对→ 显示原因（换个城市才能做）
+ *   未解锁          → 显示「研发需 N 个」（这是**未来的需求**，也值得囤）
+ *
+ * ★ 默认只展开前 2 条：32 种原料 × 十几道菜，全列出来市场会长到没法看。
+ *   更多用「+N」按钮展开（UI.expandUses）。
+ *
+ * @param {object} s 状态
+ * @param {object} g 原料
+ * @returns {string} HTML
+ */
+function marketIngUsesHtml(s, g) {
+  const uses = recipesUsingIng(g.id);
+  if (!uses.length) {
+    return `<div class="ing-uses none">暂无可用配方</div>`;
+  }
+  const cid = currentCityId(s);
+  const have = Math.round(num(s.inv[g.id], 0));
+
+  /* 状态分类 */
+  const ready = [], away = [], locked = [];
+  for (const u of uses) {
+    if (!s.recipes.includes(u.rid)) { locked.push(u); continue; }
+    if (u.city && u.city !== cid) { away.push(u); continue; }
+    ready.push(u);
+  }
+
+  /* 一行小徽章的文案 */
+  const one = (u, kind) => {
+    if (kind === 'ready') {
+      return `<button class="ing-use ok" data-act="inguse" data-rid="${u.rid}"
+        title="查看配方">${u.emoji}${esc(u.name)}
+        <b>每杯${u.perCup || '-'}</b></button>`;
+    }
+    if (kind === 'away') {
+      const cn = (cityById(u.city) || {}).name || '其他城市';
+      return `<span class="ing-use away" title="本地专属菜，需切换经营城市">${u.emoji}${esc(u.name)}
+        <i>${esc(cn)}</i></span>`;
+    }
+    return `<span class="ing-use lock" title="尚未解锁该配方">${u.emoji}${esc(u.name)}
+      ${u.rschFor ? `<i>研发需${u.rschFor}</i>` : ''}</span>`;
+  };
+
+  const chips = [...ready.map(u => one(u, 'ready')),
+    ...away.map(u => one(u, 'away')),
+    ...locked.map(u => one(u, 'lock'))];
+
+  /* ★ 库存够不够做一杯：一杯都做不出时给红色提示 ——
+     这是玩家最容易踩的坑（囤了一堆结果做不出来）。 */
+  const canMakeAny = ready.some(u => have >= u.perCup);
+  let warn = '';
+  if (ready.length && !canMakeAny) {
+    const need = Math.min.apply(null, ready.map(u => u.perCup));
+    warn = `<span class="ing-warn">库存不够做一杯（至少需 ${need}）</span>`;
+  }
+
+  const EXPAND_N = 2;
+  const expanded = UI.expandUses && UI.expandUses[g.id];
+  const showN = expanded ? chips.length : Math.min(EXPAND_N, chips.length);
+  const more = chips.length > showN
+    ? `<button class="ing-more" data-act="ingexpand" data-id="${g.id}">+${
+      chips.length - showN}${expanded ? ' 收起' : ''}</button>`
+    : '';
+
+  return `<div class="ing-uses">
+    <div class="ing-uses-t">能做 <b>${ready.length}</b> 道${
+      locked.length ? ` · <i>研发中 ${locked.length}</i>` : ''}${warn}</div>
+    <div class="ing-use-list">${chips.slice(0, showN).join('')}${more}</div>
+  </div>`;
+}
+
 function cityBarHtml(s) {
   const cid = currentCityId(s);
   const city = cityById(cid);
@@ -1604,9 +1865,17 @@ function recipeNodeCardHtml(s, n) {
     const parts = [];
     for (const k in r.research.ing) {
       const g = ingById(k);
+      const need = r.research.ing[k];
       const has = Math.round(s.inv[k] || 0);
-      parts.push(`${g.emoji}${r.research.ing[k]}<span style="color:${
-        has >= r.research.ing[k] ? 'var(--green)' : 'var(--red)'}">(${has})</span>`);
+      /* ★ V16：原料从**纯文本**变成可点 —— 这是关联链的另一半。
+         玩家在研发页看到「🍵3(5)」缺料时，最直接的动作就是「去市场买」，
+         让他自己切页再找原料是多餘的动作。
+         ★ 缺料时仍然可点（红字但可点）—— 红是提示，不是禁用。 */
+      parts.push(`<button class="ing-link${has < need ? ' short' : ''}"
+        data-act="toing" data-id="${esc(k)}"
+        title="${esc(g.name)}：${has >= need ? '库存充足' : `还差 ${need - has} 个`}（点击去市场）">
+        ${g.emoji}${need}<span style="color:${
+          has >= need ? 'var(--green)' : 'var(--red)'}">(${has})</span></button>`);
     }
     needHtml = parts.join(' ');
   }
@@ -1619,7 +1888,7 @@ function recipeNodeCardHtml(s, n) {
     else if (n.status === 'locked' && n.lockMsg) tip = esc(n.lockMsg);
     else if (!canR.ok && canR.msg) tip = esc(canR.msg);
   }
-  return `<div class="rc ${cls}${isAch ? ' ach' : ''}">
+  return `<div class="rc ${cls}${isAch ? ' ach' : ''}" data-rid="${esc(n.recipe)}">
     <div class="rc-h"><span class="rc-e">${r.emoji}</span><span>${esc(r.name)}</span></div>
     <div class="rc-m">${esc(r.desc)}</div>
     <div class="rc-m">人气 ${r.pop} · 售价 ¥${r.price} · 成本约 ¥${costOf(s, n.recipe).toFixed(1)}</div>
@@ -1627,7 +1896,8 @@ function recipeNodeCardHtml(s, n) {
       ${cu ? `<span class="rc-tag cui">${cu.emoji}${esc(cu.name)}</span>` : ''}
       ${r.tags.map(t => `<span class="rc-tag">${TAGS[t].emoji}${TAGS[t].name}</span>`).join('')}
     </div>
-    ${owned ? `<div style="margin-top:7px;font-size:var(--fs-md);font-weight:800;color:var(--cyan)">✅ 已解锁</div>`
+    ${owned ? `<div style="margin-top:7px;font-size:var(--fs-md);font-weight:800;color:var(--cyan)">✅ 已解锁</div>
+           ${recipePerCupHtml(s, n.recipe)}`
       : isAch ? `<div class="rc-tip">🏅 成就专属 · 不可研发</div>`
         : `${r.city ? `<div class="rc-tip">📍 仅限${esc(ownCity)}</div>` : ''}
            <div style="margin-top:7px;font-size:var(--fs-sm);color:var(--txt3)">需要 ${needHtml}</div>
