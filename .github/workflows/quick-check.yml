@@ -57,6 +57,9 @@ jobs:
       - name: 存档可控字段转义（逐字段污染 + 扫全部面板）
         run: node tools/check-escape.js
 
+      - name: 源码注释是否泄漏到界面
+        run: node tools/check-leak.js
+
       - name: 主流程
         run: node tools/e2e-flow.js
 

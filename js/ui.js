@@ -893,6 +893,30 @@ UI.renderManage = function () {
   /* 已持有的经营策略卡（没有则整块不渲染） */
   h += UI.cardsChipsHtml(s);
 
+  /* news.text 来自存档（可导出 / 导入），必须转义。
+
+     ★ 这里曾经是唯一一处漏掉 esc() 的动态文本，导入一份带 payload 的存档就能执行。
+     ★ 但「唯一一处」只描述当时 —— V12/V13 新增了
+       store.name/emoji、manager.name/emoji、formerManagers[].name/emoji/fromStore
+       等存档可控字段，其中 3 个 emoji 字段一度漏了 esc()
+       （同对象上的 name 转义了 —— 同一对象里只转义一半，
+         review 时很容易误以为「name 都转了，应该没事」）。
+
+     ★ 所以别再依赖注释，改跑 node tools/check-escape.js ——
+       它会逐个污染 10 个存档可控字段、扫 6 个面板，
+       只要有一个没转义就报错。新加存档字段时把它加进那个列表。
+
+     ⚠️⚠️ 写这段注释时踩过两个坑，别再犯：
+       ① 它必须写在模板字符串**外面**。
+          写在 h += 反引号包裹的模板内部的话，注释起始符只是字面文本，
+          会把整段注释**原样渲染到游戏界面上**（V12 起就一直是坏的，
+          只是当时只有 2 行不明显；扩写成 12 行后一眼就能看见）。
+       ② 注释里不能出现「注释闭合符」，也不能出现反引号 ——
+          会提前结束块注释导致语法错误。 */
+  const newsHtml = s.news
+    ? `<div style="margin-top:9px;font-size:var(--fs-md);color:var(--amber)">📰 ${esc(s.news.text)}</div>`
+    : '';
+
   /* 今日情报 */
   h += `<div class="card"><div class="card-h">📡 今日情报 <span class="ch-sub">Day ${s.day}</span></div>
     <div class="intel">
@@ -903,20 +927,7 @@ UI.renderManage = function () {
       <div class="intel-i"><div class="ii-k">明日预告</div><div class="ii-v">${s.trendKnown ? nextTag.emoji + ' ' + nextTag.name : '❓ 未知'}</div>
         ${s.trendKnown ? '' : '<button class="btn btn-sm btn-ghost" data-act="scout" style="margin-top:3px">🔍 调研 ¥150</button>'}</div>
     </div>
-    /* news.text 来自存档（可导出 / 导入），必须转义。
-
-       ★ 这里曾经是唯一一处漏掉 esc() 的动态文本，导入一份带 payload 的存档就能执行。
-       ★ 但「唯一一处」只描述当时 —— V12/V13 新增了
-         store.name/emoji、manager.name/emoji、formerManagers[].name/emoji/fromStore
-         等存档可控字段，其中 3 个 emoji 字段一度漏了 esc()
-         （同对象上的 name 转义了 —— **同一对象里只转义一半，
-           review 时很容易误以为「name 都转了，应该没事」）。
-
-       ★ 所以别再依赖注释，改跑 node tools/check-escape.js ——
-         它会逐个污染 10 个存档可控字段、扫 6 个面板，
-         只要有一个没转义就报错。新加存档字段时把它加进那个列表。
-         ⚠️ 写这类注释时别在里面用反引号 —— 会提前结束块注释导致语法错误。 */
-    ${s.news ? `<div style="margin-top:9px;font-size:var(--fs-md);color:var(--amber)">📰 ${esc(s.news.text)}</div>` : ''}
+    ${newsHtml}
   </div>`;
 
   /* 每日合同（V1）：放在所有卡片最上面 ——
