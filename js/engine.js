@@ -353,12 +353,76 @@ function managerBonus(s, branch) {
        何况Lv.1 店长的日薪本来就低。 */
   const q = clamp((num(m.skill, 1) - 0.85) * 0.6, 0, 0.35);   /* 能力值微调 */
   const lvBonus = 0.04 + (r - 1) * 0.5 + q;/* 基础 4% + 等级 + 能力 */
+  /* ★ V13.4：叠加「组合加成」（团队层面的配合，跨店全局生效）。
+     组合是**全局**的 —— 一旦集齐，整个管理团队形成配合，所有店都受益。
+     这样两层分工清晰：
+       · 单店特性（ops/qc/lean/hosp）→ 只作用于**他那家店**（个人层）
+       · 组合加成（brand/leanOps/…） → 所有店都吃到（团队层）
+     玩家的决策因此是「**招什么特性**」+「**放谁去哪家店**」两件事。 */
+  const cb = managerComboBonus(s);
   return {
-    speed: 1 + lvBonus * 0.20 + (tr === 'ops' ? 0.02 : 0),
-    sat: 1 + lvBonus * 0.30 + (tr === 'qc' ? 0.50 : 0),
-    rep: 1 + lvBonus * 0.25 + (tr === 'hosp' ? 0.40 : 0),
-    ops: 1 + lvBonus * 0.28 + (tr === 'ops' ? 0.08 : 0),
+    speed: (1 + lvBonus * 0.20 + (tr === 'ops' ? 0.02 : 0)) * cb.speed,
+    sat: (1 + lvBonus * 0.30 + (tr === 'qc' ? 0.50 : 0)) * cb.sat,
+    rep: (1 + lvBonus * 0.25 + (tr === 'hosp' ? 0.40 : 0)) * cb.rep,
+    ops: (1 + lvBonus * 0.28 + (tr === 'ops' ? 0.08 : 0)) * cb.ops,
   };
+}
+
+/**
+ * 组合加成：已任命的店长之间形成的搭配（V13.4）
+ *
+ * ★ 判定只看**已任命**的店长（s.managers），不含候选池——
+ *   候选还没上任，不该触发「团队配合」。
+ *
+ * ★ 特性用 managerTrait() 的**兜底后** id 判定：
+ *   脏存档可能塞了字典外的 trait id，若用原始 id 比对，
+ *   一个不存在的特性也可能凑成组合（凭空白送加成）。
+ *
+ * @returns {{speed:number, sat:number, rep:number, ops:number}} 乘数（默认全 1）
+ */
+function managerComboBonus(s) {
+  const out = { speed: 1, sat: 1, rep: 1, ops: 1 };
+  const actives = managerComboView(s);
+  for (const c of actives) {
+    /* ★★ 必须判 active —— 只判 c.combo 存在的话，
+       **没集齐的组合也会被乘上去**（白送加成）。
+       这个 bug 是写 U2c 断言时被抓出来的 ——
+       「没招店长时组合乘数全为 1」这条判据直接把它照出来了。 */
+    if (!c || !c.active || !c.combo) continue;
+    if (c.combo.mul.speed) out.speed *= c.combo.mul.speed;
+    if (c.combo.mul.sat) out.sat *= c.combo.mul.sat;
+    if (c.combo.mul.rep) out.rep *= c.combo.mul.rep;
+    if (c.combo.mul.ops) out.ops *= c.combo.mul.ops;
+  }
+  return out;
+}
+
+/**
+ * 组合加成视图：哪些组合已激活 / 还差什么（V13.4）
+ *
+ * @returns 数组，每项：
+ *   { combo, active, have, need, missing }
+ *   have   —— 已具备的特性 id（去重）
+ *   need   —— 组合要求的特性 id 列表
+ *   missing—— 还缺哪些
+ */
+function managerComboView(s) {
+  const have = new Set();
+  for (const m of (s.managers || [])) {
+    if (!m) continue;
+    have.add(managerTrait(m).id);
+  }
+  return MANAGER_COMBOS.map(combo => {
+    const need = combo.traits.slice();
+    const missing = need.filter(t => !have.has(t));
+    return {
+      combo,
+      active: missing.length === 0,
+      have: need.filter(t => have.has(t)),
+      need,
+      missing,
+    };
+  });
 }
 
 /** 店员效率系数 */

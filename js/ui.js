@@ -798,6 +798,38 @@ function managerPanelHtml(s) {
     店长每天会<b>自动补员</b>到该店编制上限（与你手动招聘<b>共用名额</b>），
     代价是每天都要付他日薪。</div>`;
 
+  /* ★ V13.4：团队组合加成面板（放在招募区之前 ——
+     玩家要先知道「凑什么组合」才去招人，否则组合成了不可见的加成）。
+     借鉴开罗《创意咖啡厅物语》的「技能搭配」与放置类的「羁绊共鸣」：
+     单条数值堆叠没有经营「人」的乐趣，**组合本身才是策略**。 */
+  {
+    const cv = managerComboView(s);
+    const activeN = cv.filter(x => x.active).length;
+    h += `<div class="mgr-combos">
+      <div class="mgr-combos-h">🧩 团队组合 <span class="ch-sub">${activeN}/${cv.length} 已激活 · 跨店生效</span></div>
+      <div class="mgr-combos-sub">店长的<b>特性搭配</b>会形成组合加成，所有分店都受益 —— 招什么人、凑什么组合，是经营「人」的核心决策。</div>`;
+    for (const c of cv) {
+      const cb = c.combo;
+      const mulTxt = Object.keys(cb.mul).map(k => {
+        const nm = { speed: '速度', sat: '满意', rep: '口碑', ops: '客流' }[k] || k;
+        return nm + ' +' + Math.round((cb.mul[k] - 1) * 100) + '%';
+      }).join(' · ');
+      h += `<div class="mgr-combo${c.active ? ' on' : ''}">
+        <span class="mgr-combo-e">${cb.emoji}</span>
+        <div class="mgr-combo-info">
+          <div class="mgr-combo-n">${esc(cb.name)}${c.active ? ' ✔ 已激活' : ''}</div>
+          <div class="mgr-combo-d">${esc(cb.desc)}</div>
+          <div class="mgr-combo-m">${esc(mulTxt)}</div>
+          ${c.active ? '' : `<div class="mgr-combo-need">还缺：${c.missing.map(t => {
+        const tr = MANAGER_TRAITS.find(x => x.id === t);
+        return tr ? tr.emoji + tr.name : t;
+      }).join('、')}</div>`}
+        </div>
+      </div>`;
+    }
+    h += `</div>`;
+  }
+
   const fee = managerCost(s);
   for (let b = 2; b <= shops; b++) {
     const mg = managerOfBranch(s, b);

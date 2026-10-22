@@ -331,6 +331,14 @@ function drawPanelArea(ctx, L, s) {
  *  所以**所有关键信息必须画在界面上**：
  *  店长能力值、特性、加成百分比、编制数、候选人的日薪与等级。
  */
+/** 组合加成的可读文案（V13.4）—— H5/Canvas 两版共用同一套措辞 */
+function comboMulText(combo) {
+  var names = { speed: '速度', sat: '满意', rep: '口碑', ops: '客流' };
+  return Object.keys(combo.mul).map(function (k) {
+    return (names[k] || k) + ' +' + Math.round((combo.mul[k] - 1) * 100) + '%';
+  }).join(' · ');
+}
+
 function panelManagers(ctx, x, y, w, s) {
   var shops = Math.max(1, num(s.shops, 1));
   var left = managerSlotsLeft(s);
@@ -346,6 +354,48 @@ function panelManagers(ctx, x, y, w, s) {
     text(ctx, '只有总店（你亲自经营）。开设第一家分店后即可招募店长。',
       x + 6, y + 2, { size: FS.xs, color: T.txt3, maxW: w - 12 });
     return y + 22;
+  }
+
+  /* ★ V13.4：团队组合加成（与 H5 端同数据、同语义）。
+     ★ Canvas 端画得比 H5 紧凑 —— 一屏只有约 600px，
+       组合表只画「已激活 + 最接近的一个」，
+       否则 5 个组合 × 3 行会把下面的分店列表全推出裁剪区
+       （GFX.addHit 在裁剪区外不登记 → 画出来但点不到，
+         本项目在招牌卡/研发树/出杯位上都栽过这个）。 */
+  {
+    var cv = managerComboView(s);
+    var act = cv.filter(function (x) { return x.active; });
+    var near = cv.filter(function (x) { return !x.active; })
+      .sort(function (a, b) { return a.missing.length - b.missing.length; })[0];
+    GFX.card(ctx, x, y, w, 30);
+    text(ctx, '🧩 团队组合', x + 10, y + 8, { size: FS.md, weight: 800, color: T.txt });
+    text(ctx, act.length + '/' + cv.length + ' 已激活 · 跨店生效',
+      x + w - 10, y + 9, { size: FS.xs, align: 'right', color: T.cyan });
+    y += 34;
+    /* 已激活的组合逐个列出 */
+    for (var ai = 0; ai < act.length; ai++) {
+      var ac = act[ai].combo;
+      GFX.card(ctx, x, y, w, 30);
+      text(ctx, ac.emoji + ' ' + ac.name, x + 10, y + 5,
+        { size: FS.sm, weight: 800, color: T.amber, maxW: w - 90 });
+      text(ctx, comboMulText(ac), x + w - 10, y + 6,
+        { size: FS.xs, align: 'right', color: T.cyan, maxW: 84 });
+      text(ctx, ac.desc, x + 10, y + 17, { size: FS.xs, color: T.txt3, maxW: w - 20 });
+      y += 34;
+    }
+    /* 最接近凑齐的那个（给玩家一个目标） */
+    if (near) {
+      GFX.card(ctx, x, y, w, 30);
+      text(ctx, '🎯 ' + near.combo.name, x + 10, y + 5,
+        { size: FS.sm, weight: 700, color: T.txt2, maxW: w - 90 });
+      text(ctx, comboMulText(near.combo), x + w - 10, y + 6,
+        { size: FS.xs, align: 'right', color: T.txt3, maxW: 84 });
+      text(ctx, '还缺：' + near.missing.map(function (t) {
+        var tr = MANAGER_TRAITS.filter(function (x) { return x.id === t; })[0];
+        return tr ? tr.emoji + tr.name : t;
+      }).join('、'), x + 10, y + 17, { size: FS.xs, color: T.txt3, maxW: w - 20 });
+      y += 34;
+    }
   }
 
   var fee = managerCost(s);

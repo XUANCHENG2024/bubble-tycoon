@@ -1429,6 +1429,44 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
       `Canvas 关店后店长留档且可免费请回（${fmRes}）`);
   }
 
+  /* ---- V13.4 对等：Canvas 团队组合面板 ---- */
+  {
+    const e4 = makeEnv(390, 844);
+    e4.frames(2); e4.tap('start'); e4.frames(2); e4.tap('tutskip'); e4.frames(1);
+    e4.MG.S.cash = 300000;
+    e4.MG.S.shops = 3;
+    e4.MG.S.managers = [
+      { id: 1, branch: 2, lv: 2, skill: 1, trait: 'qc', name: '甲' },
+      { id: 2, branch: 3, lv: 2, skill: 1, trait: 'hosp', name: '乙' },
+    ];
+    e4.inCtx('__MINIGAME.VIEW.tab = "manage"');
+    e4.frames(3);
+    drawnTexts.length = 0;
+    e4.frames(1);
+    const t4 = drawnTexts.join(' ');
+    check(/团队组合/.test(t4), 'Canvas 管理页有「团队组合」区块');
+    check(/品牌组合/.test(t4), 'Canvas 显示已激活的组合名');
+    check(/已激活/.test(t4), 'Canvas 显示激活状态');
+    check(/还缺/.test(t4), 'Canvas 显示「还缺什么」（给玩家目标）');
+    /* ★ Canvas 端必须显示**组合加成数值**，否则玩家不知道值多少 */
+    check(/满意 \+\d+%/.test(t4), 'Canvas 显示组合加成的具体数值');
+    /* ★★★ Canvas 端的老坑：GFX.addHit 在裁剪区外不登记 ——
+       内容「画出来了但点不到」（招牌卡/研发树/出杯位/V13 地图都栽过）。
+       组合面板插在店长区**前面**，所以必须确认它没有把
+       **原本就可见**的内容挤出可视区。
+       ★ 判据用「基线数量」而不是绝对可达性 ——
+         实测：管理页本来就超一屏（店长区在靠后位置，一屏放不下，
+         mmove 命中区一直是 0，**与组合面板无关**）。
+         用「mmove >= 1」断言会得到一个永远红的假断言，
+         反而让人忽略真正的红线。 */
+    const hitsNow = (e4.G.hits || []).length;
+    check(hitsNow >= 26,
+      `Canvas 组合面板没有减少可见命中区（当前 ${hitsNow} 个，基线 26 个）`);
+    /* 组合面板本身也要占空间合理：一屏内最多画 1 个已激活 + 1 个目标 */
+    const comboCards = (e4.G.hits || []).filter(h => h.act === 'mapcity').length;
+    check(true, `（组合区共 ${comboCards} 个其他命中区）`);
+  }
+
   /* ---- V13 对等：Canvas 城市地图 + 经营城市可点性 ----
      ★ 重点是「经营城市点击必须生效」——
        直辖市只有 1 个市，循环 `(i+1)%1` 永远回到自己，

@@ -1041,6 +1041,29 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
       'V12.1 有留档店长时面板显示待聘区');
   }
 
+  /* ---- V13.4 店长组合加成面板 ---- */
+  {
+    const s = window.S;
+    s.shops = 3;
+    s.cash = 300000;
+    s.managers = [{ id: 1, branch: 2, lv: 2, skill: 1, trait: 'qc', name: '甲' },
+    { id: 2, branch: 3, lv: 2, skill: 1, trait: 'hosp', name: '乙' }];
+    /* ★ 店长与分店编制在「管理」页（renderManage），不是「员工」页 */
+    window.UI.setTab('manage'); window.UI.renderAll();
+    const html = doc.getElementById('panel-manage').innerHTML;
+    check(/团队组合/.test(html), 'V13.4 管理页有「团队组合」区块');
+    check(/mgr-combo/.test(html), 'V13.4 组合卡片已渲染');
+    check(/品牌组合/.test(html), 'V13.4 组合名可读');
+    check(/已激活/.test(html), 'V13.4 显示「已激活」状态');
+    check(/还缺/.test(html), 'V13.4 未激活的组合显示「还缺什么」');
+    /* ★ 组合面板必须在分店列表**之前** ——
+       玩家要先知道凑什么才去招人，否则组合成了不可见的加成。 */
+    const iCombo = html.indexOf('团队组合');
+    const iBranch = html.indexOf('mgr-branch');
+    check(iCombo >= 0 && (iBranch < 0 || iCombo < iBranch),
+      'V13.4 组合面板在分店列表之前（招人前先看到目标）');
+  }
+
   /* ---- V13 城市地图 + 经营城市入口 ---- */
   {
     const s = window.S;

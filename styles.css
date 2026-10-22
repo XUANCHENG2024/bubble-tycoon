@@ -1299,3 +1299,34 @@ body::before {
 .map-bar-info { flex: 1; min-width: 0; }
 .map-bar-cur { font-size: var(--fs-md); font-weight: 800; color: var(--txt); }
 .map-bar-sub { font-size: var(--fs-xs); color: var(--txt3); margin-top: 1px; }
+
+/* ---------- V13.4：团队组合加成 ---------- */
+.mgr-combos {
+  padding: 9px 10px; border-radius: 10px; margin-bottom: 10px;
+  background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .08);
+}
+.mgr-combos-h {
+  font-size: var(--fs-md); font-weight: 800; color: var(--txt);
+  display: flex; align-items: baseline; gap: 7px; flex-wrap: wrap;
+}
+.mgr-combos-sub {
+  font-size: var(--fs-xs); color: var(--txt3); line-height: 1.6; margin: 4px 0 7px;
+}
+.mgr-combos-sub b { color: var(--txt2); }
+.mgr-combo {
+  display: flex; gap: 8px; align-items: flex-start;
+  padding: 5px 6px; border-radius: 8px; margin-bottom: 3px;
+  border: 1px solid transparent; opacity: .62;
+}
+.mgr-combo.on {
+  opacity: 1;
+  background: rgba(255, 194, 71, .09);
+  border-color: rgba(255, 194, 71, .28);
+}
+.mgr-combo-e { font-size: var(--fs-md); line-height: 1.4; flex: none; }
+.mgr-combo-info { flex: 1; min-width: 0; }
+.mgr-combo-n { font-size: var(--fs-sm); font-weight: 700; color: var(--txt2); }
+.mgr-combo.on .mgr-combo-n { color: var(--amber); }
+.mgr-combo-d { font-size: var(--fs-xs); color: var(--txt3); margin-top: 1px; }
+.mgr-combo-m { font-size: var(--fs-xs); color: var(--cyan); margin-top: 2px; }
+.mgr-combo-need { font-size: var(--fs-xs); color: var(--txt3); margin-top: 2px; opacity: .9; }

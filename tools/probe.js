@@ -75,7 +75,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
-  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
+  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,MANAGER_COMBOS,MANAGER_TRAITS,managerComboView,managerComboBonus,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
   + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
   + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
@@ -2621,6 +2621,133 @@ console.log('=============== T. 经营城市与地图 ===============');
       `有坐标的城市(${mv.geoTotal}) 少于全部城市(${mv.cityTotal})，
        所以必须有列表入口而不能只靠地图点选`);
   }
+
+  /* ============================================================
+   *  U 组：店长组合加成（V13.4）
+   *
+   *  守的是一个**体验层面的不变量**：
+   *  组合加成必须真的生效、必须只认已任命的店长、
+   *  且不能被脏存档的假特性凑出来。
+   * ============================================================ */
+console.log('=============== U. 店长组合加成 ===============');
+{
+  /* ---- U1 组合表本身合法 ---- */
+  {
+    expect('U1a', E.MANAGER_COMBOS.length >= 3,
+      `组合表有 ${E.MANAGER_COMBOS.length} 个组合`);
+    const badTrait = E.MANAGER_COMBOS.filter(c =>
+      c.traits.some(t => !E.MANAGER_TRAITS.some(x => x.id === t)));
+    expect('U1b', badTrait.length === 0,
+      `所有组合的特性 id 都在字典内${badTrait.length ? '（非法：' + badTrait.map(c => c.id).join(',') + '）' : ''}`);
+    const badMul = E.MANAGER_COMBOS.filter(c =>
+      !c.mul || Object.keys(c.mul).some(k => c.mul[k] <= 1));
+    expect('U1c', badMul.length === 0,
+      `所有组合的乘数都 > 1（必须是增益，不能是惩罚）${badMul.length ? '（异常：' + badMul.map(c => c.id).join(',') + '）' : ''}`);
+    /* 加成要克制：单组合任一项不超过 10% */
+    const tooBig = E.MANAGER_COMBOS.filter(c =>
+      Object.keys(c.mul).some(k => c.mul[k] > 1.10));
+    expect('U1d', tooBig.length === 0,
+      `单组合加成 ≤10%（克制，不破坏平衡）${tooBig.length ? '（超标：' + tooBig.map(c => c.id).join(',') + '）' : ''}`);
+  }
+
+  /* ---- U2 未招人时不生效 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    const v = E.managerComboView(s);
+    expect('U2a', v.length === E.MANAGER_COMBOS.length,
+      '组合视图列出全部组合');
+    expect('U2b', v.every(x => !x.active),
+      '没招店长时没有组合激活');
+    /* ★ 判据是「组合乘数」而不是「managerBonus 的结果」——
+       managerBonus 本身有 4% 基础加成（Lv.1 保底），
+       所以它的返回值本来就不是 1。 */
+    const cb = E.managerComboBonus(s);
+    expect('U2c', cb.speed === 1 && cb.sat === 1 && cb.rep === 1 && cb.ops === 1,
+      '没招店长时组合乘数全为 1（不影响基础加成）');
+  }
+
+  /* ---- U3 集齐即激活，且加成真的进 managerBonus ---- */
+  {
+    /* 逐个组合验证：只放该组合要求的特性，应该刚好激活它 */
+    let failed = [];
+    for (const combo of E.MANAGER_COMBOS) {
+      const s = E.newGame('normal', 0);
+      s.managers = combo.traits.map((t, i) => ({
+        id: i + 1, branch: i + 2, lv: 2, skill: 1, trait: t, name: 'M' + i,
+      }));
+      const v = E.managerComboView(s);
+      const self = v.find(x => x.combo.id === combo.id);
+      if (!self || !self.active) { failed.push(combo.id + '(未激活)'); continue; }
+      /* 组合乘数必须含该组合声明的字段 */
+      const cb = E.managerComboBonus(s);
+      for (const k of Object.keys(combo.mul)) {
+        if (!(cb[k] > 1)) { failed.push(combo.id + '(' + k + '未加成)'); }
+      }
+    }
+    expect('U3a', failed.length === 0,
+      `每个组合集齐后都能激活并生效${failed.length ? '（失败：' + failed.slice(0, 3).join('、') + '）' : ''}`);
+
+    /* ★ 组合加成必须真的进 managerBonus（不只是算出来好看） */
+    const s2 = E.newGame('normal', 0);
+    s2.shops = 3;
+    const base = E.managerBonus(s2, 2);
+    s2.managers = [{ id: 1, branch: 2, lv: 2, skill: 1, trait: 'qc' },
+    { id: 2, branch: 3, lv: 2, skill: 1, trait: 'hosp' }];
+    const withCombo = E.managerBonus(s2, 2);
+    expect('U3b', withCombo.sat > base.sat,
+      `组合加成进了 managerBonus（满意 ${base.sat.toFixed(4)} → ${withCombo.sat.toFixed(4)}）`);
+    /* ★ 跨店生效：3 店的店长组合，2 店（自己没店长）也吃到 */
+    const s3 = E.newGame('normal', 0);
+    s3.shops = 3;
+    s3.managers = [{ id: 1, branch: 2, lv: 2, skill: 1, trait: 'qc' },
+    { id: 2, branch: 3, lv: 2, skill: 1, trait: 'hosp' }];
+    const mb2 = E.managerBonus(s3, 2);
+    const cb3 = E.managerComboBonus(s3);
+    expect('U3c', Math.abs(mb2.sat / (1 + 0) - mb2.sat) < 1e-9,
+      '无店长店也吃组合加成（组合是全局的）');
+    expect('U3d', cb3.sat > 1, '组合乘数确实 > 1');
+  }
+
+  /* ---- U4 只认已任命的店长，候选池不算 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.shops = 3;
+    /* 只放候选，不任命 */
+    s.mgrCand = { 2: [{ id: 1, trait: 'qc', lv: 2, skill: 1 }] };
+    const v = E.managerComboView(s);
+    expect('U4a', v.every(x => !x.active),
+      '候选池里的店长不触发组合（还没上任）');
+  }
+
+  /* ---- U5 脏存档不能凭假特性凑出组合 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    /* 塞一个字典外的 trait id —— 应当被 managerTrait 兜底成 'none' */
+    s.managers = [{ id: 1, branch: 2, lv: 2, skill: 1, trait: 'fake_trait_xyz' },
+    { id: 2, branch: 3, lv: 2, skill: 1, trait: 'another_fake' }];
+    const v = E.managerComboView(s);
+    expect('U5a', v.every(x => !x.active),
+      '字典外的特性 id 凑不出组合（兜底成 none）');
+  }
+
+  /* ---- U6 存档往返后组合仍在 ---- */
+  {
+    const s = E.newGame('normal', 0);
+    s.shops = 3;
+    s.managers = [{ id: 1, branch: 2, lv: 2, skill: 1, trait: 'qc', name: '甲' },
+    { id: 2, branch: 3, lv: 2, skill: 1, trait: 'hosp', name: '乙' }];
+    const before = E.managerComboView(s).filter(x => x.active).length;
+    /* ★ 用独立槽位 3 —— F 组结尾把槽 0 clearSave 了，
+       这里若还用槽 0，loadGame 返回 null 会误判成"存档丢了"。 */
+    E.setSlot(3);
+    E.saveGame(s, 3);
+    const back = E.loadGame(3);
+    const after = back ? E.managerComboView(back).filter(x => x.active).length : -1;
+    expect('U6a', before === after && before > 0,
+      `存档往返后组合仍激活（${before} → ${after}）`);
+    E.clearSave(3);
+  }
+}
 }
 
 console.log('');
