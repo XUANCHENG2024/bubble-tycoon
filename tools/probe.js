@@ -75,7 +75,7 @@ const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'
   + 'VENUE_TYPES,PROVINCES,CITIES,DISTRICTS,GEO,CITY_CENTERS,VENUE_DEFAULT,CITY_DEFAULT,venueTypeById,cityById,citiesOfProvince,districtsOfCity,normalizeGeo,setGeoToCityCenter,nextVenueType,nextProvince,nextCity,nextDistrict,cityGeoOf,'
   + 'CUISINES,CRAFT_WORKSHOPS,CUISINE_FOCUS,WORKSHOP_START,workshopById,workshopLevel,workshopCost,workshopCostCut,workshopResearchCut,workshopTier3Bonus,cuisineWeightMul,cuisineFocusBonus,cuisineFocusWeight,cuisineById,recipesOfCuisine,cuisineViews,buildWorkshop,reqOf,consumeStock,canListRecipe,canResearch,researchCost,doResearch,'
-  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,MANAGER_COMBOS,MANAGER_TRAITS,managerComboView,managerComboBonus,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
+  + 'STORE_LEVELS,STORE_SUFFIX,MANAGER_START_CASH,storeDailyCost,syncShopCount,storeByBranch,storeById,mainStore,allStores,managedStores,playerStores,storeManager,syncStoreManagers,makeStore,openStore,defaultStoreName,renameStore,setMainStore,setStoreAuto,fundStore,withdrawStore,managedStoresDaily,managedStoreOneDay,managedStoreBuy,venueTrafficMul,activeBranchCount,closeStore,STORE_UPGRADES,storeUpLevel,storeUpCost,buyStoreUpgrade,cityMapView,MANAGER_COMBOS,MANAGER_TRAITS,managerComboView,managerComboBonus,REGULAR_CFG,REGULAR_TRAITS,regularView,spawnOne,regularIdentityOf,regularServe,regularBonus,regularPullMul,regularsOf,CUSTOMER_TYPES,CUSTOMER_FACES,SPECIAL_CUSTOMERS,nextCity,nextProvince,storeTrafficBonus,storeStaffBonus,storeMenuBonus,storeCostCut,rehireManager,'
   + 'MANAGER_RANKS,MANAGER_TRAITS,MANAGER_NAMES,MANAGER_COSTS,BRANCH_STAFF_CAP,managerCount,managerSlotsLeft,managerOfBranch,managerById,managerTrait,managerRank,managerCost,managerRerollCost,branchStaffCap,staffOfBranch,makeManagerCandidate,refreshManagerCandidates,dailyManagerRefresh,hireManager,fireManager,moveManager,managerDaily,managerBonus,stationTime,'
   + 'RESEARCH_TREE,ACH_RECIPES,ALL_RECIPES,treeNodeById,nodeByRecipe,achRecipeById,cuisinesOfCity,hasCityCuisine,ingsOfCity,ingAvailableAt,currentCityId,recipeAvailableAt,availableRecipes,availableCuisineIds,treePrereqOk,researchTree,refreshCityMenu,grantAchRecipe,cityVisited,localRecipeCount,localCountIn,'
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalAction,updateRival,money,clamp,num,pick,rnd,'
@@ -2923,6 +2923,127 @@ console.log('=============== V. 地域挑战关卡 ===============');
     const sv = E.stageView(s);
     expect('V6b', sv.backlog > 0,
       `stageView 报出待补关卡数（backlog=${sv.backlog}）`);
+  }
+}
+
+/* ============================================================
+ *  W 组：常客系统（V13.6）
+ *
+ *  守的是「常客系统真的在起作用，且没有可被脏存档利用的漏洞」：
+ *   ① 好感累积与成常客的判定
+ *   ② 常客的加成真的进收入与小费
+ *   ③ 脏存档塞 fav=99999 不能白嫖常客加成
+ *   ④ 特殊顾客不占常客名额
+ * ============================================================ */
+console.log('=============== W. 常客系统 ===============');
+{
+  /* ---- W1 身份与好感累积 ---- */
+  {
+    const s = E.newGame('normal', 0, null);
+    const t = E.CUSTOMER_TYPES[0];
+    const reg = E.regularIdentityOf(s, t);
+    expect('W1a', !!reg && !!reg.id && !!reg.face && !!reg.name,
+      `常客身份可生成（${reg.id} / ${reg.face} / ${reg.name}）`);
+    expect('W1b', reg.fav === 0, '新身份好感为 0');
+
+    /* 服务 N 次 → 好感累积到上限 */
+    const need = Math.ceil(E.REGULAR_CFG.max / E.REGULAR_CFG.gain);
+    for (let i = 0; i < need; i++) E.regularServe(s, reg.id);
+    expect('W1c', reg.fav === E.REGULAR_CFG.max,
+      `服务 ${need} 次后好感满（${reg.fav}/${E.REGULAR_CFG.max}）`);
+    expect('W1d', reg.isRegular === true, '好感满 → 成为常客');
+
+    /* 好感不能超过上限 */
+    for (let i = 0; i < 50; i++) E.regularServe(s, reg.id);
+    expect('W1e', reg.fav === E.REGULAR_CFG.max,
+      `好感不超过上限（${reg.fav}）`);
+  }
+
+  /* ---- W2 常客加成真的生效 ---- */
+  {
+    const s = E.newGame('normal', 0, null);
+    const t = E.CUSTOMER_TYPES[0];
+    const reg = E.regularIdentityOf(s, t);
+    const before = E.regularBonus(s, reg);
+    expect('W2a', before.budget === 1 && before.tip === 1,
+      '未成常客时无加成');
+    for (let i = 0; i < Math.ceil(E.REGULAR_CFG.max / E.REGULAR_CFG.gain); i++) {
+      E.regularServe(s, reg.id);
+    }
+    const after = E.regularBonus(s, reg);
+    expect('W2b', after.budget > 1 && after.tip > 1,
+      `常客加成生效（预算 ×${after.budget} / 小费 ×${after.tip}）`);
+    expect('W2c', after.isRegular === true, 'regularBonus 标记 isRegular');
+    /* 回头率加权 */
+    expect('W2d', E.regularPullMul(s, reg) > 1,
+      `常客回头率加权生效（×${E.regularPullMul(s, reg).toFixed(2)}）`);
+  }
+
+  /* ---- W3 脏存档不能白嫖常客加成 ---- */
+  {
+    /* ★ fav 必须夹取到上限 —— 脏存档塞 fav=99999 就能白得 15% 消费加成。
+       这类漏洞在"玩家互相分享存档"的场景下最容易被利用。 */
+    const s = E.newGame('normal', 0, null);
+    s.regulars = {
+      'student#0': { id: 'student#0', type: 'student', face: '🧑', fav: 99999, name: '外挂' },
+      'worker#0': { id: 'worker#0', type: 'worker', face: '👩', fav: -50, name: '负数' },
+      'fake#0': { id: 'fake#0', type: 'not_a_type', face: '👽', fav: 100, name: '假类型' },
+    };
+    const back = E.sanitizeState(JSON.parse(JSON.stringify(s)));
+    const rs = back.regulars || {};
+    const good = rs['student#0'];
+    expect('W3a', !good || good.fav <= E.REGULAR_CFG.max,
+      `脏存档的 fav 被夹到上限（${good ? good.fav : '已丢弃'}）`);
+    expect('W3b', !rs['fake#0'],
+      '字典外的 type 被丢弃');
+    expect('W3c', !rs['worker#0'] || rs['worker#0'].fav >= 0,
+      '负数 fav 被夹到 0');
+  }
+
+  /* ---- W4 特殊顾客不占常客名额 ---- */
+  {
+    /* ★ 特殊顾客（评论家/美食家…）是一次性事件角色，
+       它们 regId=null（不累积好感）。
+       若仍写进档案，就是**永远 fav=0 的空档案**：
+       实测 30 天后名册混了 11 个空壳（31 位里 11 个是空壳），名册虚高。
+       ★ 测法：走真实的 spawnOne 路径（特殊顾客参数非空），
+         而不是直接调 regularIdentityOf —— 后者本来就会建档案。 */
+    const s = E.newGame('normal', 0, null);
+    s.menu = s.recipes.slice(0, 3);
+    /* spawnOne 需要 s.sim（新档时是 null）—— 造一个最小 sim */
+    s.sim = {
+      cups: 0, orders: 0, revenue: 0, lost: 0, clicks: 0, comboBest: 0,
+      trendCups: 0, typeServed: {}, typeLost: {}, byRecipe: {},
+      queue: [], spawned: 0, floaters: [], priceLost: 0, stockout: 0,
+    };
+    const sp = E.SPECIAL_CUSTOMERS[0];
+    expect('W4a', sp && !!sp.id, '有特殊顾客可测');
+    E.spawnOne(s, sp);
+    const known = E.regularView(s).known;
+    expect('W4b', known === 0,
+      `特殊顾客不占常客名额（known=${known}）`);
+    /* 而常规顾客会建档案 */
+    E.spawnOne(s, null);
+    expect('W4c', E.regularView(s).known >= 1,
+      '常规顾客会建立常客档案');
+  }
+
+  /* ---- W5 存档往返 ---- */
+  {
+    const s = E.newGame('normal', 0, null);
+    const t = E.CUSTOMER_TYPES[0];
+    const reg = E.regularIdentityOf(s, t);
+    for (let i = 0; i < Math.ceil(E.REGULAR_CFG.max / E.REGULAR_CFG.gain); i++) {
+      E.regularServe(s, reg.id);
+    }
+    const before = E.regularView(s).regulars;
+    E.setSlot(4);
+    E.saveGame(s, 4);
+    const back = E.loadGame(4);
+    const after = back ? E.regularView(back).regulars : -1;
+    expect('W5a', before === after && before > 0,
+      `存档往返后常客仍在（${before} → ${after}）`);
+    E.clearSave(4);
   }
 }
 }

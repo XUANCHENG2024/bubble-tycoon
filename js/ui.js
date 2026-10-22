@@ -780,6 +780,55 @@ function cityDetailModalHtml(s, cityId) {
  *    店长只管分店，玩家很容易忘总店也要人。
  *    只列分店会出现"店长都满了，总店一个人也没有"的荒谬局面。
  */
+/**
+ * 常客名册（V13.6）
+ *
+ * ★ 借鉴开罗《创意咖啡厅物语》的「常客度」——
+ *   顾客满意度累积到常客度满 100 后，消费预算与出手都会变大。
+ *   本作把它做成**个体**：每位熟客有脸、有名字、有好感条。
+ *
+ * ★ 为什么要让它可见：
+ *   常客的加成是「个体层」的（不同于全局口碑），
+ *   如果玩家看不到好感条，就不知道服务好有什么用、
+ *   也感受不到"这个老顾客越来越爱来了"的进展。
+ */
+function regularPanelHtml(s) {
+  const rv = regularView(s);
+  if (!rv.known) {
+    return `<div class="card"><div class="card-h">💝 熟客名册
+        <span class="ch-sub">还没人认识</span></div>
+      <div style="font-size:var(--fs-md);color:var(--txt3);line-height:1.7">
+        每天把客人<b>服务好</b>，他们会记住你的店 ——
+        好感攒满就会变成<b>常客</b>：出手更阔绰、常来光顾。</div></div>`;
+  }
+  /* 只显示好感最高的若干位 —— 名册可能有 100 位，全列太长 */
+  const top = rv.list.slice(0, 12);
+  let h = `<div class="card"><div class="card-h">💝 熟客名册
+      <span class="ch-sub">${rv.regulars} 位常客 / 认识 ${rv.known} 位</span></div>
+    <div style="font-size:var(--fs-xs);color:var(--txt3);margin-bottom:7px;line-height:1.6">
+      好感满 ${rv.max} 就是<b>常客</b>：消费预算 +${Math.round(REGULAR_CFG.budgetBonus * 100)}%、
+      小费 +${Math.round(REGULAR_CFG.tipBonus * 100)}%、更常光顾。</div>
+    <div class="reg-list">`;
+  for (const r of top) {
+    const isReg = r.fav >= rv.max;
+    const pct = Math.round((r.fav / rv.max) * 100);
+    h += `<div class="reg-item${isReg ? ' reg' : ''}">
+      <span class="reg-face">${esc(r.face)}</span>
+      <div class="reg-info">
+        <div class="reg-name">${esc(r.name)}${isReg ? ' 💝' : ''}</div>
+        <div class="reg-bar"><i style="width:${pct}%"></i></div>
+      </div>
+      <span class="reg-fav">${r.fav}</span>
+    </div>`;
+  }
+  if (rv.known > top.length) {
+    h += `<div style="font-size:var(--fs-xs);color:var(--txt3);margin-top:4px">
+      还有 ${rv.known - top.length} 位只是脸熟…</div>`;
+  }
+  h += `</div></div>`;
+  return h;
+}
+
 function managerPanelHtml(s) {
   const shops = Math.max(1, pos(s.shops, 1));
   const left = managerSlotsLeft(s);
@@ -1098,6 +1147,13 @@ UI.renderManage = function () {
      放在「原料市场」之后：它属于人事管理，重要性低于"今天卖什么"，
      但仍留在管理页 —— 招完人往往顺手看一眼编制。 */
   h += managerPanelHtml(s);
+
+  /* ---------- V13.6 常客名册 ----------
+     放在「店长与分店编制」之后：都是"经营人/客情"这一类，
+     玩家做完今天的活、安排好人手，顺手看一眼熟客。
+     ★ 常客是**个体**层面的东西（不是全局口碑），
+       所以必须有个地方看得到"谁是我的熟客"。 */
+  h += regularPanelHtml(s);
 
   /* 菜单 */
   const slots = menuSlots(s);

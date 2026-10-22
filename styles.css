@@ -1348,3 +1348,30 @@ body::before {
   font-size: var(--fs-xs); font-weight: 700; color: var(--amber);
   background: rgba(255, 194, 71, .14); border: 1px solid rgba(255, 194, 71, .3);
 }
+
+/* ---------- V13.6：常客名册 ---------- */
+.reg-list { display: flex; flex-direction: column; gap: 3px; }
+.reg-item {
+  display: flex; align-items: center; gap: 7px;
+  padding: 3px 5px; border-radius: 7px;
+}
+.reg-item.reg {
+  background: rgba(255, 107, 157, .10);
+  border: 1px solid rgba(255, 107, 157, .26);
+}
+.reg-face { font-size: var(--fs-md); line-height: 1.3; flex: none; }
+.reg-info { flex: 1; min-width: 0; }
+.reg-name { font-size: var(--fs-sm); color: var(--txt2); font-weight: 600; }
+.reg-item.reg .reg-name { color: var(--pink); }
+.reg-bar {
+  height: 3px; border-radius: 2px; margin-top: 2px;
+  background: rgba(255, 255, 255, .10); overflow: hidden;
+}
+.reg-bar i {
+  display: block; height: 100%; border-radius: 2px;
+  background: linear-gradient(90deg, var(--pink), var(--amber));
+}
+.reg-fav {
+  font-size: var(--fs-xs); color: var(--txt3); flex: none;
+  min-width: 24px; text-align: right;
+}

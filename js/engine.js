@@ -307,7 +307,27 @@ function typeWeightOf(s, t) {
 
 /** 按权重抽取顾客类型 */
 function pickCustomerType(s) {
-  return weightedPick(CUSTOMER_TYPES, t => typeWeightOf(s, t));
+  /* ★ V13.6：常客加权 —— 该类型下常客越多，这个类型越容易被抽中
+     （开罗的「常客度 ↑ → 人气 ↑ → 到店顾客 ↑」）。
+     只看**已成名常客**（好感满 100）的数量，
+     否则好感 2 的人也会贡献权重，稀释了"常客"的意义。 */
+  return weightedPick(CUSTOMER_TYPES, t => {
+    let w = typeWeightOf(s, t);
+    const n = regularCountOf(s, t.id);
+    if (n > 0) w *= 1 + n * 0.12;
+    return w;
+  });
+}
+
+/** 某类型下已成常客（好感满）的数量（V13.6） */
+function regularCountOf(s, typeId) {
+  const rs = regularsOf(s);
+  let n = 0;
+  for (const id in rs) {
+    const rec = rs[id];
+    if (rec && rec.type === typeId && num(rec.fav, 0) >= REGULAR_CFG.max) n++;
+  }
+  return n;
 }
 
 /** 当天客群的平均「每单杯数」——用于把杯数换算成人次 */
@@ -493,6 +513,8 @@ function newGame(diffKey, bpBonus, sigCarry) {
     staff: [], candidates: [], nextStaffId: 1,
     /* V11 店长系统：已招店长 / 各分店候选池 / 店长 id 计数器 */
     managers: [], mgrCand: {}, nextMgrId: 1,
+    /* V13.6：常客档案 id → { id, type, face, fav, name } */
+    regulars: {},
     weather: WEATHERS[1], trend: 'milky', nextTrend: 'fruity', trendKnown: false,
     news: null, newsFx: null, marketing: 0, dayMarketing: 0, eventTrafficMul: 1,
     doneEvents: [],
@@ -2038,11 +2060,149 @@ function openShop(s) {
   return { ok: true };
 }
 
+/* ============================================================
+ *  常客系统（V13.6）—— 借鉴开罗《创意咖啡厅物语》的「常客度」
+ *
+ * ★ 核心循环（开罗原作）：满意度 ↑ → 常客度 ↑ → 顾客预算 ↑ →
+ *   人气 ↑ → 到店顾客 ↑ —— 一个自己会滚的复利。
+ *
+ * ★ 本作的取舍：**身份 = 类型 + 外观变体**（不是完整个体）。
+ *   完整个体要改订单结构/队列/存档清洗，动辄上百行；
+ *   而「类型+变体」已经能让玩家感知到「那个戴帽子的老顾客越来越爱来」。
+ * ============================================================ */
+
+/** 常客档案表（存档里 s.regulars）：id → { id, type, face, fav, name } */
+function regularsOf(s) {
+  if (!s.regulars || typeof s.regulars !== 'object') s.regulars = {};
+  return s.regulars;
+}
+
+/**
+ * 给一位顾客分配稳定身份（V13.6）
+ *
+ * ★ 身份 id = 顾客类型 + 变体序号（如 student#0）。
+ *   变体从 CUSTOMER_FACES 里按类型分块取，
+ *   所以同类型的顾客长相不同、不同类型不会撞脸。
+ *
+ * @param {object} s 状态
+ * @param {object} t 顾客类型
+ * @returns {{id:string, type:string, face:string, fav:number, isRegular:boolean}}
+ */
+function regularIdentityOf(s, t) {
+  const faces = CUSTOMER_FACES;
+  const typeIdx = Math.max(0, CUSTOMER_TYPES.findIndex(x => x.id === t.id));
+  /* ★ V13.6 修正：每种类型可用**全部 20 个外观** → 5 × 20 = 100 位常客。
+     ★ 为什么不是 4 个变体（20 位）：
+       实测 30 天总服务 1000+ 单，20 个身份人均被服务 50 次 →
+       **全部好感满**（20/20 成常客），
+       常客系统就退化成"全员常客"，加成对所有人一样 = 没有区分度。
+       100 位身份把人均摊薄到 10 次左右，
+       才会出现"有的很熟、有的只是脸熟"的层次。 */
+  const v = Math.floor(RNG.next() * faces.length) % faces.length;
+  const face = faces[(typeIdx * 4 + v) % faces.length];
+  const id = t.id + '#' + v;
+  const rs = regularsOf(s);
+  if (!rs[id]) {
+    rs[id] = { id, type: t.id, face, fav: 0, name: regularNameOf(t.id, v) };
+  }
+  const rec = rs[id];
+  rec.face = face;
+  rec.fav = clamp(num(rec.fav, 0), 0, REGULAR_CFG.max);
+  rec.isRegular = rec.fav >= REGULAR_CFG.max;
+  return rec;
+}
+
+/** 常客的昵称（由类型 + 变体派生，跨局稳定） */
+function regularNameOf(typeId, v) {
+  const t = CUSTOMER_TYPES.find(x => x.id === typeId);
+  const base = t ? t.name : '顾客';
+  const suffix = ['常客', '老熟客', '回头客', '铁粉'][v % 4];
+  return base + suffix;
+}
+
+/**
+ * 常客的回头率加成（V13.6）
+ *
+ * ★ 好感越高越常来；满 100（常客）时额外加权。
+ * @returns 客流权重乘数
+ */
+function regularPullMul(s, reg) {
+  if (!reg) return 1;
+  const fav = num(reg.fav, 0);
+  const cfg = REGULAR_CFG;
+  if (fav >= cfg.max) return 1 + cfg.pullWeight;
+  /* 好感 0~100 线性映射到 1.0~1.45 */
+  return 1 + (fav / cfg.max) * 0.45;
+}
+
+/**
+ * 常客的服务结算（V13.6）：满意服务 → 好感 +gain
+ * @param {object} s 状态
+ * @param {string} regId 常客 id
+ */
+function regularServe(s, regId) {
+  if (!regId) return;
+  const rs = regularsOf(s);
+  const rec = rs[regId];
+  if (!rec) return;
+  const before = rec.fav;
+  rec.fav = clamp(num(rec.fav, 0) + REGULAR_CFG.gain, 0, REGULAR_CFG.max);
+  rec.isRegular = rec.fav >= REGULAR_CFG.max;
+  /* ★ 刚刚成为常客 → 给一条提示（一次性，成就感 + 引导玩家） */
+  if (before < REGULAR_CFG.max && rec.fav >= REGULAR_CFG.max) {
+    pushLog(s, `💝 ${rec.name} 成了常客！以后消费更舍得花`);
+    if (s.sim) s.sim.floaters.push({ text: `💝 ${rec.name} 成了常客`, kind: 'good' });
+  }
+}
+
+/**
+ * 常客好感不再每日衰减（V13.6 修正）
+ *
+ * ★ 初版有「每天 -1 淡忘」的设计，实测发现**数学死锁**：
+ *   顾客 2 天来 1 次 → 每 2 天净 -2 +2 = 0 → 永远卡在 92，满不了；
+ *   3 天来 1 次 → 净 -1 → 越攒越少。
+ *   30 天实测确实有两位卡在 96 / 92 永远成不了常客。
+ *
+ * ★ 开罗原作的常客度**不衰减** —— 它是「累积的里程碑」而不是「易变的状态」。
+ *   服务过的人记得你，不因为几天没来就忘了。
+ *   ★ 所以这里不做衰减，改用别的机制表达"不常来"：
+ *     回头率权重（pullWeight）已经让常客更常来，
+ *     而没被服务的顾客自然停在低好感（不会突然变常客）。
+ *
+ * 函数保留（不删）—— 万一日后要加「淡忘」机制，有接口可用；
+ * 但**当前实现是空操作**，调用点保留是为了不改动 nextDay 的结构。
+ */
+function regularDecay(s) {
+  /* ★ 当前无衰减：见上方说明（初版的 -1/天 会造成数学死锁） */
+}
+
+/** 常客加成：消费预算 / 小费（V13.6） */
+function regularBonus(s, reg) {
+  if (!reg || num(reg.fav, 0) < REGULAR_CFG.max) return { budget: 1, tip: 1, isRegular: false };
+  return {
+    budget: 1 + REGULAR_CFG.budgetBonus,
+    tip: 1 + REGULAR_CFG.tipBonus,
+    isRegular: true,
+  };
+}
+
+/** 常客名册视图（UI 用）：已认识 / 已成常客的顾客 */
+function regularView(s) {
+  const rs = regularsOf(s);
+  const list = Object.keys(rs).map(k => rs[k]).filter(Boolean);
+  list.sort((a, b) => (b.fav || 0) - (a.fav || 0));
+  return {
+    list,
+    known: list.length,
+    regulars: list.filter(x => x.fav >= REGULAR_CFG.max).length,
+    max: REGULAR_CFG.max,
+  };
+}
+
 /**
  * 生成一位顾客并入队。
  * type 非空 = 特殊顾客（V7）；为 null = 常规顾客（按客群权重抽）。
- */
-function spawnOne(s, type) {
+ */function spawnOne(s, type) {
   const sim = s.sim;
   if (!s.menu.length) return;
   const t = type || pickCustomerType(s);
@@ -2067,6 +2227,19 @@ function spawnOne(s, type) {
   });
 
   sim.spawned++;
+  /* ★ V13.6 常客：给这位顾客一个**稳定身份**（跨天一致）。
+     身份 = 顾客类型 + 外观变体（从 CUSTOMER_FACES 里按类型分块取），
+     最多 5 类型 × 4 变体 = 20 位「熟客」。
+     ★ 刻意不做完整个体（那要改订单结构/队列/存档清洗），
+       但玩家感知上仍是「那个戴帽子的老顾客越来越爱来」。
+     ★★ **特殊顾客不分配身份** —— 它们是一次性事件角色（评论家、美食家…），
+        不该占常客名额。而且它们 regId 为 null（不累积好感），
+        若仍写进档案就是**永远 fav=0 的空档案**：
+        实测 30 天后名册里混了 11 个空条目（31 位里 11 个是空壳），
+        名册虚高、存档浪费。 */
+  const reg = type ? null : regularIdentityOf(s, t);
+  /* 常客加权：好感越高越常来（开罗的「常客度 ↑ → 人气 ↑ → 客流 ↑」） */
+  const pull = regularPullMul(s, reg);
   /* 等位座满了 → 直接走人 */
   if (sim.queue.length >= queueCap(s)) {
     sim.lost++; sim.repGain += CFG.LOST_REP;
@@ -2075,7 +2248,9 @@ function spawnOne(s, type) {
     return;
   }
   /* 价格接受度：客群容忍度不同，定价过高会被当场劝退。
-     🃏 策略卡「精品路线」提高 priceTol —— 可以涨价而不被劝退。 */
+     🃏 策略卡「精品路线」提高 priceTol —— 可以涨价而不被劝退。
+     ★ V13.6：常客的预算加成（好感满 100）—— 开罗的「常客度↑ → 预算↑」。 */
+  const regB = regularBonus(s, reg);
   const eff = (s.ratios[r] || 1) / t.priceTol / cardMul(s, 'priceTol');
   const accept = clamp(1.35 - 0.35 * eff, 0.3, 1.5);
   if (RNG.next() > accept) {
@@ -2089,9 +2264,17 @@ function spawnOne(s, type) {
 
   sim.queue.push({
     id: 'c' + sim.spawned + '_' + RNG.next().toString(36).slice(2, 6),
-    face: t.emoji, rid: r, type: t.id,
+    /* ★ V13.6：常规顾客用**常客身份的外观**（同一类型不同变体长相不同），
+       这样玩家能认出「那个戴帽子的老顾客」。特殊顾客保持类型专属表情。 */
+    face: type ? t.emoji : reg.face, rid: r, type: t.id,
     /* V7：特殊顾客要在队列里一眼认出来（face 不同 + 角标） */
     special: type ? t.id : null,
+    /* ★ V13.6：常客身份（null = 不是常客系统的追踪对象） */
+    regId: reg ? reg.id : null,
+    /* ★ V13.6：常客的预算加成（好感满 100 时 +15%） */
+    budgetMul: regB.budget,
+    tipMul: regB.tip,
+    isRegular: regB.isRegular,
     cups: rndInt(t.cups[0], t.cups[1]),
     wait: 0,
     /* 🃏 策略卡：会员体系延长耐心、员工入股缩短耐心 */
@@ -2133,7 +2316,12 @@ function assignOrder(s, st, c) {
   }
   const n = c.cups || 1;
   for (let i = 0; i < n; i++) sim.cogs += consumeStock(s, c.rid, st.worker) * cardMul(s, 'cogs');
-  st.order = { c, progress: 0, price: priceOf(s, c.rid), rid: c.rid, cups: n, type: c.type };
+  st.order = {
+    c, progress: 0, price: priceOf(s, c.rid), rid: c.rid, cups: n, type: c.type,
+    /* ★ V13.6：常客加成随订单带下来（顾客进店时就算好，
+       避免结算时再查一次档案 —— 期间好感可能已被别的订单改过）。 */
+    regId: c.regId || null, budgetMul: num(c.budgetMul, 1), tipMul: num(c.tipMul, 1),
+  };
   return true;
 }
 
@@ -2149,12 +2337,18 @@ function completeOrder(s, st) {
   /* 限时促销（V2）期间每杯再让 ¥2：它换来的是那 8 秒里多来 60% 的客人，
      划不划算取决于当时产能够不够 —— 这正是它作为"决策"的意义。 */
   const saleNow = sim.t < sim.saleUntil;
-  const income = Math.max(1, o.price * cups - sub - (saleNow ? CFG.SALE_UNIT_SUB * cups : 0));
+  /* ★ V13.6：常客的**消费预算加成**（开罗的「常客度↑ → 顾客预算↑」）。
+     乘在收入上（不是加固定额）—— 越贵的单子，常客多花的越多。 */
+  const bMul = Math.max(1, num(o.budgetMul, 1));
+  const income = Math.max(1,
+    (o.price * bMul - sub) * cups - (saleNow ? CFG.SALE_UNIT_SUB * cups : 0));
 
   s.cash += income;
   sim.revenue += income;
   sim.orders++;
   sim.cups += cups;
+  /* ★ V13.6：满意服务 → 好感累积（成常客的那天会推一条日志） */
+  if (o.regId) regularServe(s, o.regId);
   /* V11：分店工位额外享受店长的口碑/满意度加成。
      总店（branchIdx = 1）不受影响 —— 加成必须限定在店长管的店里，
      否则「招店长」就变成全局加成，玩家无脑堆一家店即可。 */
@@ -2231,7 +2425,9 @@ function rushStation(s, idx) {
   s.stats.clicks++;
   bumpQuest(s, 'clicks', 1);
   /* 🃏 策略卡：自助点单机提高小费、极速出杯降低小费 */
-  const t = st.order.price * CFG.RUSH_TIP * bonus * cardMul(s, 'tip');
+  /* ★ V13.6：常客的小费加成（开罗的常客「出手更大方」） */
+  const t = st.order.price * CFG.RUSH_TIP * bonus * cardMul(s, 'tip')
+    * Math.max(1, num(st.order.tipMul, 1));
   s.cash += t; sim.revenue += t; sim.tips += t;
   /* 小费进了 sim.revenue（结算报表会算），任务进度也该跟着走，
      否则「营业额冲高」的进度条永远比报表少一截。 */
@@ -2531,6 +2727,9 @@ function startEndless(s) {
 function nextDay(s) {
   s.endlessLevelUp = false;
   s.day++;
+  /* ★ V13.6：常客好感每日自然衰减（不常来的会淡忘）。
+     已经成常客的（好感满 100）不衰减 —— 那是"铁粉"，不会因为一天没来就忘了。 */
+  regularDecay(s);
   s.cardOffer = null;      /* 抽卡是一次性的，跨天作废（选择发生在 enterNextDay 之前） */
   /* 营销是「当天一次性投入」，开门时扣掉、打烊后归零。
      以前这个归零是完全静默的：玩家第二天看到营销还是 ¥0，
@@ -4459,6 +4658,34 @@ function sanitizeState(s) {
     });
   }
   s.managers = mgrs;
+  /* ★ V13.6：常客档案清洗。
+     要点：
+       ① 必须是对象（老存档没有这个字段）
+       ② fav 夹取到 [0, max] —— 脏存档塞 fav=99999 会让所有人立刻成常客
+       ③ type 必须在字典内 —— 否则 UI 显示不出名字，且该条目不该计数
+       ④ 条数上限 —— 最多 5 类型 × 4 变体 = 20 条，超出的丢弃
+     ★ fav 上限必须夹：**脏存档塞一个 fav=9999 就白得 15% 消费加成**，
+       这类漏洞在"玩家互相分享存档"的场景下最容易被利用。 */
+  {
+    const raw = (s.regulars && typeof s.regulars === 'object' && !Array.isArray(s.regulars)) ? s.regulars : {};
+    const out = {};
+    let n = 0;
+    for (const id in raw) {
+      if (n >= 40) break;
+      const r = raw[id];
+      if (!r || typeof r !== 'object') continue;
+      if (!CUSTOMER_TYPES.some(t => t.id === r.type)) continue;
+      out[String(id).slice(0, 24)] = {
+        id: String(id).slice(0, 24),
+        type: r.type,
+        face: typeof r.face === 'string' ? r.face.slice(0, 8) : '🧑',
+        fav: clamp(num(r.fav, 0), 0, REGULAR_CFG.max),
+        name: typeof r.name === 'string' ? r.name.slice(0, 16) : '常客',
+      };
+      n++;
+    }
+    s.regulars = out;
+  }
   /* ★ 名额硬顶：店长数**不可能**超过店数（V12 含主店，故为 shopN）。
      不裁剪的话，脏存档塞 20 个店长进来，
      玩家白得 20 份加成而分店只有 3 家（白嫖是最难查的平衡漏洞）。 */
