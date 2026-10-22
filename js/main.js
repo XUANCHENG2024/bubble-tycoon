@@ -161,17 +161,8 @@ function autoSave(s) {
 /** 每次操作后即时结算成就 / 标记教程完成（不再等到打烊） */
 function pump() {
   const s = window.S;
-  const got = checkAchievements(s);
-  if (got && got.length) {
-    /* ★ 只在跨局首次达成时给，之后重复达成仍有现金但没有 ★ */
-    const firsts = claimAchStars(window.META, got);
-    if (firsts.length) saveMeta(window.META);
-    got.forEach((a, i) => setTimeout(() => {
-      UI.toast(`🏅 ${a.emoji} ${a.name}  +${money(a.reward.cash || 0)}`
-        + (firsts.indexOf(a.id) >= 0 ? ` ${a.reward.bp}★` : ''), 'gold');
-      UI.confetti(22); SFX.ach();
-    }, i * 400));
-  }
+  /* ★ V13.8：成就弹出走showAchBatch（与 emitAchievements 同一份实现） */
+  showAchBatch(checkAchievements(s));
   emitQuests();
   UI.renderAll();
   autoSave(s);
@@ -203,13 +194,53 @@ function onDayEnd() {
   UI.showReport();
 }
 
-/** 弹出成就（去掉 s.newAchList 里的已消费项，避免重复） */
-function emitAchievements() {
+/**
+ * 把经营城市切到指定城市（V13.8 抽取）
+ *
+ * ★ 为什么要抽：
+ *   `mapset`（地图详情里点）与 `mappick`（城市选择器里选）两个 action
+ *   做的是**同一件事**，14 行一模一样（check-dup.js 扫出来的）。
+ *   它们存在的意义是**入口不同**（一个是地图卡片，一个是选择器列表），
+ *   行为必须一致 —— 抽出来才能保证「两个入口的结果永远相同」。
+ *
+ * ★ 提示里包含「下架了几款本地菜」+「当地特色是哪几道」——
+ *   切城不是纯粹的好事（旧城特色菜会下架），必须让玩家知道代价，
+ *   否则会以为是 bug。
+ *
+ * @param {string} cityId 目标城市 id
+ */
+function doSetVenueCity(cityId) {
   const s = window.S;
-  let got = [];
-  if (s.newAchList && s.newAchList.length) { got = s.newAchList; s.newAchList = []; }
-  else got = checkAchievements(s);
-  if (!got.length) return;
+  const r = setVenueCity(s, cityId);
+  if (!r.ok) { UI.toast(r.msg, 'err'); return; }
+  UI.closeModal();
+  const parts = [`已切换到${r.cityName || cityId}`];
+  if (r.dropped && r.dropped.length) parts.push(`${r.dropped.length} 款本地菜下架`);
+  if (r.cityCuisines && r.cityCuisines.length) {
+    parts.push('当地特色：' + r.cityCuisines.map(cid => {
+      const c = cuisineById(cid);
+      return c ? c.name : cid;
+    }).join('、'));
+  }
+  UI.toast(parts.join(' · '), 'ok');
+  SFX.click();
+  pump();
+}
+
+/**
+ * 弹出一组成就提示（V13.8 抽取）
+ *
+ * ★ 为什么要抽：
+ *   这段「领★ → 存 meta → 逐条 toast（带间隔）→ 撒彩带 → 播音效」
+ *   原本在 pump() 和 emitAchievements() 里**各写了一份**，8 行一模一样。
+ *   风险不是"多写了些"，而是将来改 toast 文案/加音效/调节奏时只改一处 ——
+ *   玩家会看到"操作后弹的成就"和"打烊后弹的成就"长得不一样。
+ *
+ * @param {Array} got 已达成的成就数组
+ */
+function showAchBatch(got) {
+  if (!got || !got.length) return;
+  /* ★ 只在跨局首次达成时给，之后重复达成仍有现金但没有 ★ */
   const firsts = claimAchStars(window.META, got);
   if (firsts.length) saveMeta(window.META);
   got.forEach((a, i) => setTimeout(() => {
@@ -217,6 +248,16 @@ function emitAchievements() {
       + (firsts.indexOf(a.id) >= 0 ? ` ${a.reward.bp}★` : ''), 'gold');
     UI.confetti(22); SFX.ach();
   }, i * 400));
+}
+
+/** 弹出成就（去掉 s.newAchList 里的已消费项，避免重复） */
+function emitAchievements() {
+  const s = window.S;
+  let got = [];
+  if (s.newAchList && s.newAchList.length) { got = s.newAchList; s.newAchList = []; }
+  else got = checkAchievements(s);
+  if (!got.length) return;
+  showAchBatch(got);
 }
 
 /* ---------------- 收官 ---------------- */
@@ -575,20 +616,7 @@ function doAct(act, el) {
     }
     case 'mapset': {
       /* 从地图详情设为经营城市 */
-      const r = setVenueCity(s, id);
-      if (!r.ok) { UI.toast(r.msg, 'err'); break; }
-      UI.closeModal();
-      const parts = [`已切换到${r.cityName || id}`];
-      if (r.dropped && r.dropped.length) parts.push(`${r.dropped.length} 款本地菜下架`);
-      if (r.cityCuisines && r.cityCuisines.length) {
-        parts.push('当地特色：' + r.cityCuisines.map(cid => {
-          const c = cuisineById(cid);
-          return c ? c.name : cid;
-        }).join('、'));
-      }
-      UI.toast(parts.join(' · '), 'ok');
-      SFX.click();
-      pump();
+      doSetVenueCity(id);
       break;
     }
     case 'mapgoto': {
@@ -601,20 +629,7 @@ function doAct(act, el) {
     }
     case 'mappick': {
       /* 从城市选择器里选定一个城市 */
-      const r = setVenueCity(s, id);
-      if (!r.ok) { UI.toast(r.msg, 'err'); break; }
-      UI.closeModal();
-      const parts = [`已切换到${r.cityName || id}`];
-      if (r.dropped && r.dropped.length) parts.push(`${r.dropped.length} 款本地菜下架`);
-      if (r.cityCuisines && r.cityCuisines.length) {
-        parts.push('当地特色：' + r.cityCuisines.map(cid => {
-          const c = cuisineById(cid);
-          return c ? c.name : cid;
-        }).join('、'));
-      }
-      UI.toast(parts.join(' · '), 'ok');
-      SFX.click();
-      pump();
+      doSetVenueCity(id);
       break;
     }
     case 'stbuy': {

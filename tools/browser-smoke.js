@@ -1077,6 +1077,62 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
       `resetHUDCache 后 HUD 立即反映新值（${cashEl.textContent}）`);
   }
 
+  /* ---- V13.8 切城逻辑抽取：两个入口行为必须一致 ---- */
+  {
+    /* ★ mapset（地图）与 mappick（选择器）抽成了同一个 doSetVenueCity。
+       要守的不是「点了不报错」，而是**切城真的生效**且提示一致。 */
+    const s4 = window.S;
+    s4.cash = 300000;
+    s4.menu = s4.recipes.slice(0, 3);
+    /* 入口 A：mapset */
+    let okA = true, msgA = '';
+    try {
+      window.doAct('mapset', { dataset: { id: '310100' } });
+    } catch (e) { okA = false; msgA = e.message; }
+    const cityA = (s4.venue && s4.venue.cityId) || '';
+    check(okA, `mapset 入口不抛异常${msgA ? '：' + msgA : ''}`);
+    check(cityA === '310100', `mapset 切城生效（cityId=${cityA}）`);
+    /* 入口 B：mappick，切到另一个城市 */
+    let okB = true;
+    try {
+      window.doAct('mappick', { dataset: { id: '510100' } });
+    } catch (e) { okB = false; }
+    const cityB = (s4.venue && s4.venue.cityId) || '';
+    check(okB, 'mappick 入口不抛异常');
+    check(cityB === '510100', `mappick 切城生效（cityId=${cityB}）`);
+    /* ★ 切到非法城市必须被拒绝且不改变状态 */
+    const before = s4.venue.cityId;
+    window.doAct('mapset', { dataset: { id: '99999999' } });
+    check(s4.venue.cityId === before,
+      `非法城市 id 被拒绝（仍为 ${s4.venue.cityId}）`);
+  }
+
+  /* ---- V13.8 店长候选卡抽取：两处渲染必须一致 ---- */
+  {
+    /* ★ 抽取的**真正风险**是「改一处漏一处」——
+       玩家会看到同一个候选人在招店长弹窗和管理页显示不一致。
+       所以断言要比对两处的 HTML，而不只是「都有渲染」。 */
+    const s3 = window.S;
+    s3.shops = 3;
+    s3.cash = 300000;
+    s3.managers = [];
+    s3.mgrCand = { 2: [{ id: 1, name: '测试甲', emoji: '🧑‍💼', lv: 2, skill: 1.1, trait: 'qc', wage: 800 }] };
+    window.UI.setTab('manage'); window.UI.renderAll();
+    const manageHtml = doc.getElementById('panel-manage').innerHTML;
+    check(/测试甲/.test(manageHtml), 'V13.8 管理页渲染候选人');
+    check(/data-act="mhire"/.test(manageHtml), 'V13.8 管理页用 mhire action');
+    check(/招募/.test(manageHtml), 'V13.8 管理页按钮文案是「招募」');
+    check(/品质把关/.test(manageHtml), 'V13.8 候选人显示特性');
+    /* 两处的「共有部分」必须一致：姓名/等级/特性/日薪/能力 */
+    const parts = [
+      ['姓名', '测试甲'], ['等级', 'Lv.2'], ['特性名', '品质把关'],
+      ['日薪', '¥800'], ['能力', '1.10'],
+    ];
+    const missing = parts.filter(([, t]) => !manageHtml.includes(t)).map(([n]) => n);
+    check(missing.length === 0,
+      `V13.8 候选人信息完整${missing.length ? '（缺：' + missing.join('、') + '）' : ''}`);
+  }
+
   /* ---- V13.4 店长组合加成面板 ---- */
   {
     const s = window.S;

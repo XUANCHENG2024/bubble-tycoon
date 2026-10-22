@@ -590,11 +590,40 @@ function storeCandidatesHtml(s, branch) {
   let h = `<div style="font-size:11.5px;color:var(--txt3);margin-bottom:8px">
     任命费用 ${money(fee)} · 每家店至多一名店长</div>`;
   for (let i = 0; i < cands.length; i++) {
-    const c = cands[i];
-    const tr = managerTrait(c);
-    h += `<div class="mgr-cand">
+    h += managerCandidateHtml(cands[i], i, branch, fee, s.cash >= fee, 'smgrpick', '任命');
+  }
+  return h;
+}
+
+/**
+ * 店长候选人卡片（V13.8 抽取）
+ *
+ * ★ 为什么要抽：
+ *   这段卡片原本在两处**几乎完全重复**（V11 招店长弹窗 + V12 管理页编制区），
+ *   18 行一样、只差缩进。check-dup.js 扫出来的第一处。
+ *   两份拷贝的真实风险不是"多写了些"，而是**将来改一处漏一处** ——
+ *   比如给候选人加上专精提示，改了弹窗忘了改管理页，
+ *   玩家会看到"同一个候选人在两个页面显示不同"。
+ *
+ * ★ 两处原本有**两处真实差异**（所以要参数化，不能强行统一）：
+ *   ① data-act不同：smgrpick（弹窗里挑）vs mhire（管理页招募）
+ *   ② 按钮文案不同：「任命」vs「招募」
+ *   —— 它们是两个不同的 action，接的是 main.js 里两个分支，
+ *   强行合并会破坏「同一个候选人在两处行为一致」的预期。
+ *
+ * @param {object} c        候选人
+ * @param {number} idx      在候选数组里的下标（用于 data-i）
+ * @param {number} branch   所属分店号
+ * @param {number} fee      当前任命费用
+ * @param {boolean} afford  是否付得起（付不起时按钮禁用）
+ * @param {string} act      data-act 值（smgrpick / mhire）
+ * @param {string} label    按钮文案
+ */
+function managerCandidateHtml(c, idx, branch, fee, afford, act, label) {
+  const tr = managerTrait(c);
+  return `<div class="mgr-cand">
       <div class="mgr-row">
-        <span class="mgr-e">${c.emoji}</span>
+        <span class="mgr-e">${esc(c.emoji)}</span>
         <div class="mgr-info">
           <div class="mgr-name">${esc(c.name)}<span class="mgr-lv">Lv.${c.lv} ${esc(managerRank(c.lv).name)}</span></div>
           <div class="mgr-trait">${tr.emoji} ${esc(tr.name)} · ${esc(tr.desc)}</div>
@@ -605,11 +634,9 @@ function storeCandidatesHtml(s, branch) {
         </div>
       </div>
       <button class="btn btn-sm btn-primary" style="width:100%;margin-top:6px"
-        data-act="smgrpick" data-b="${branch}" data-i="${i}"
-        ${s.cash >= fee ? '' : 'disabled'}>任命 · ${money(fee)}</button>
+        data-act="${act}" ${act === 'mhire' ? `data-br="${branch}"` : `data-b="${branch}"`} data-i="${idx}"
+        ${afford ? '' : 'disabled'}>${label} · ${money(fee)}</button>
     </div>`;
-  }
-  return h;
 }
 
 /** 开店流程弹窗内容 */
@@ -1010,23 +1037,7 @@ function managerPanelHtml(s) {
     } else if (cands.length) {
       h += `<div class="mgr-cands">`;
       for (let i = 0; i < cands.length; i++) {
-        const c = cands[i];
-        const tr = managerTrait(c);
-        h += `<div class="mgr-cand">
-          <div class="mgr-row">
-            <span class="mgr-e">${c.emoji}</span>
-            <div class="mgr-info">
-              <div class="mgr-name">${esc(c.name)}<span class="mgr-lv">Lv.${c.lv} ${esc(managerRank(c.lv).name)}</span></div>
-              <div class="mgr-trait">${tr.emoji} ${esc(tr.name)} · ${esc(tr.desc)}</div>
-            </div>
-            <div class="mgr-cost">
-              <div>日薪 ${money(c.wage)}</div>
-              <div class="mgr-skill">能力 ${Number(c.skill).toFixed(2)}</div>
-            </div>
-          </div>
-          <button class="btn btn-sm btn-primary" style="width:100%;margin-top:6px"
-            data-act="mhire" data-br="${b}" data-i="${i}" ${s.cash >= fee ? '' : 'disabled'}>招募 · ${money(fee)}</button>
-        </div>`;
+        h += managerCandidateHtml(cands[i], i, b, fee, s.cash >= fee, 'mhire', '招募');
       }
       h += `</div>`;
     } else {
