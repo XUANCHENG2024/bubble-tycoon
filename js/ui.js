@@ -401,7 +401,7 @@ function storesPanelHtml(s) {
     const staffN = staffOfBranch(s, st.branch).length;
     h += `<div class="store-card${st.auto ? ' auto' : ''}${isMain ? ' main' : ''}">
       <div class="store-head">
-        <span class="store-e">${st.emoji}</span>
+        <span class="store-e">${esc(st.emoji)}</span>
         <div class="store-title">
           <div class="store-name">${esc(st.name)}
             ${isMain ? '<span class="store-badge main">⭐ 主店</span>' : ''}
@@ -425,7 +425,7 @@ function storesPanelHtml(s) {
 
       <div class="store-mgr">
         ${mg
-      ? `店长：<b>${mg.emoji} ${esc(mg.name)}</b>
+      ? `店长：<b>${esc(mg.emoji)} ${esc(mg.name)}</b>
              <span class="store-mgr-lv">Lv.${mg.lv} ${esc(managerRank(mg.lv).name)}</span>
              <span class="store-mgr-tr">${managerTrait(mg).emoji} ${esc(managerTrait(mg).name)}</span>
              <span class="store-mgr-w">日薪 ${money(mg.wage)}</span>`
@@ -509,7 +509,7 @@ function storeFormerHtml(s, store) {
   for (const f of fm) {
     const tr = managerTrait({ trait: f.trait });
     h += `<div class="store-up-row">
-      <span class="store-up-e">${f.emoji}</span>
+      <span class="store-up-e">${esc(f.emoji)}</span>
       <div class="store-up-info">
         <div class="store-up-n">${esc(f.name)}
           <span class="store-up-lv">Lv.${f.lv} ${esc(managerRank(f.lv).name)}</span></div>
@@ -809,7 +809,7 @@ function managerPanelHtml(s) {
         <span class="mgr-be">🏪</span>
         <span class="mgr-bn">第 ${b} 分店</span>
         <span class="mgr-bs">编制 ${staffN}/${cap}</span>
-        <span class="mgr-bm${mg ? '' : ' none'}">${mg ? `店长 ${mg.emoji} ${esc(mg.name)}` : '无店长'}</span>
+        <span class="mgr-bm${mg ? '' : ' none'}">${mg ? `店长 ${esc(mg.emoji)} ${esc(mg.name)}` : '无店长'}</span>
       </div>`;
 
     if (mg) {
@@ -822,7 +822,7 @@ function managerPanelHtml(s) {
       }
       h += `<div class="mgr-card">
         <div class="mgr-row">
-          <span class="mgr-e">${mg.emoji}</span>
+          <span class="mgr-e">${esc(mg.emoji)}</span>
           <div class="mgr-info">
             <div class="mgr-name">${esc(mg.name)}<span class="mgr-lv">Lv.${mg.lv} ${esc(managerRank(mg.lv).name)}</span></div>
             <div class="mgr-trait">${tr.emoji} ${esc(tr.name)} · ${esc(tr.desc)}</div>
@@ -903,8 +903,19 @@ UI.renderManage = function () {
       <div class="intel-i"><div class="ii-k">明日预告</div><div class="ii-v">${s.trendKnown ? nextTag.emoji + ' ' + nextTag.name : '❓ 未知'}</div>
         ${s.trendKnown ? '' : '<button class="btn btn-sm btn-ghost" data-act="scout" style="margin-top:3px">🔍 调研 ¥150</button>'}</div>
     </div>
-    /* news.text 来自存档（可导出 / 导入），必须转义：
-       这里曾经是唯一一处漏掉 esc() 的动态文本，导入一份带 payload 的存档就能执行。 */
+    /* news.text 来自存档（可导出 / 导入），必须转义。
+
+       ★ 这里曾经是唯一一处漏掉 esc() 的动态文本，导入一份带 payload 的存档就能执行。
+       ★ 但「唯一一处」只描述当时 —— V12/V13 新增了
+         store.name/emoji、manager.name/emoji、formerManagers[].name/emoji/fromStore
+         等存档可控字段，其中 3 个 emoji 字段一度漏了 esc()
+         （同对象上的 name 转义了 —— **同一对象里只转义一半，
+           review 时很容易误以为「name 都转了，应该没事」）。
+
+       ★ 所以别再依赖注释，改跑 node tools/check-escape.js ——
+         它会逐个污染 10 个存档可控字段、扫 6 个面板，
+         只要有一个没转义就报错。新加存档字段时把它加进那个列表。
+         ⚠️ 写这类注释时别在里面用反引号 —— 会提前结束块注释导致语法错误。 */
     ${s.news ? `<div style="margin-top:9px;font-size:var(--fs-md);color:var(--amber)">📰 ${esc(s.news.text)}</div>` : ''}
   </div>`;
 

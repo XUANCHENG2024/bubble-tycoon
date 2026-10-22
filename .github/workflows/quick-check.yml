@@ -54,6 +54,9 @@ jobs:
       - name: XSS 注入
         run: node tools/xss-verify.js
 
+      - name: 存档可控字段转义（逐字段污染 + 扫全部面板）
+        run: node tools/check-escape.js
+
       - name: 主流程
         run: node tools/e2e-flow.js
 
