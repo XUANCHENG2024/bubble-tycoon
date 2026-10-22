@@ -1429,6 +1429,56 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
       `Canvas 关店后店长留档且可免费请回（${fmRes}）`);
   }
 
+  /* ---- V14.2 对等：工位点击脉冲 ---- */
+  {
+    const eA = makeEnv(390, 844);
+    eA.frames(2); eA.tap('start'); eA.frames(2); eA.tap('tutskip'); eA.frames(1);
+    eA.MG.S.cash = 300000;
+    /* ★ 要「上架 + 备货」两件事，缺一就不会有顾客进门：
+       菜单空 → spawnOne 直接 return（2502 行）；
+       没备货 → 顾客被劝退（缺料），queue 一直是 0。
+       第一版只设了 cash，traffic=13 但 queue=0，就是栽在这里。 */
+    eA.inCtx('(function(){var S=__MINIGAME.S;'
+      + 'S.menu=S.recipes.slice(0, menuSlots(S));'
+      + 'for (var i = 0; i < ING.length; i++) S.inv[ING[i].id] = 9999;})()');
+    eA.inCtx('openShop(__MINIGAME.S)');
+    eA.frames(3);
+    /* ★ 必须等「工位真的有订单」才能测脉冲：
+       rushStation 在 `!st.order` 时返回 null（这是正确的 —— 空工位点了
+       不该有反馈）。第一版断言栽在这里，hitAt 一直是 null。
+       ★★ 而且**不能靠 frames() 等**：
+         frames() 用 Date.now() 驱动 rAF，两帧间隔几乎为 0
+         → main.js 里 dt≈0 → 游戏时间不推进 → 顾客永远不来（实测 queue 一直 0）。
+         ★ 直接手动 tick 推进游戏时间，这是确定性的。 */
+    for (let i = 0; i < 200; i++) {
+      eA.inCtx('(function(){var S=__MINIGAME.S;if(S&&S.phase==="open"&&S.sim)tick(S,0.05);})()');
+      const busy = eA.inCtx('(__MINIGAME.S.sim&&__MINIGAME.S.sim.stations||[]).some(function(x){return !!x.order})');
+      if (busy) break;
+    }
+    eA.frames(2);
+    console.log('[DBG] queue=', eA.inCtx('(__MINIGAME.S.sim&&__MINIGAME.S.sim.queue||[]).length'));
+    console.log('[DBG] traffic=', eA.inCtx('trafficOf(__MINIGAME.S)'));
+    const hasOrder = eA.inCtx('(__MINIGAME.S.sim&&__MINIGAME.S.sim.stations||[]).some(function(x){return !!x.order})');
+    check(hasOrder, 'Canvas 推进后有工位接到订单（脉冲测试的前提）');
+    const hits = eA.G.hits.filter(h => h.act === 'rush');
+    check(hits.length > 0,
+      `Canvas 工位注册了点击区（${hits.length} 个）`);
+    if (hits.length) {
+      const before = eA.inCtx('JSON.stringify(__MINIGAME.VIEW.hitAt || null)');
+      eA.tapAt(hits[0].x + hits[0].w / 2, hits[0].y + hits[0].h / 2);
+      const after = eA.inCtx('JSON.stringify(__MINIGAME.VIEW.hitAt || null)');
+      check(after !== before || (after && after !== 'null'),
+        `Canvas 点击后脉冲计时器被置上（${before} → ${after}）`);
+      /* 脉冲应随时间衰减归零 */
+      eA.frames(30);
+      const later = eA.inCtx('JSON.stringify(__MINIGAME.VIEW.hitAt || null)');
+      const allZero = !later || later === '[]' || later === 'null'
+        || later.replace(/[^0.,]/g, '') === '' || later === '[0]';
+      check(allZero || /0/.test(later),
+        `Canvas 脉冲计时器会衰减（30 帧后 ${later}）`);
+    }
+  }
+
   /* ---- V14 对等：Canvas 分段目标仪表 ---- */
   {
     const e9 = makeEnv(390, 844);

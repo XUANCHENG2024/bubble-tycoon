@@ -1462,3 +1462,23 @@ body::before {
 }
 /* 进度条本体也压扁一点，给刻度让位 */
 .goal-bar { overflow: visible; }
+
+/* ---------- V14.2：工位被点击的物理反馈 ---------- */
+/* ★ 用「缩放 + 高光」而不是位移：点击瞬间的挤压感最能传达"打到了"。
+   -10% → 100% 只花 140ms，快到不打断节奏，但眼睛一定抓得到。 */
+.stn.hit .so { animation: stHit .16s ease-out; }
+.stn.hit .sp { animation: stBarHit .16s ease-out; }
+
+@keyframes stHit {
+  0%   { transform: scale(.82); filter: brightness(2.1); }
+  60%  { transform: scale(1.06); filter: brightness(1.25); }
+  100% { transform: scale(1); filter: none; }
+}
+@keyframes stBarHit {
+  0%   { box-shadow: 0 0 0 2px rgba(53, 229, 240, .95); }
+  100% { box-shadow: 0 0 0 0 rgba(53, 229, 240, 0); }
+}
+/* 尊重「减少动态效果」的系统设置（与 V13.8 的负债条一致） */
+@media (prefers-reduced-motion: reduce) {
+  .stn.hit .so, .stn.hit .sp { animation: none; }
+}

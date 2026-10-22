@@ -2075,6 +2075,18 @@ UI.stageInit = function () {
         const rect = el.getBoundingClientRect();
         UI.floater(rect.left + rect.width / 2 - 12, rect.top - 6, '+¥' + r.tip.toFixed(1), 'good');
         if (r.combo >= 5) UI.toast(`🔥 ${r.combo} 连击！`, 'gold');
+        /* ★ V14.2：工位自身的「被击中」反馈。
+           原来飘字浮在工位**上方**、按钮**完全不动**——
+           玩家盯着工位等出杯时，视觉上没有任何"我这一下点到了"的确认，
+           只能靠进度条慢慢爬。快节奏连点时尤其明显（点十几次屏幕毫无变化）。
+           ★ 用「重放 CSS 动画」而不是切换 class：
+             连续点击同一个工位时，改 class 不会重新触发动画
+             （类没有变化），必须用reflow 强制重排再回加。
+           ★ 动画放在 .so（当前订单那一行）而不是整个工位上：
+             整卡缩放会让玩家以为布局变了，只动订单行更"物理"。 */
+        el.classList.remove('hit');
+        void el.offsetWidth;          /* 强制 reflow，让动画能重新播放 */
+        el.classList.add('hit');
         UI.renderHUD();
       }
     });

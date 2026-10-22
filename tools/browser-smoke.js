@@ -1077,6 +1077,70 @@ const frames = (n) => new Promise(r => setTimeout(r, 17 * (n || 1)));
       `resetHUDCache 后 HUD 立即反映新值（${cashEl.textContent}）`);
   }
 
+  /* ---- V14.2 工位点击脉冲 ---- */
+  {
+    /* ★ 这条守的是「玩家点了有确认」——
+       原来飘字浮在工位**上方**、按钮本身完全不动，
+       玩家盯着工位等出杯时，视觉上没有任何"我这一下点到了"的确认。
+
+       ★★ 前置条件比看起来多，踩了两次才搞清：
+         ① 要**上架配方**：菜单空 → spawnOne 直接 return，没有顾客
+         ② 要**备货**：没备货 → 顾客被劝退，queue 一直是 0
+         ③ 要**手动 tick** 推进：frames() 用 Date.now() 驱动，
+            两帧间隔≈0 → dt≈0 → 游戏时间不走 → 顾客永远不来
+         ④ ★★ **不能推进太多**：第一单完成后 completeOrder 会清空工位，
+            后面再点就是"空工位点击"（正确地不该有反馈）。
+            实测推进 200 帧时，早接的单早出完了 → className 不变。
+            ★ 只推进到「刚有工位接到订单」为止，然后立刻断言。 */
+    const saved = window.eval('window.S');
+    window.eval('(function(){var S=window.S;S.cash=300000;'
+      + 'S.menu=S.recipes.slice(0, menuSlots(S));'
+      + 'for (var k in S.inv) S.inv[k]=9999;})()');
+    /* ★★★ 必须走 **doAct('open')** 而不是直接调 openShop(S)：
+       工位节点是 UI.stageInit() 建的（openShop 的调用方，见 main.js:478），
+       而每个节点的 click handler **闭包捕获了当时的 s**。
+       只调 openShop 不调 stageInit 的话，
+       拿到的是**更早某次** stageInit 建的节点 —— 它闭包里的 s 是旧状态，
+       点它等于操作一个已经废弃的局面，于是「点击毫无反应」。
+       ★ 这个坑极其隐蔽：handler 代码完全正确、节点也对，
+         只是它们绑的不是当前状态。查了半天才发现是函数名猜错
+         （我一直在找 stageBegin，实际叫 stageInit）。 */
+    window.doAct('open', { dataset: {} });
+    for (let i = 0; i < 300; i++) {
+      const busy = window.eval('(function(){var S=window.S;'
+        + 'if(!(S&&S.phase==="open"&&S.sim))return false;'
+        + 'tick(S,0.02);'
+        + 'return S.sim.stations.some(function(x){return !!x.order});})()');
+      if (busy) break;
+    }
+    check(window.eval('window.S.sim.stations.some(function(x){return !!x.order})'),
+      'V14.2 推进到有工位接到订单（脉冲测试的前提）');
+
+    /* 走真实点击（不是直接调 rushStation）——要验的是「点了 DOM 有没有反应」 */
+    const nodes = doc.querySelectorAll('#stations .stn');
+    check(nodes.length > 0, `V14.2 舞台上渲染出 ${nodes.length} 个工位`);
+    const el = nodes[0];
+    if (el) {
+      /* ★ 优先用 UI.stageEls —— 它就是绑定 handler 的那批节点。
+         querySelectorAll 拿到的是「当前 DOM 里的」，
+         若中途有重建，两者可能不是同一批（这坑踩过一次）。 */
+      const bound = window.eval('(UI.stageEls||[])[0]');
+      const target = bound || el;
+      const before = target.className;
+      target.click();
+      check(/\bhit\b/.test(target.className),
+        `V14.2 点击后工位加 hit 类（${before} → ${target.className}）`);
+      /* ★ 连续点击：hit 类要能被重放（否则第二次点视觉上"没反应"）。
+         实现靠 classList.remove + reflow + add。 */
+      target.click();
+      check(/\bhit\b/.test(target.className),
+        'V14.2 连续点击仍保持 hit 类（动画可重放）');
+      check(target.className.split(/\s+/).filter(c => c === 'hit').length === 1,
+        `V14.2 hit 类不重复叠加（class="${target.className}"）`);
+    }
+    if (saved) window.eval('window.S = window.__svSave || window.S');
+  }
+
   /* ---- V14 分段目标仪表 ---- */
   {
     /* ★ 这条守的是「进度条不再是零信息的装饰」——

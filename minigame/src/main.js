@@ -100,6 +100,15 @@ function loop(now) {
 function step(dt) {
   var ms = dt * 1000;
 
+  /* ★ V14.2：递减工位脉冲计时器。
+     递减放在 step（逻辑帧）而不是 draw（渲染帧）——
+     渲染可能被节流或降频，让逻辑帧驱动才能保证脉冲时长稳定。 */
+  if (VIEW.hitAt) {
+    for (var hi = 0; hi < VIEW.hitAt.length; hi++) {
+      if (VIEW.hitAt[hi] > 0) VIEW.hitAt[hi] = Math.max(0, VIEW.hitAt[hi] - dt);
+    }
+  }
+
   /* 营业推进 */
   var s = _S;
   if (s && s.phase === 'open' && s.sim) {
@@ -1032,6 +1041,14 @@ function doAct(act, id, extra) {
       beep('up', 880, 0.07);
       floater(CW / 2, CH * 0.45, '+¥' + rx.tip.toFixed(1), 'good');
       if (rx.combo >= 5) toast('🔥 ' + rx.combo + ' 连击！');
+      /* ★ V14.2：工位自身的「被击中」反馈（与 H5 端对等）。
+         原来飘字浮在屏幕中央、工位**完全不动**——
+         玩家盯着工位等出杯时，视觉上没有"我这一下点到了"的确认。
+         ★ Canvas 没有 CSS，用一个**衰减计时器**画脉冲：
+           hit 时刻被记录，绘制时按剩余时间缩放 —— 每帧只算一次减法，
+           不分配对象，对性能友好（与 V13.8 HUD 脏检查同一思路）。 */
+      VIEW.hitAt = VIEW.hitAt || [];
+      VIEW.hitAt[+id] = 0.16;
       /* 这一步要教的是「连点」，点一次就跳过等于没教。与 H5 同为 3 次。 */
       if (VIEW.tut.on && tutWaitAct() === 'rush') {
         VIEW.tutRush = (VIEW.tutRush || 0) + 1;

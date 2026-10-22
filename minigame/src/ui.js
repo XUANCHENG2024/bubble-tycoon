@@ -1793,9 +1793,33 @@ function drawStage(ctx, L, s) {
     var sy = viewTop + Math.floor(si / cols) * (sh + 8) - sc;
     /* 卡片整体被裁掉时 addHit 会自动放弃登记，无需在这里再判断可见性 */
     var busy = !!st.order;
+    /* ★ V14.2：工位被点击的脉冲（与 H5 端对等）。
+       VIEW.hitAt[工位号] 在 main.js 点击时置为 0.16（秒），
+       这里按「剩余时间 / 总时长」算出进度并换算成缩放——
+       Canvas 没有 CSS 动画，用这种衰减计时器最省（每帧只算一次减法）。
+       ★ t=1 → 刚点（缩到 0.82 + 高亮），t=0 → 恢复原状。 */
+    var tHit = 0;
+    if (VIEW.hitAt && VIEW.hitAt[si] > 0) {
+      tHit = VIEW.hitAt[si] / 0.16;
+    }
+    /* 0 → 1 → 0 的三角波：前 60% 挤压回弹，后 40% 归位 */
+    var pulse = tHit > 0.4 ? (1 - tHit) / 0.6 : tHit / 0.4;
+    var sc2 = 1 - 0.18 * pulse;
+    var bx = sw / 2, by = sh / 2;
+    ctx.save();
+    if (pulse > 0.01) {
+      ctx.translate(sx + bx, sy + by);
+      ctx.scale(sc2, sc2);
+      ctx.translate(-bx, -by);
+    }
     GFX.fillRR(ctx, sx, sy, sw, sh, 12,
       busy ? 'rgba(53,229,240,.10)' : T.card,
       busy ? 'rgba(53,229,240,.4)' : T.line);
+    /* 脉冲高亮：刚点时描一圈亮边，然后淡出 */
+    if (pulse > 0.01) {
+      GFX.fillRR(ctx, sx - 1, sy - 1, sw + 2, sh + 2, 13, null,
+        'rgba(53,229,240,' + (pulse * 0.9).toFixed(3) + ')');
+    }
     var nm = st.isBoss ? '👑 老板' : (st.branch ? '🏪 分店位'
       : (st.worker ? st.worker.emoji + ' ' + st.worker.name : '空位'));
     text(ctx, nm, sx + 8, sy + 5,
@@ -1824,6 +1848,8 @@ function drawStage(ctx, L, s) {
     }
     /* 整个出杯位都是可点区域：手指不需要瞄准小控件 */
     GFX.addHit(sx, sy, sw, sh, 'rush', String(si), null);
+    /* ★ 闭合 V14.2 开的 save（脉冲缩放用了变换矩阵） */
+    ctx.restore();
   }
   GFX.clipPop(ctx);
   /* 右侧一条细滚动条，让玩家知道下面还有工位 */
