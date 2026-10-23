@@ -24,6 +24,18 @@ jobs:
         with:
           node-version: '22'
 
+      # ★ 装 jsdom —— 四个 DOM 测试需要它
+      #   （browser-smoke / mobile-smoke / xss-verify / check-dist-boot）
+      # ★ 装到 .ci-node/ 而不是 node_modules/：
+      #   项目根刻意保持零依赖（无 package.json），
+      #   不想让 clone 的人以为要跑 npm install。
+      - name: 安装 jsdom（DOM 测试依赖）
+        run: node tools/install-jsdom.js
+
+      # ★ 后续步骤统一读这个变量
+      - name: 设置 JSDOM_PATH
+        run: echo "JSDOM_PATH=$PWD/.ci-node/node_modules/jsdom" >> $GITHUB_ENV
+
       - name: 全部 11 套
         run: |
           set -e

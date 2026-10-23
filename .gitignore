@@ -37,3 +37,8 @@ npm-debug.log*
 .tmp/
 *.local
 .cache/_livecheck/
+
+# ── CI 临时依赖 ───────────────────────────────────
+# tools/install-jsdom.js 在 CI 里把 jsdom 装到 .ci-node/
+# （项目根刻意保持零依赖：不装到 node_modules/）
+.ci-node/
