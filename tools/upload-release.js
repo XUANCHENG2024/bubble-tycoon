@@ -40,6 +40,8 @@ const token = getToken();
 if (!token) { console.error('✘ 拿不到 GitHub token'); process.exit(1); }
 
 const REPO = 'XUANCHENG2024/bubble-tycoon';
+/* ★ 失败计数 —— 上传后校验发现问题时要能报出来 */
+let failed = 0;
 const API = 'https://api.github.com';
 
 function api(p, opts) {
@@ -86,17 +88,6 @@ function api(p, opts) {
     const buf = fs.readFileSync(full);
     const name = path.basename(f);
 
-    /* ★ 手写 multipart ——
-       curl -F 在这个环境下报 "Bad Size"（GitHub 侧），
-       所以边界自己画。 */
-    const boundary = '----bubble' + Date.now().toString(16) + Math.random().toString(16).slice(2);
-    const head = Buffer.from(
-      '--' + boundary + '\r\n'
-      + 'Content-Disposition: form-data; name="file"; filename="' + name + '"\r\n'
-      + 'Content-Type: application/octet-stream\r\n\r\n', 'utf8');
-    const tail = Buffer.from('\r\n--' + boundary + '--\r\n', 'utf8');
-    const body = Buffer.concat([head, buf, tail]);
-
     console.log('· 上传 ' + name + '（' + (buf.length / 1048576).toFixed(2) + ' MB）…');
 
     const res = await new Promise((resolve, reject) => {
@@ -107,10 +98,35 @@ function api(p, opts) {
           'Authorization': 'Bearer ' + token,
           'Accept': 'application/vnd.github+json',
           'User-Agent': 'bubble-tycoon-builder',
-          'Content-Type': 'multipart/form-data; boundary=' + boundary,
-          /* ★ Content-Length 必须显式给 ——
-             GitHub 靠它判断大小，给了 chunked 就会当成 "Bad Size"。 */
-          'Content-Length': String(body.length),
+          /* ★★★ Content-Type 必须是**文件自己的类型**，而不是 multipart ★★★
+           *
+           * ★★★ 这是一个极其隐蔽的坑（V20.6，被用户报「装不上」才发现）★★★
+           *
+           * GitHub 的 asset 上传端点**不解析 multipart** ——
+           * 它把整个请求体**原样存成文件**。
+           * ★ 所以用 multipart/form-data 上传时，
+           *   存下来的文件开头是 `------bubbleXXX`（边界头），
+           *   结尾是 `------bubbleXXX--`（边界尾），
+           *   **中间才是真正的 APK**。
+           *
+           * ★★ 为什么难以发现：
+           *   · 上传返回 HTTP 201（成功）
+           *   · 返回的 size 只比本地大 200 多字节（看着正常）
+           *   · ★ 只有真正装到手机上才会炸：「解析包时出现问题」
+           *   ★ 而且 unzip -t 能通过（ZIP 允许前置任意数据）——
+           *     连「完整性检查」都测不出来！
+           *
+           * ★★ 我试过的三条路（都失败）：
+           *   ① curl -F "file=@x"     → 存下来带边界头
+           *   ② curl -F "body=@x"     → 同上
+           *   ③ 手写 multipart + Content-Length → 同上
+           *   ★ 全部返回 201，全部是坏文件。
+           *
+           * ★★ 正确做法：**直接发 binary body**，
+           *   Content-Type 用文件自己的 MIME 类型。
+           *   实测：上传后下载回来与本地**逐字节一致**。 */
+          'Content-Type': mimeOf(name),
+          'Content-Length': String(buf.length),
         },
       }, r => {
         let d = '';
@@ -118,7 +134,7 @@ function api(p, opts) {
         r.on('end', () => resolve({ status: r.statusCode, body: d }));
       });
       req.on('error', reject);
-      req.write(body);
+      req.write(buf);          /* ★ 直接写文件字节，不加任何边界 */
       req.end();
     });
 
@@ -127,12 +143,31 @@ function api(p, opts) {
       try { size = JSON.parse(res.body).size; } catch (e) { }
       console.log('  ✔ ' + name + ' 上传成功'
         + (size ? '（' + (size / 1048576).toFixed(2) + ' MB）' : ''));
+      /* ★★★ 上传后必须校验 ★★★
+       * GitHub 返回 201 + 正常大小，不代表存对了 ——
+       * ★ 我踩过的坑：multipart 的边界头尾被一起存进了文件，
+       *   大小只多了 200 字节（看起来完全正常），
+       *   而文件开头是 `------bubble...` 而不是 `PK` →
+       *   手机装时报「解析包出现问题」。
+       * ★ 所以这里比对「GitHub 存的大小」与「本地文件大小」：
+       *   差值应当正好是 multipart 的头尾长度（几十到几百字节）。
+       *   ★ 而**关键判据**是：能不能从 GitHub 下载回来的文件
+       *     用 ZIP 魔数（PK）开头。 */
+      /* ★ 现在是 binary body，尺寸应当**完全相等**（没有任何包装）。
+         差 1 字节都说明有问题。 */
+      if (size && Number(size) !== buf.length) {
+        console.error('  ✘★ 尺寸不符：本地 ' + buf.length + '，GitHub ' + size);
+        failed++;
+      } else if (size) {
+        console.log('    · 尺寸一致（' + buf.length + ' 字节）');
+      }
     } else {
       console.error('  ✘ ' + name + ' → HTTP ' + res.status + ' ' + res.body.slice(0, 200));
+      failed++;
     }
   }
 
-  /* ---------- ③ 确认 ---------- */
+  /* ---------- ③ 确认（并做真正的内容校验）---------- */
   const rel2 = await api('/repos/' + REPO + '/releases/tags/' + encodeURIComponent(tag));
   console.log('');
   console.log('★ Release 资产：');
@@ -140,4 +175,59 @@ function api(p, opts) {
     console.log('  ' + a.name + '  ' + (a.size / 1048576).toFixed(2) + ' MB  '
       + a.browser_download_url);
   }
+
+  /* ★★★ 真正的校验：把文件下载回来，验 ZIP 魔数与签名 ★★★
+   * ★ 这才是能抓住「multipart 头尾混进文件」的唯一办法 ——
+   *   GitHub 的 API 返回一切正常，只有下载下来才知道内容坏了。
+   * ★ 验 ZIP 魔数（'PK' = 0x50 0x4B）—— APK 本质是 ZIP。 */
+  console.log('');
+  console.log('· 下载回来校验内容…');
+  for (const a of (rel2.body.assets || [])) {
+    const buf = await downloadFile(a.browser_download_url);
+    if (!buf) { console.error('  ✘ ' + a.name + ' 下载失败'); failed++; continue; }
+    const isZip = buf.length > 4 && buf[0] === 0x50 && buf[1] === 0x4B;
+    if (!isZip) {
+      console.error('  ✘★ ' + a.name + ' 不是有效的 ZIP/APK'
+        + '（开头字节 ' + buf.slice(0, 8).toString('hex') + '）'
+        + ' —— ★ multipart 边界混进文件了，手机会装不上');
+      failed++;
+    } else {
+      console.log('  ✔ ' + a.name + ' ZIP 魔数正确（PK），大小 '
+        + (buf.length / 1048576).toFixed(2) + ' MB');
+    }
+  }
+
+  console.log('');
+  if (failed) {
+    console.error('✘ ' + failed + ' 个问题');
+    process.exit(1);
+  }
+  console.log('✔ 全部上传并校验通过');
 })();
+
+/** 按扩展名给 Content-Type —— ★ GitHub 的 asset 上传端点
+ *  **不解析 multipart**，Content-Type 直接用文件自己的类型即可。 */
+function mimeOf(name) {
+  if (/\.apk$/i.test(name)) return 'application/vnd.android.package-archive';
+  if (/\.aab$/i.test(name)) return 'application/octet-stream';
+  if (/\.png$/i.test(name)) return 'image/png';
+  if (/\.zip$/i.test(name)) return 'application/zip';
+  return 'application/octet-stream';
+}
+
+/** 下载文件（跟随重定向） */
+function downloadFile(url) {
+  return new Promise((resolve) => {
+    const req = https.get(url, { headers: { 'User-Agent': 'bubble-tycoon-builder' } }, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        return resolve(downloadFile(res.headers.location));
+      }
+      if (res.statusCode !== 200) { res.resume(); return resolve(null); }
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => resolve(Buffer.concat(chunks)));
+    });
+    req.on('error', () => resolve(null));
+  });
+}

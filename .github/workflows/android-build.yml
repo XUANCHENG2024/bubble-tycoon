@@ -135,6 +135,14 @@ jobs:
           path: app/android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: ignore
 
+      - name: 校验 Release 资产（★ 抓 multipart 边界混进文件）
+        # ★ 这个检查是被用户报「装不上」后补的 ——
+        #   GitHub 的 asset 上传端点**不解析 multipart**，
+        #   用 multipart 上传会把边界头尾一起存进文件，
+        #   而 unzip -t **测不出来**（ZIP 允许前置任意数据）。
+        #   只有下载回来验 PK 魔数才能抓住。
+        run: node tools/check-release.js
+
       - name: 验证 APK 内容
         run: |
           AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt2"

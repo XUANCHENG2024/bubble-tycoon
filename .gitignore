@@ -53,3 +53,8 @@ releases/
 # ── Release 上传临时文件 ─────────────────────────
 .rel.json
 .rel-up.txt
+
+# ── 上传到 Release 的临时副本（构建产物，不入库）──────────
+# ★ 上传用 ASCII 文件名 —— GitHub 的 asset 名里中文会被吞成 "-"
+bubble-tycoon-v1.0.0-*.apk
+bubble-tycoon-v1.0.0-*.aab
