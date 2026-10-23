@@ -36,4 +36,4 @@ npm-debug.log*
 # 部署/冒烟过程中的中间产物
 .tmp/
 *.local
-.cache/
+.cache/_livecheck/
