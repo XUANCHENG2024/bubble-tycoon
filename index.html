@@ -7,6 +7,13 @@
 <title>奶茶星球 · Bubble Tycoon</title>
 <link rel="icon" type="image/png" href="assets/icon-192.png">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
+<!-- ★ PWA（V20.6）：让 H5 版能「装到桌面」并离线玩。
+     ★ manifest 用相对路径 —— GitHub Pages 部署在子目录 /bubble-tycoon/ 下，
+       绝对路径会 404（Pages 上最常见的坑）。 -->
+<link rel="manifest" href="manifest.json">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="奶茶星球">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -161,5 +168,42 @@
 <script src="js/ui/ach.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/main.js"></script>
+<script>
+/* ★ 注册 Service Worker（V20.6）
+ *
+ * ★ 为什么要它：
+ *   本作完全离线（0 处网络请求），但 H5 版要靠服务器提供文件 ——
+ *   没装 SW 的话，地铁里没信号就白屏。
+ *   ★ 装了之后 App Shell 被缓存，断网也能启动。
+ *
+ * ★ 三个必须处理的边界：
+ *   ① **只在 HTTPS 或 localhost 下注册**
+ *      —— file:// 下 registerServiceWorker 会直接抛错。
+ *   ② **App（Capacitor）里不要注册**
+ *      —— App 的资源本来就在本地（assets/public/），
+ *         再套一层 SW 只会带来缓存不一致的麻烦。
+ *      → 用 Capacitor 判定（见平台层的 isApp 逻辑）。
+ *   ③ 注册失败**不能影响游戏** —— 整段包 try/catch。
+ */
+(function () {
+  try {
+    /* ① HTTPS / localhost 检查 */
+    if (!('serviceWorker' in navigator)) return;
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost'
+        && location.hostname !== '127.0.0.1') return;
+
+    /* ② App 里不注册（Capacitor 的资源本来就在本地） */
+    if (window.Capacitor && window.Capacitor.isNativePlatform
+        && window.Capacitor.isNativePlatform()) return;
+
+    /* ③ 注册（失败不影响游戏） */
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function (e) {
+        if (window.console && console.warn) console.warn('SW 注册失败：', e);
+      });
+    });
+  } catch (e) { /* 任何异常都不影响游戏启动 */ }
+})();
+</script>
 </body>
 </html>

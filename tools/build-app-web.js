@@ -41,6 +41,16 @@ if (fs.existsSync(audioSrc)) {
   fs.cpSync(audioSrc, path.join(out, 'audio'), { recursive: true });
 }
 
+/* ★ App 里**不需要** manifest.json 与 sw.js：
+ *   · sw.js —— App 的资源本来就在本地（assets/public/），
+ *     再套一层缓存只会带来不一致；
+ *     而 App 的 index.html 会用 isNativePlatform 跳过 SW 注册。
+ *   · manifest.json —— App 的 index.html 根本不引用它
+ *     （那是另一份模板，见本文件下方），复制进去只是死重量。
+ * ★ 这两个文件是给 **H5 版**用的（Pages 部署 + 装到桌面 + 离线）。
+ * ★ 顺便说明为什么 App 的 index.html 要单独一份：
+ *   它要跳过 SW 注册、检查启动错误、显示启动遮罩 —— 都是 App 特有的。 */
+
 /* ★ 图标**不**进 web 产物 ——
    ★ Capacitor 的原生层有各自的图标资源（mipmap/ 与 AppIcon.appiconset），
      而 web 产物里的图标：

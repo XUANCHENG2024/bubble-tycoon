@@ -74,4 +74,8 @@ include:
   - js
   - assets
   - README.md
+  # ★ PWA（V20.6）：manifest 与 service worker 必须发布，
+  #   否则「装到桌面」与离线都无从谈起。
+  - manifest.json
+  - sw.js
 

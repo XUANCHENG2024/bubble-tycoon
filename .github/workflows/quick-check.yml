@@ -125,6 +125,9 @@ jobs:
         run: node tools/build-dist.js && node tools/check-dist-boot.js
 
       - name: App 方案检查（同步存储 / 原生插件 / iOS 静态核对 / 体积上限）
+
+      - name: PWA 检查（manifest / service worker / 发布白名单）
+        run: node tools/check-pwa.js
         # ★ 依赖 app/node_modules（Capacitor CLI）——
         #   CI 里要先 npm install 一次。
         run: |
