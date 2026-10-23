@@ -118,6 +118,9 @@ jobs:
       - name: 难度曲线与存档容错（阶段目标 / 明日建议 / 损坏恢复）
         run: node tools/check-balance.js
 
+      - name: 两端口径一致（阶段目标金额 / 锚点判定）
+        run: node tools/check-parity-goal.js
+
       - name: 发布产物启动自检（脚本顺序 / 模块挂载 / 各面板渲染）
         run: node tools/build-dist.js && node tools/check-dist-boot.js
 

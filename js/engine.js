@@ -889,7 +889,17 @@ function nextGoalOf(s) {
   /* 当前处于第几个阶段：Day1~5 是第 0 个锚点，Day6~10 是第 1 个… */
   let idx = Math.min(R.length - 1, Math.ceil(day / MILESTONE_EVERY) - 1);
   idx = Math.max(0, idx);
-  const value = Math.round(final * R[idx]);
+  /* ★★ V20.3：这里原来算 `final * R[idx]`（比例口径），
+     而 milestoneOf 已改成每档独立的**绝对值**锚点（STAGE_GOALS）。
+     ★ 结果是**两端口径不一致** ——
+       H5 端显示绝对值锚点，小游戏端显示比例锚点，
+       同一局游戏两个端显示的目标金额不一样。
+     ★ 而且它还导致 CI 失败：
+       小游戏冒烟的「锚点日显示 ✔ 已达第 N 阶段目标」在 Linux 上失败，
+       而本地 Windows 通过 —— 差异来自两端口径不同导致的边界情况。
+     ★ 现在统一走 milestoneOf 的口径（绝对值）。 */
+  const ms = milestoneOf(s);
+  const value = ms ? ms.worth : Math.round(final * R[idx]);
   const atDay = Math.min(CFG.DAYS, (idx + 1) * MILESTONE_EVERY);
   const reached = nw >= value;
   const nextIdx = idx + 1;
