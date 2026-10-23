@@ -52,19 +52,19 @@ jobs:
         run: node tools/dom-smoke.js
 
       - name: 真实 DOM 冒烟（H5）
-        run: node tools/browser-smoke.js
+        run: node tools/run-ci-test.js tools/browser-smoke.js
 
       - name: 小游戏冒烟（Canvas 端对等）
-        run: node tools/minigame-smoke.js
+        run: node tools/run-ci-test.js tools/minigame-smoke.js
 
       - name: 移动端布局
-        run: node tools/mobile-smoke.js
+        run: node tools/run-ci-test.js tools/mobile-smoke.js
 
       - name: 符号对等（两版引擎符号一致性）
         run: node tools/symbol-check.js
 
       - name: XSS 注入
-        run: node tools/xss-verify.js
+        run: node tools/run-ci-test.js tools/xss-verify.js
 
       - name: 存档可控字段转义（逐字段污染 + 扫全部面板）
         run: node tools/check-escape.js

@@ -45,7 +45,12 @@ jobs:
           # 重复代码：8 行以上且非数据表
           node tools/check-dup.js 8 || exit 1
             printf '%-20s ' "$t"
-            node tools/$t.js > /dev/null
+            # ★ 用 run-ci-test.js 包装，且**不再丢弃输出**（> /dev/null）：
+            #   原来失败时 Actions 日志里只有一个「✘」，
+            #   完整输出被重定向到 /dev/null 丢掉了 ——
+            #   排查「本地过 / CI 挂」时**什么都看不到**，只能猜。
+            # ★ 包装器失败时还会打印平台 / Node 版本 / 关键文件是否存在。
+            node tools/run-ci-test.js "tools/$t.js"
             echo "PASS"
           done
 
