@@ -1,0 +1,43 @@
+# GitHub Pages（Jekyll）配置
+#
+# ★ 为什么需要这个文件：
+#   内置的「pages build and deployment」workflow 用 Jekyll 构建**整个分支**，
+#   于是 tools/（30+ 测试脚本）、docs/（内部文档）、
+#   minigame/（小游戏端源码）、legal/ 都被发布了。
+#   ★ 多发约 2.2MB，且把内部实现与测试脚本一并公开。
+#
+# ★ 为什么不用「切到 GitHub Actions 源」：
+#   那需要仓库管理员去 Settings → Pages 改一次 Source。
+#   ★ 而这个文件只要入库就生效 —— 克隆者拿到的是
+#     「开箱即用的 Pages 配置」，不用任何手动步骤。
+#
+# ★★★ 文件名必须是 _config.yml（有下划线前缀）★★★
+#   我第一次写成 _cfg.yml —— Jekyll 根本不认它，
+#   于是 include/exclude 完全没生效，Pages 照旧发布整个仓库。
+#   ★ 这类「文件名写错 → 功能静默失效」的坑，
+#     症状是「什么都没变」，很容易被忽略。
+#
+# ★★ 为什么不能配 .nojekyll：
+#   有 .nojekyll 时 Jekyll **完全跳过** —— 连 include 也不生效，
+#   于是整个仓库原样发布（正是我们要避免的）。
+#   ★ 所以必须让 Jekyll 处理，才能用 include 控制范围。
+#
+# ★ 用 include 白名单而不是 exclude 黑名单 ——
+#   白名单更安全：以后往仓库里加新目录，它**不会**被意外发布。
+#   ★ include 的路径相对于**仓库根**；
+#     目录是递归的（js 会带上子目录 js/ui/）。
+include:
+  - index.html
+  - styles.css
+  - js
+  - assets
+
+# ★ 只发布 H5 需要的 4 项。
+#   其余（tools/ docs/ minigame/ legal/ 与所有 md）一律不发布。
+#
+# ★★ 关于 js/engine.js 里的 13 处 {{ }} ★★
+#   那是 JSDoc 类型标注（如 @returns {{ok:boolean}}）。
+#   ★ Jekyll 只对**带 YAML front matter**的文件跑 Liquid 模板；
+#     js/*.js 没有 front matter → 原样复制，不会被 Liquid 处理。
+#   ★ 所以这里安全 —— 但**前提是别给 js/*.js 加 front matter**。
+#     （index.html 也没有 {{ }}，已核对 0 处。）
