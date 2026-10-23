@@ -31,9 +31,9 @@ android {
         applicationId "com.bubbletycoon.game"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        /* ★ V20.8：版本号推进（原生安全区插件 + 自适应图标 + 截断修复） */
-        versionCode 3
-        versionName "1.0.2"
+        /* ★ V20.9：版本号推进（适配深度审计：toast 限宽 + HUD 对齐） */
+        versionCode 4
+        versionName "1.0.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

@@ -598,10 +598,19 @@ function drawHUD(ctx, L, s) {
      于是 Day1 就显示 2% ——「开局欠 3 万 4」，中间 29 天零信息。
      ★ 文案也一起改：只改进度条不改文案等于让玩家盯着没意义的百分比。 */
   var gm = nextGoalOf(s);
-  GFX.bar(ctx, 16, y + 2, barW, 5, gm.phase, { color: T.cyan });
+  /* ★★ V20.9：进度条与刻度改用内容区起点（L.padX）★★
+   * ★ 真实缺陷（实测抓出）：这里硬编码了 `16`，
+   *   而上面四个数值胶囊用的是 `L.padX`。
+   *   ★ 窄屏上 padX 恰好 = 16，看不出问题；
+   *     但宽屏限宽居中后（1600 宽时 padX=496），
+   *     **进度条贴在屏幕最左边、胶囊在正中间** ——
+   *     同一个 HUD 里的元素差了 480px，一眼就能看出「没对齐」。
+   */
+  var barX = L.padX;
+  GFX.bar(ctx, barX, y + 2, barW, 5, gm.phase, { color: T.cyan });
   /* 分段刻度：让玩家看见全程节奏（6 个锚点） */
   for (var ti = 0; ti < MILESTONE_RATIO.length; ti++) {
-    var tx = 16 + barW * MILESTONE_RATIO[ti];
+    var tx = barX + barW * MILESTONE_RATIO[ti];
     GFX.fillRR(ctx, tx - 1, y, 2, 9,
       2, ti < gm.idx ? T.green : (ti === gm.idx ? T.amber : 'rgba(255,255,255,.22)'), null);
   }
@@ -612,9 +621,9 @@ function drawHUD(ctx, L, s) {
     : ('阶段目标 ' + money(gm.value) + ' · ' + Math.round(gm.phase * 100) + '%'
       + (gm.nextAt ? ' · 下一阶段 Day' + gm.nextAt : ''));
   if (share >= 0.15) gt += ' · 🦑对手抢 ' + Math.round(share * 100) + '%';
-  text(ctx, gt, 16, y + 12, { size: FS.xs, color: T.txt3, maxW: barW });
+  text(ctx, gt, barX, y + 12, { size: FS.xs, color: T.txt3, maxW: barW });
   if (dTxt && barW >= 60) {
-    text(ctx, dTxt, 16 + barW + 8, y + 12,
+    text(ctx, dTxt, barX + barW + 8, y + 12,
       { size: FS.xs, weight: 700, color: T.red, maxW: dW - 8 });
   }
 }
@@ -3206,6 +3215,21 @@ function drawEnd(ctx, L) {
  * ========================================================== */
 function drawToasts(ctx, L) {
   var W = L.W;
+  /* ★★ V20.9：toast 必须限宽 ★★
+   * ★ 原来的问题（真实缺陷，实测抓出）：
+   *   ① 背景框宽度用 `ctx.font = '700 12px'` 测量，
+   *      但文字实际用 `FS.md`（= 12 × scale）绘制 ——
+   *      ★ **测量与绘制用了不同字号**，scale≠1 时框与字对不上。
+   *   ② 文字**没有 maxW**，而 toast 文案最长可达 30+ 字符
+   *      （"📋 存档码已复制，可粘到浏览器版导入"），
+   *      ★ 在 240px 的分屏窄窗上实测左右各溢出 9px。
+   *
+   * ★ 修法：
+   *   ① 测量与绘制用**同一个字号**（FS.md）；
+   *   ② 给文字加 maxW = 可用宽度 - 边距，超长自动截断成「…」；
+   *   ③ 背景框宽度取「文字实际宽度 + 内边距」，并夹在可用宽度内。
+   */
+  var avail = W - 24;               /* 左右各留 12px */
   for (var i = 0; i < VIEW.toasts.length; i++) {
     var t = VIEW.toasts[i];
     var a = Math.min(1, t.life / 300);
@@ -3213,10 +3237,16 @@ function drawToasts(ctx, L) {
     /* 第一条要避开刘海：HUD 的数值胶囊带占了顶部约 54~94px（含 padTop），
        以前写死 60，iPhone 刘海机型（ins.top≈44）下第一条正好压在胶囊上。 */
     var y = Math.max(60, L.padTop + 62) + i * 34;
-    ctx.font = '700 12px ' + FONT;
-    var tw = ctx.measureText(t.msg).width + 24;
-    GFX.fillRR(ctx, (W - tw) / 2, y, tw, 26, 13, 'rgba(38,18,68,.94)', T.line2);
-    text(ctx, t.msg, W / 2, y + 7, { size: FS.md, weight: 700, align: 'center', color: 'white' });
+    /* ★ 测量与绘制用同一字号 —— 否则 scale≠1 时框与字对不上 */
+    var size = FS.md;
+    var textW = GFX.textW(ctx, t.msg, size, 700);
+    /* ★ 文字宽度夹在可用宽度内（超长则由 text() 截断） */
+    var boxW = Math.min(avail, Math.max(60, textW + 24));
+    GFX.fillRR(ctx, (W - boxW) / 2, y, boxW, 26, 13, 'rgba(38,18,68,.94)', T.line2);
+    text(ctx, t.msg, W / 2, y + 7, {
+      size: size, weight: 700, align: 'center', color: 'white',
+      maxW: boxW - 20,
+    });
     ctx.globalAlpha = 1;
   }
 }

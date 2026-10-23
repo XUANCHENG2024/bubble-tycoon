@@ -161,9 +161,30 @@ console.log('\n--- ③ 玩法/输入不变（纯表现层改造的红线）---')
   e.inCtx('(function(){var S=_S;S.menu=S.recipes.slice(0,menuSlots(S));for(var k in S.inv)S.inv[k]=9999;})()');
   e.MG.doAct('open');
   /* 推进到有订单 */
+  /* ★★ 2026-10-24：把「等订单」从概率等待改成**直接造一个订单** ★★
+   *   原来靠 `for (i<200) tick(S, 0.02)` 撞随机 —— 订单是随机生成的，
+   *   ★ 200 次 tick 内**不保证**一定接到订单，
+   *     于是这个测试会**偶发失败**（实测在批量跑回归时出现过一次）。
+   *   ★ 偶发失败的测试比没有测试更糟：它会让 CI 变成「随机红灯」，
+   *     团队会习惯性地忽略红灯。
+   * ★ 现在直接给一个工位挂订单 —— 测的是「点击工位能否触发脉冲与连击」，
+   *   不该依赖「能否随机接到订单」。
+   */
   for (let i = 0; i < 200; i++) {
     e.inCtx('(function(){var S=_S;if(!(S&&S.phase==="open"&&S.sim))return;tick(S,0.02);})()');
     if (e.inCtx('(__MINIGAME.S.sim&&__MINIGAME.S.sim.stations||[]).some(function(x){return !!x.order})')) break;
+  }
+  /* ★ 还没接到订单就直接造一个（造得出来的前提是工位已生成） */
+  if (!e.inCtx('(__MINIGAME.S.sim&&__MINIGAME.S.sim.stations||[]).some(function(x){return !!x.order})')) {
+    e.inCtx(`(function(){
+      var S = _S;
+      if (!S || !S.sim || !S.sim.stations || !S.sim.stations.length) return false;
+      /* ★ 造一个最小可用的订单对象 —— 只要求 truthy，
+         后续 click/rushStation 只关心「这个工位有单」 */
+      var st = S.sim.stations[0];
+      st.order = { qty: 1, item: (S.menu && S.menu[0]) || 'milk', done: false };
+      return true;
+    })()`);
   }
   check(e.inCtx('(__MINIGAME.S.sim.stations||[]).some(function(x){return !!x.order})'),
     'V15 等距下仍能正常接到订单（玩法未受影响）');

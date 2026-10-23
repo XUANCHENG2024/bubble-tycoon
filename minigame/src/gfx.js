@@ -329,14 +329,27 @@ function clipPop(ctx) {
 
 function addHit(x, y, w, h, act, id, extra) {
   y += HIT.offY;   /* 弹窗滚动时命中区跟着内容一起走（见 setHitOffset） */
+  /* ★★ V20.9：记录「原始尺寸」与「是否被裁剪」 ★★
+   * ★ 为什么需要：
+   *   addHit 会把命中区**裁剪到 clip 区之内**（滚动列表里很常见）——
+   *   一个视觉高 27px 的按钮若被裁剪区切了一刀，读出来的 h 就只剩 13px。
+   * ★ 而「命中区过小」这个诊断判据关心的是**控件本身设计得小不小**，
+   *   不是「它现在露出来多少」。
+   * ★ 所以把未裁剪的原始尺寸一并记下来，诊断器据此判断。
+   */
+  var origW = w, origH = h, clipped = false;
   for (var i = 0; i < HIT.stack.length; i++) {
     var c = HIT.stack[i];
     var nx = Math.max(x, c.x), ny = Math.max(y, c.y);
     var mx = Math.min(x + w, c.x + c.w), my = Math.min(y + h, c.y + c.h);
     if (mx <= nx || my <= ny) return;   /* 完全被裁掉，不登记 */
+    if (mx - nx < w - 0.5 || my - ny < h - 0.5) clipped = true;
     x = nx; y = ny; w = mx - nx; h = my - ny;
   }
-  HIT.list.push({ x: x, y: y, w: w, h: h, act: act, id: id, extra: extra });
+  HIT.list.push({
+    x: x, y: y, w: w, h: h, act: act, id: id, extra: extra,
+    ow: origW, oh: origH, clipped: clipped,
+  });
 }
 
 function hitAt(px, py) {
