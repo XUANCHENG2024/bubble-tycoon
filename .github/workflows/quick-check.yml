@@ -134,6 +134,24 @@ jobs:
         #   —— 这三类都与滚动无关，是可靠的判据。
         run: node tools/diag-canvas-layout.js
 
+      - name: 文本截断专项测试（GFX.text maxW 二分截断）
+        # ★ V20.8 新增。截断是「文字不被截断」这条诉求的最后一道防线，
+        #   而 V20.7 改过截断算法却**从未被任何测试覆盖**。
+        # ★ 本套测试当场抓出了 3 个真实缺陷（maxW=0 不截断 /
+        #   省略号预留顺序错误导致断词被破坏 / 截断顺序倒置）。
+        run: node tools/test-text-truncate.js
+
+      - name: 全局字号缩放专项测试（FS getter + setTextScale）
+        # ★ V20.8 新增。FS 从固定字面量改成 getter 后，
+        #   361 处 `FS.xs` 直接读取必须全部跟随缩放 ——
+        #   失效时界面看起来完全正常，只是字号没变（V20.7 就这样翻车）。
+        run: node tools/test-text-scale.js
+
+      - name: Android 图标资源修复与校验（自适应图标 + 各密度前景）
+        # ★ 幂等脚本：无自适应图标时生成，密度不对时重生成。
+        #   Android 8+ 没有 mipmap-anydpi-v26 会退回 legacy PNG 并被系统裁圆。
+        run: node tools/fix-android-icons.js && node tools/check-android-res.js
+
       - name: Android 资源合法性（XML / Manifest / Java）
         # ★ 抓的是「XML 标签内插注释」这类只在构建时才暴露的错误 ——
         #   而 Gradle 的报错不告诉你是哪一行。

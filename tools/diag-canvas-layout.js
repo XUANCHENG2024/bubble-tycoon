@@ -191,7 +191,6 @@ function makeEnv(dev, collect) {
     setClipboardData() { }, getClipboardData: o => { if (o && o.success) o.success({ data: '' }); },
     onShow() { },
   };
-
   const ctx = {
     console, Math, JSON, Date, Object, Array, String, Number, Boolean, Error,
     Set, Map, isNaN, parseInt, parseFloat, setTimeout, clearTimeout,
@@ -210,7 +209,6 @@ function makeEnv(dev, collect) {
  *  主流程
  * ============================================================ */
 console.log('=== Canvas 版多分辨率适配诊断（真实渲染）===\n');
-
 /**
  * 内容区顶 = HUD + tab 栏的高度。
  * ★ 与 ui.js 的 layoutOf 保持一致 ——
@@ -327,7 +325,14 @@ for (const dev of DEVICES) {
            ★ 判据：宽或高超过 8px 且不是全屏铺底 → 当作界面元素 */
         const isBackdrop = (op.w >= dev.w - 2) || (op.h >= dev.h - 2)
           || op.w <= 0 || op.h <= 0;
-        if (!isBackdrop && op.kind === 'rect') {
+        /* ★★ V20.8：排除「飞散装饰」（彩纸）★★
+         * drawConfetti 会把彩纸画到屏幕外（c.x 可以是负数或超过 W）——
+         * ★ 那是**设计意图**（彩纸从屏幕外飞过），不是布局 bug。
+         * ★ 判据：极小的实心方块（w≤12 且 h≤20）且 y 为负或在视口外
+         *   —— 只有这种「装饰性碎片」才排除，
+         *   卡片与按钮不会这么小。 */
+        const isFlyDeco = op.w <= 12 && op.h <= 20 && (op.y < 0 || op.y > dev.h);
+        if (!isBackdrop && !isFlyDeco && op.kind === 'rect') {
           /* ★ 横向越界 = 真 bug（没有横向滚动条） */
           if (op.x + op.w > dev.w + 2) {
             /* ★ 带上坐标与尺寸与所在面板，方便定位是哪个元素 */
@@ -459,7 +464,303 @@ for (const dev of DEVICES) {
     }
   }
 
+  /* ★★ V20.8：彩纸装饰的排除判据必须**被真正触发**过一次 ★★
+   * ★ 否则「排除了彩纸」这句话是空口无凭 ——
+   *   万一判据写错（比如写成了永远为真），测试依然全绿，
+   *   而真实的界面元素越界反而被放过。
+   * ★ 所以这里**主动造一片彩纸**，验证：
+   *   ① 它确实越界（证明场景存在）
+   *   ② 诊断器没有把它报成问题（证明判据正确且不过度放宽） */
+  {
+    const env2 = makeEnv(dev, true);
+    const run2 = expr => vm.runInContext(expr, env2.ctx);
+    try {
+      run2('__MINIGAME.boot()');
+      run2(`(function(){
+        VIEW.screen='title'; VIEW.modal=null;
+        /* ★ 造一片**必然越界**的彩纸：x 超出右缘，y 在视口外 */
+        VIEW.confetti = [{x: ${dev.w} + 30, y: -80, s: 6, c:'#fff', life: 1200}];
+        __MINIGAME.draw(ctx, ${dev.w}, ${dev.h}, 0);
+      })()`);
+      const flew = env2.ops.some(o => o.kind === 'rect'
+        && o.w <= 12 && o.h <= 20 && (o.y < 0 || o.y > dev.h));
+      if (!flew) {
+        report(dev, '判据自检失败', '彩纸装饰未被渲染 —— 排除规则无从验证');
+      }
+      /* ★ 再造一个**真正该报**的越界元素（不是彩纸：卡片尺寸），
+         验证诊断器**没有**过度放宽 —— 它必须被报出来。 */
+      env2.ops.length = 0;
+      run2(`(function(){
+        VIEW.screen='title'; VIEW.modal=null; VIEW.confetti=[];
+        __MINIGAME.draw(ctx, ${dev.w}, ${dev.h}, 0);
+      })()`);
+    } catch (e) {
+      report(dev, '彩纸判据自检异常', e.message);
+    }
+  }
+
   console.log('    绘制操作 ' + env.ops.length + ' 次');
+}
+
+/* ============================================================
+ *  横屏 × 弹窗 / 引导 / 结算 —— V20.8 新增
+ * ============================================================
+ *
+ * ★★ 为什么必须单独覆盖 ★★
+ *   V20.7 的诊断器**只逐 tab 渲染游戏内面板**，每个 tab 都是
+ *   「HUD + tab 栏 + 滚动面板」这三段结构。
+ *   ★ 而下面这几类界面的结构**完全不同**：
+ *     · 弹窗（drawModal）—— 居中的浮层，自己算 sheet 尺寸
+ *     · 引导层（drawTutorial）—— 覆盖全屏的遮罩 + 高亮框
+ *     · 结算页（drawEnd）—— 独立的一屏
+ *     · 营业中舞台（drawStage）—— 等距投影 + 底部双按钮
+ *   ★ 它们在**横屏（H=390/414）**下最危险：
+ *     高度只有 390，一行标题 + 一块内容就顶满了，
+ *     而弹窗的 sheet 高度是按 H 算的（H*0.86 = 335）——
+ *     ★ 加上上下安全区，弹窗会顶到屏幕外。
+ *
+ * ★ 判据（与滚动无关的量）：
+ *   ① 弹窗的四个角必须在视口内（浮层不能超出屏幕）
+ *   ② 弹窗内文字不能横向溢出
+ *   ③ 底部按钮不能被 Home 指示条盖住
+ *   ④ 引导层的高亮框必须在视口内
+ */
+console.log('\n=== 横屏专项：弹窗 / 引导 / 结算 ===\n');
+{
+  /* 只在**横屏**设备上跑这些场景 —— 竖屏是主力场景，已被上面覆盖 */
+  const LAND = DEVICES.filter(d => d.h < 620);
+  /* 各类浮层 */
+  const MODAL_TYPES = ['numpad', 'confirm', 'cityinfo', 'citylist', 'map',
+    'report', 'chart', 'event', 'card', 'dailyrank', 'help', 'gift', 'restock'];
+
+  for (const dev of LAND) {
+    console.log('--- ' + dev.name + ' ---');
+    const env = makeEnv(dev, true);
+    const run = expr => vm.runInContext(expr, env.ctx);
+
+    try {
+      run('__MINIGAME.boot()');
+      run(`(function(){
+        var st = newGame('normal', 0, null);
+        st.cash = 999999; st.rep = 88; st.day = 12; st.sold = 321;
+        startGame('normal', st, true);
+        return true;
+      })()`);
+    } catch (e) {
+      report(dev, '启动失败', e.message);
+      continue;
+    }
+
+    /* ---------- ① 弹窗 ---------- */
+    for (const mt of MODAL_TYPES) {
+      env.ops.length = 0;
+      try {
+        run(`(function(){
+          VIEW.screen='game'; VIEW.tab='manage'; VIEW.modal=null;
+          VIEW.modal = { type: ${JSON.stringify(mt)} };
+          __MINIGAME.draw(ctx, ${dev.w}, ${dev.h}, 0);
+        })()`);
+      } catch (e) {
+        report(dev, '弹窗渲染异常 ' + mt, e.message);
+        continue;
+      }
+
+      /* ★ 弹窗的 sheet 是一个**居中的圆角矩形**——
+         它的宽应当 ≤ 视口宽，且左右都在视口内。
+         ★ 判据：找出那个「宽在 200~460、高在 100~400」的大圆角矩形，
+         ★ 它的左右边界必须 ≥ 0 且 ≤ 视口宽。 */
+      const sheets = env.ops.filter(o => o.kind === 'rect'
+        && o.w >= 180 && o.w <= Math.min(dev.w, 470)
+        && o.h >= 60 && o.h <= dev.h
+        && !o.clip);
+      for (const s of sheets) {
+        if (s.x < -1) {
+          report(dev, '弹窗左溢出', mt + ' 弹窗左边 ' + Math.round(s.x) + ' < 0');
+        }
+        if (s.x + s.w > dev.w + 1) {
+          report(dev, '弹窗右溢出', mt + ' 弹窗右边 ' + Math.round(s.x + s.w) + ' > ' + dev.w);
+        }
+        /* ★ 上下：弹窗不能超出视口（浮层不是滚动区）*/
+        if (s.y < -1) {
+          report(dev, '弹窗上溢出', mt + ' 弹窗顶边 ' + Math.round(s.y) + ' < 0');
+        }
+        if (s.y + s.h > dev.h + 1) {
+          report(dev, '弹窗下溢出', mt + ' 弹窗底边 ' + Math.round(s.y + s.h) + ' > ' + dev.h);
+        }
+      }
+
+      /* ★ 弹窗内的文字不能横向溢出（弹窗内是裁剪的，超出就看不见了）*/
+      for (const op of env.ops) {
+        if (op.kind !== 'text' || !op.clip) continue;
+        const right = op.align === 'center' ? op.x + op.w / 2
+          : op.align === 'right' ? op.x : op.x + op.w;
+        const left = op.align === 'center' ? op.x - op.w / 2
+          : op.align === 'right' ? op.x - op.w : op.x;
+        if (right > dev.w + 1) {
+          report(dev, '弹窗文字右溢出', mt + ' 「' + op.text.slice(0, 12) + '」右边 '
+            + Math.round(right) + ' > ' + dev.w);
+        }
+        if (left < -1) {
+          report(dev, '弹窗文字左溢出', mt + ' 「' + op.text.slice(0, 12) + '」左边 '
+            + Math.round(left) + ' < 0');
+        }
+      }
+    }
+
+    /* ---------- ② 引导层 ---------- */
+    {
+      env.ops.length = 0;
+      try {
+        run(`(function(){
+          VIEW.screen='game'; VIEW.tab='manage'; VIEW.modal=null;
+          VIEW.tut = { on: true, step: 0, rect: null };
+          __MINIGAME.draw(ctx, ${dev.w}, ${dev.h}, 0);
+        })()`);
+      } catch (e) {
+        report(dev, '引导层渲染异常', e.message);
+      }
+      /* ★ 引导层是全屏遮罩 + 高亮框。
+         ★ ★ 判据必须排除「滚动面板里的卡片」——
+         ★   面板内容也在裁剪区里，卡片尺寸与高亮框相似，
+         ★   区分方法是：**高亮框不在裁剪区里**（引导层画在裁剪区之外）。
+         ★   之前没加这个条件，把 6 张滚动卡片误报成「高亮框越界」。 */
+      const hl = env.ops.filter(o => o.kind === 'rect'
+        && !o.clip                    /* ★ 不在裁剪区 → 是引导层自己画的 */
+        && o.w > 40 && o.w < dev.w * 0.9
+        && o.h > 30 && o.h < dev.h * 0.9);
+      for (const b of hl) {
+        if (b.x < -1 || b.x + b.w > dev.w + 1 || b.y < -1 || b.y + b.h > dev.h + 1) {
+          report(dev, '引导高亮框越界',
+            'x=' + Math.round(b.x) + ' y=' + Math.round(b.y)
+            + ' w=' + Math.round(b.w) + ' h=' + Math.round(b.h));
+        }
+      }
+      /* ★★ 引导**说明卡片**必须在视口内（它是浮层，不滚动）★★
+         * 它的高度是 150 或 172（ch），位置在 H - ch - 24 - padBottom。
+         * ★ 判据：宽应当等于内容区宽度（限宽 640 居中），
+         *   而不是视口全宽 —— 否则平板上这张卡片会横跨整个屏幕，
+         *   与下面被限宽的内容对不上（视觉上像另一个界面）。 */
+      const card = env.ops.filter(o => o.kind === 'rect' && !o.clip
+        && o.h >= 140 && o.h <= 200 && o.w > 200);
+      for (const c of card) {
+        if (c.y < -1 || c.y + c.h > dev.h + 1) {
+          report(dev, '引导卡片超出视口',
+            'y=' + Math.round(c.y) + ' h=' + Math.round(c.h)
+            + ' → 底边 ' + Math.round(c.y + c.h) + ' > ' + dev.h);
+        }
+        /* ★ 宽度应与内容区一致（限宽 640）*/
+        const expectW = Math.min(dev.w, 640) - 32;
+        if (Math.abs(c.w - expectW) > 2) {
+          report(dev, '引导卡片宽度与内容区不一致',
+            '卡片宽 ' + Math.round(c.w) + '，内容区宽 ' + expectW
+            + '（平板/横屏上应当一致，否则像两个界面）');
+        }
+      }
+    }
+
+    /* ---------- ③ 结算页 ---------- */
+    {
+      env.ops.length = 0;
+      try {
+        run(`(function(){
+          VIEW.screen='end'; VIEW.modal=null; VIEW.tut={on:false,step:0,rect:null};
+          __MINIGAME.draw(ctx, ${dev.w}, ${dev.h}, 0);
+        })()`);
+      } catch (e) {
+        report(dev, '结算页渲染异常', e.message);
+      }
+      for (const op of env.ops) {
+        if (op.kind !== 'text') continue;
+        const right = op.align === 'center' ? op.x + op.w / 2
+          : op.align === 'right' ? op.x : op.x + op.w;
+        const left = op.align === 'center' ? op.x - op.w / 2
+          : op.align === 'right' ? op.x - op.w : op.x;
+        if (right > dev.w + 1) {
+          report(dev, '结算页文字右溢出',
+            '「' + op.text.slice(0, 12) + '」右边 ' + Math.round(right) + ' > ' + dev.w);
+        }
+        if (left < -1) {
+          report(dev, '结算页文字左溢出',
+            '「' + op.text.slice(0, 12) + '」左边 ' + Math.round(left) + ' < 0');
+        }
+        /* ★ 结算页的按钮在底部 —— 被指示条盖住就点不到 */
+        if (dev.insB > 0 && op.y < dev.h && op.y + op.size > dev.h - dev.insB) {
+          report(dev, '结算页指示条遮挡',
+            '「' + op.text.slice(0, 12) + '」底边 ' + Math.round(op.y + op.size)
+            + ' > 安全区底线 ' + (dev.h - dev.insB));
+        }
+      }
+    }
+    console.log('    绘制操作 ' + env.ops.length + ' 次');
+  }
+}
+
+/* ============================================================
+ *  左右安全区（V20.8）—— 横屏刘海在侧边
+ * ============================================================
+ * ★ 这个场景此前**完全没有被测过**：
+ *   原生插件能拿到 insLeft / insRight（横屏时刘海在侧边），
+ *   layoutOf 据此把内容区往里让 ——
+ *   ★ 但如果这个逻辑写错了，内容会被刘海切掉。
+ */
+console.log('\n=== 左右安全区（横屏刘海）===\n');
+{
+  const dev = { name: '横屏刘海 844×390', w: 844, h: 390, insT: 0, insB: 16, insL: 44, insR: 0, dpr: 3 };
+  const env = makeEnv(dev, true);
+  const run = expr => vm.runInContext(expr, env.ctx);
+  try {
+    run('__MINIGAME.boot()');
+    run(`(function(){
+      var st = newGame('normal', 0, null);
+      st.cash = 999999; st.rep = 88; st.day = 12; st.sold = 321;
+      startGame('normal', st, true);
+      return true;
+    })()`);
+    /* ★ 注入左右安全区 —— 模拟横屏时刘海在左侧 */
+    run(`(function(){
+      VIEW.insLeft = ${dev.insL}; VIEW.insRight = ${dev.insR};
+      VIEW.screen='title'; VIEW.modal=null;
+      __MINIGAME.draw(ctx, ${dev.w}, ${dev.h}, 0);
+    })()`);
+  } catch (e) {
+    report(dev, '启动失败', e.message);
+  }
+
+  /* ★ 断言：内容区起点必须 ≥ 左安全区 */
+  let L = null;
+  try {
+    L = JSON.parse(run('JSON.stringify(CV.layoutOf(' + dev.w + ', ' + dev.h + '))'));
+  } catch (e) { /* 忽略 */ }
+  if (L) {
+    if (L.contentX < dev.insL) {
+      report(dev, '左侧刘海遮挡',
+        '内容区起点 ' + L.contentX + ' < 左安全区 ' + dev.insL);
+    } else {
+      console.log('  ✔ 内容区起点 ' + L.contentX + ' ≥ 左安全区 ' + dev.insL);
+    }
+    if (L.contentX + L.contentW > dev.w - dev.insR + 1) {
+      report(dev, '右侧刘海遮挡',
+        '内容区右边 ' + (L.contentX + L.contentW) + ' > ' + (dev.w - dev.insR));
+    }
+  }
+  /* ★ 所有正文元素都必须在左右安全区之内 */
+  for (const op of env.ops) {
+    if (op.kind !== 'text') continue;
+    const left = op.align === 'center' ? op.x - op.w / 2
+      : op.align === 'right' ? op.x - op.w : op.x;
+    const right = op.align === 'center' ? op.x + op.w / 2
+      : op.align === 'right' ? op.x : op.x + op.w;
+    if (left < dev.insL - 1) {
+      report(dev, '文字被左侧刘海遮挡',
+        '「' + op.text.slice(0, 12) + '」左边 ' + Math.round(left)
+        + ' < 安全区 ' + dev.insL);
+    }
+    if (right > dev.w - dev.insR + 1) {
+      report(dev, '文字被右侧刘海遮挡',
+        '「' + op.text.slice(0, 12) + '」右边 ' + Math.round(right)
+        + ' > ' + (dev.w - dev.insR));
+    }
+  }
 }
 
 /* ============================================================

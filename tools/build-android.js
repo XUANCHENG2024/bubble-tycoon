@@ -137,9 +137,18 @@ if (!status()) {
   process.exit(1);
 }
 
-/* ★ 同步 web 产物到原生工程 —— 不做这步构建出来的是旧内容 */
-console.log('· 同步 web 产物到原生工程');
-execFileSync('npx', ['cap', 'sync'], {
+/* ★ 同步 web 产物到原生工程 —— 不做这步构建出来的是旧内容
+ *
+ * ★★ 为什么必须显式指定 `android` 平台（V20.8 修复）★★
+ *   原来写的是 `npx cap sync`（不带平台参数）——
+ *   它会**连带同步 iOS**，而 iOS 同步里有一步「删除旧的原生插件目录」。
+ *   ★ 在 Windows 上那一步会因文件占用 / 权限而失败，
+ *     整个 execFileSync 抛错 → **Android 构建直接中断**，
+ *     而这个失败与 Android 本身毫无关系。
+ *   ★ 只构建 Android 时，明确写 `cap sync android` —— 不碰 iOS。
+ */
+console.log('· 同步 web 产物到原生工程（仅 Android）');
+execFileSync('npx', ['cap', 'sync', 'android'], {
   cwd: appDir, stdio: 'inherit', shell: process.platform === 'win32',
 });
 

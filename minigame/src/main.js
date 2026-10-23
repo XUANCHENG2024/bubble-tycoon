@@ -27,6 +27,9 @@ function setupCanvas() {
      刘海机型上顶部 HUD 会被挖孔压住，底部按钮会被 Home 指示条盖住，
      没有这一层，营业中「暂停 / 提前打烊」根本点不到。 */
   VIEW.ins = { top: i.insTop || 0, bottom: i.insBottom || 0 };
+  /* ★ 左右安全区（横屏时刘海在侧边）—— V20.8 */
+  VIEW.insLeft = i.insLeft || 0;
+  VIEW.insRight = i.insRight || 0;
   var dpr = i.dpr;
   canvas.width = Math.round(CW * dpr);
   canvas.height = Math.round(CH * dpr);
@@ -34,6 +37,45 @@ function setupCanvas() {
   /* 之后所有绘制都用 CSS 像素坐标，DPR 只在这一行体现 ——
      否则业务代码里会到处乘除 dpr，改一处漏一处。 */
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  /* ★★★ V20.8：CSS 尺寸与绘制坐标严格 1:1 ★★★
+   *
+   * ★★★ 根因：CSS 尺寸与绘制坐标来自**两个不同的量** ★★★
+   *   · CSS 尺寸：index.html 里 `#gc { width: 100vw; height: 100dvh }`
+   *   · 绘制坐标：`window.innerWidth / window.innerHeight`
+   *   ★ 这两个数**不一定相等**：
+   *     - `100vw` 包含滚动条宽度（WebView 里通常为 0，但 split-screen 下不一定）
+   *     - `100dvh` 是「动态视口高」，而 innerHeight 是「布局视口高」——
+   *       ★ Android WebView 在系统栏显隐、软键盘弹出、分屏拖动时，
+   *         这两个值会**短暂不一致**
+   *     - iOS Safari 的 dvh 与 innerHeight 也有已知的差异场景
+   *
+   * ★★★ 后果：内容被**整体缩放** ★★★
+   *   画布后备缓冲是 CW*dpr，但显示尺寸是 100vw×100dvh。
+   *   ★ 若 100vw = 390 而 innerWidth = 375，
+   *     那么所有内容被拉伸到 390/375 = 1.04 倍 ——
+   *     **文字变形、圆形变椭圆、点击区与视觉位置错位**。
+   *   ★ 这正是用户说的「拉伸」「错位」「点击区域偏移」。
+   *
+   * ★★★ 修法：让 CSS 尺寸**由 JS 决定** ★★★
+   *   显式设置 style.width/height = CW/CH px，
+   *   于是「显示像素」与「绘制坐标」严格一一对应，
+   *   ★ 不管视口怎么变，比例恒为 1，绝无拉伸。
+   *
+   * ★ 为什么不用 CSS 的 100%：
+   *   100% 指的是**父元素**（html/body）的高度，
+   *   而 html/body 的高度在 WebView 里又由视口决定 ——
+   *   ★ 还是回到了「两个来源」的老问题。
+   */
+  try {
+    if (canvas.style) {
+      canvas.style.width = CW + 'px';
+      canvas.style.height = CH + 'px';
+      /* ★ 避免内联样式被 index.html 的样式表覆盖
+         （CSS 优先级：内联 > 选择器，所以内联赢）。 */
+      canvas.style.display = 'block';
+    }
+  } catch (e) { /* 小游戏环境没有 style，忽略 */ }
 }
 
 /* ---------------- 尺寸变化（V20.7）----------------
@@ -1524,6 +1566,26 @@ function boot() {
      Android 的 configChanges 含 screenSize，旋转时 Activity 不重建，
      只会 resize WebView —— 不重算尺寸的话画面会被拉伸。 */
   watchResize();
+  /* ★★ V20.8：向原生拉一次**真实**安全区 ★★
+   * ★ 为什么需要这一步：
+   *   · CSS env(safe-area-inset-*) 在 Android WebView（Chromium < 140）
+   *     的 edge-to-edge 模式下**返回 0** —— 静默失效。
+   *   · 原生的 push 可能早于页面加载完成而丢失。
+   *   ★ 所以页面就绪后再主动拉一次，拉到就重排。
+   * ★ 这个修正对玩家不可见（差异只有几十像素），但保证了
+   *   底部按钮一定在 Home 指示条之上。 */
+  if (PLAT.requestInsets) {
+    PLAT.requestInsets(function (ins) {
+      if (!ins) return;
+      /* ★ 只有真的变了才重排 —— 避免无谓的重绘闪烁 */
+      if ((ins.top || 0) === (VIEW.ins.top || 0)
+        && (ins.bottom || 0) === (VIEW.ins.bottom || 0)) return;
+      VIEW.ins = { top: ins.top, bottom: ins.bottom };
+      VIEW.insLeft = ins.left || 0;
+      VIEW.insRight = ins.right || 0;
+      try { draw(ctx, CW, CH, 0); } catch (e) { }
+    });
+  }
   /* 从侧边栏回来时给一句提示：入口在经营面板首屏，玩家得先开一局才看得到 */
   if (CAPS.fromSidebar()) toast('🎁 欢迎回来，开局后可领复访补给');
   requestAnimationFrame(loop);

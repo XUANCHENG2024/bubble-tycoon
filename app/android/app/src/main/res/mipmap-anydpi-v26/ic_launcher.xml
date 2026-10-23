@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- V20.8：自适应图标（Android 8.0+ / API 26+）
+     ★ 此前 res/ 下没有任何 anydpi 目录 —— Android 8+ 根本用不上自适应图标，
+       只能退回 legacy ic_launcher.png 并被系统裁成圆形（图标小一圈、边缘被切）。
+     ★ 三层结构：背景纯色 + 前景品牌图，由系统按机型裁切成圆形/方形/水滴形。 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

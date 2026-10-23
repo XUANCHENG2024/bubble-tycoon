@@ -64,27 +64,54 @@ var PLAT = (function () {
    */
   function clampIns(v) { return Math.max(0, Math.min(60, Math.round(num(v, 0) || 0))); }
 
-  /* ---------- CSS env() 安全区探针（V20.7）----------
+  /* ---------- 安全区读取（V20.8 重构）----------
    *
-   * ★ 为什么需要探针：
-   *   `env(safe-area-inset-top)` 是**函数**，不能直接在
-   *   getComputedStyle 里读（那只能读自定义属性与普通属性）。
-   *   标准做法：造一个隐藏元素，把 env() 写进它的 padding，
-   *   再读该元素的 computed padding。
+   * ★★★ 三个层级，从权威到兜底 ★★★
    *
-   * ★ 前提：页面必须有 `viewport-fit=cover`，
-   *   否则 env() 在所有平台上都返回 0。
-   *   —— App 的 index.html 与 H5 版都有这一条。
+   * ① **原生插件**（App/Android 权威来源）
+   *   AppInsetsPlugin.java 监听 WindowInsetsCompat，
+   *   把 systemBars + displayCutout 换算成 CSS px，
+   *   主动推到 `window.__APP_INSETS`。
+   *   ★ 同步可读 —— 不等 Promise，首帧布局就能拿到正确 inset。
    *
-   * ★ 缓存：结果缓存起来（安全区在一次运行里不变），
-   *   但**旋转后可能变** —— 所以提供 clearEnvInsetsCache()，
-   *   由 resize 处理调用。
+   * ② **CSS env() 探针**（iOS / 桌面浏览器正确，Android 可能为 0）
+   *   `env(safe-area-inset-*)` 是 Apple 定义、WebKit 实现的能力；
+   *   Android WebView 直到 Chromium 140 才补上，
+   *   更早的版本在 edge-to-edge 下**返回 0**（静默失效）。
+   *   ★ 所以它只能当 fallback，不能当唯一来源。
+   *
+   * ③ **全 0**（都拿不到时的兜底）
+   *   布局照常画，只是可能没避开系统栏 —— 至少不会崩。
+   *
+   * ★★ 为什么 ① 必须在最前面 ★★
+   *   V20.7 只做了 ②，那在**多数 Android 设备上等于没做** ——
+   *   env() 返回 0，不报错、不告警，底部按钮被手势条盖住，
+   *   开发者却以为已经修好了。**静默失效是最坏的失败模式。**
    */
   var _envInsets = null;
 
+  /**
+   * 读原生推来的 inset（若宿主是 Capacitor App 且插件已推过值）。
+   * ★ 返回 null 表示「没有原生值」，调用方应继续往下 fallback。
+   */
+  function readNativeInsets() {
+    try {
+      if (!isApp) return null;
+      var v = (typeof window !== 'undefined') ? window.__APP_INSETS : null;
+      if (!v || typeof v !== 'object') return null;
+      if (!v.ok) return null;
+      var top = clampIns(v.top), bottom = clampIns(v.bottom);
+      /* ★ 左右也带上（横屏时刘海在侧边）。
+         ★ 但左右只在「确实有值」时才用 —— 侧边安全区通常为 0。 */
+      var left = Math.max(0, Math.round(num(v.left, 0) || 0));
+      var right = Math.max(0, Math.round(num(v.right, 0) || 0));
+      return { top: top, bottom: bottom, left: left, right: right, src: 'native' };
+    } catch (e) { return null; }
+  }
+
   function readEnvInsets() {
     if (_envInsets) return _envInsets;
-    var out = { top: 0, bottom: 0 };
+    var out = { top: 0, bottom: 0, src: 'none' };
     try {
       if (typeof document !== 'undefined' && document.body) {
         var probe = document.createElement('div');
@@ -103,15 +130,72 @@ var PLAT = (function () {
     } catch (e) { /* 拿不到就用 0 */ }
     out.top = clampIns(out.top);
     out.bottom = clampIns(out.bottom);
+    out.src = 'env';
     _envInsets = out;
     return out;
+  }
+
+  /**
+   * 主动向原生插件拉一次 inset（异步）。
+   *
+   * ★★ 为什么需要这条异步通道 ★★
+   *   原生侧是「主动 push 到 window.__APP_INSETS」，
+   *   ★ 但 push 发生在插件 load() 时 —— 那时 WebView **还没加载完页面**，
+   *   ★ evaluateJavascript 会打到 about:blank 上，值就丢了。
+   *   ★ 而 Capacitor 的插件调用**永远是异步的**（nativePromise），
+   *   ★ 没法在同步的 PLAT.info() 里等它。
+   *
+   * ★ 所以：**首帧先用 env 探针/兜底画出画面，
+   *   页面就绪后再异步拉一次真实 inset，拉到就重排。**
+   *   ★ 这个「晚一帧的修正」对玩家不可见（布局差异只有几十像素），
+   *   ★ 但保证了旋转/系统栏变化后始终是真实值。
+   *
+   * @param {function} cb 回调 (insets|null)
+   */
+  function requestInsets(cb) {
+    try {
+      if (!isApp) { cb(null); return; }
+      var C = window.Capacitor;
+      if (!C || !C.Plugins || !C.Plugins.AppInsets) { cb(null); return; }
+      var p = C.Plugins.AppInsets;
+      if (!p || typeof p.get !== 'function') { cb(null); return; }
+      Promise.resolve(p.get()).then(function (r) {
+        if (!r || !r.ok) { cb(null); return; }
+        var ins = {
+          top: clampIns(r.top), bottom: clampIns(r.bottom),
+          left: Math.max(0, Math.round(num(r.left, 0) || 0)),
+          right: Math.max(0, Math.round(num(r.right, 0) || 0)),
+          src: 'native',
+        };
+        /* ★ 写回全局 —— 让后续所有同步的 info() 都能读到它。
+           ★ 原生侧的 push 与这里的写入是同一个数据源，值一致。 */
+        try { window.__APP_INSETS = ins; } catch (e) { }
+        cb(ins);
+      }).catch(function () { cb(null); });
+    } catch (e) { cb(null); }
+  }
+
+  /**
+   * ★★ 统一入口：拿当前安全区（V20.8）★★
+   * 优先级：原生推送值 → env() 探针 → 全 0。
+   * ★ 原生值**不走缓存** —— 它是宿主随时推来的最新值，
+   *   而 env 探针的结果在旋转后可能过期，所以缓存只加在 env 上。
+   */
+  function safeInsets() {
+    var nat = readNativeInsets();
+    if (nat) return nat;
+    var env = readEnvInsets();
+    /* ★ env 探针返回 0 时不认为它是「有效来源」——
+       记下来是为了让调用方知道「这次是兜底」。 */
+    if (env.top === 0 && env.bottom === 0) env.src = 'none';
+    return env;
   }
 
   /** 旋转 / 折叠屏展开后安全区可能变 —— 清缓存让下次 info() 重读 */
   function clearEnvInsetsCache() { _envInsets = null; }
 
   function info() {
-    var w = 375, h = 667, dpr = 2, it = 0, ib = 0;
+    var w = 375, h = 667, dpr = 2, it = 0, ib = 0, il = 0, ir = 0;
     try {
       if (isTT) {
         var si = tt.getSystemInfoSync() || {};
@@ -144,9 +228,11 @@ var PLAT = (function () {
          *     Android 15+ (API 35) 强制 edge-to-edge，iOS 一直支持 ——
          *     所以这条路径在两个平台上都有效。
          */
-        var ins = readEnvInsets();
+        var ins = safeInsets();
         it = ins.top;
         ib = ins.bottom;
+        il = ins.left || 0;
+        ir = ins.right || 0;
       } else {
         w = window.innerWidth || w; h = window.innerHeight || h;
         dpr = window.devicePixelRatio || dpr;
@@ -156,6 +242,11 @@ var PLAT = (function () {
     return {
       w: w, h: h, dpr: Math.min(3, Math.max(1, dpr)),
       insTop: clampIns(it), insBottom: clampIns(ib),
+      /* ★ 左右安全区（V20.8）——
+       *   横屏时刘海/挖孔在**侧边**，内容会被物理遮挡。
+       *   ★ 这两个值不夹上限（侧边一般只有 0~40px）。 */
+      insLeft: Math.max(0, Math.round(il || 0)),
+      insRight: Math.max(0, Math.round(ir || 0)),
     };
   }
 
@@ -483,6 +574,10 @@ var PLAT = (function () {
     appStoreReady: appStoreReady,
     /* ★ 旋转 / 折叠屏展开后安全区可能变 —— 清缓存让下次 info() 重读 */
     clearEnvInsetsCache: clearEnvInsetsCache,
+    /* ★ V20.8：异步向原生拉一次真实 inset（Android）。
+       ★ 拿到后回调，调用方应重排一次布局。
+       ★ 原因见 requestInsets 的注释 —— 原生 push 可能早于页面加载而丢失。 */
+    requestInsets: requestInsets,
     /* 触感反馈。
        本作核心是连点出杯位，这类玩法最吃「按下去有回弹」。
        抖音有 tt.vibrateShort / vibrateLong；浏览器没有对应能力，直接 no-op ——

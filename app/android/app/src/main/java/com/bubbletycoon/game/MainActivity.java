@@ -18,6 +18,10 @@ public class MainActivity extends BridgeActivity {
         /* ★ 注册自定义插件（Capacitor 7 的注册方式）。
            ★ 必须在 super.onCreate 之后 —— Bridge 还没建好时注册会失败。 */
         registerPlugin(BubbleStorePlugin.class);
+        /* ★ V20.8：安全区查询插件。
+           ★ 它把系统的 WindowInsets（状态栏/导航栏/刘海）换算成 CSS px，
+             主动推到 window.__APP_INSETS —— JS 侧同步读取，不需要等 Promise。 */
+        registerPlugin(AppInsetsPlugin.class);
 
         /* ★★★ 全屏沉浸（V20.7）★★★
          *
@@ -48,9 +52,37 @@ public class MainActivity extends BridgeActivity {
 
         WindowInsetsControllerCompat controller =
             WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        controller.hide(WindowInsetsCompat.Type.systemBars());
-        controller.setSystemBarsBehavior(
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+        /* ★★ V20.8 修正：不再 hide(systemBars()) ★★
+         *
+         * ★★ V20.7 的做法是全隐藏，那有一个**致命副作用** ★★
+         *   一旦把系统栏 hide 掉，WindowInsets 里的 `systemBars()` inset
+         *   就变成 **0** —— 因为「系统栏此刻不占位、不被布局考虑」。
+         *   ★ 而**手势条 / Home 指示条仍然物理覆盖在屏幕底部**！
+         *     它只是不占布局空间，不代表不遮挡。
+         *   ★ 于是：
+         *     - 原生插件读到的 bottom = 0 → 底部按钮照样被盖
+         *     - CSS env(safe-area-inset-bottom) 也 = 0
+         *     - 两条路都拿不到真实值 → **V20.7 的安全区修复在 Android 上整体失效**
+         *
+         * ★★ V20.8 的做法：透明系统栏 + 真实 inset 避让 ★★
+         *   ① setDecorFitsSystemWindows(false) → 内容延伸到系统栏之下（edge-to-edge）
+         *   ② 系统栏**不隐藏**，只设透明 + 亮色图标
+         *      → 此时 systemBars() inset 是**真实值**（状态栏 24~48px、手势条 24~48px）
+         *      → 原生插件拿得到，JS 能把底部按钮抬到指示条之上
+         *   ③ 亮色图标：深紫背景 #170a2e 上的图标必须是亮的，否则会「消失」
+         *
+         * ★ 为什么不用 BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE：
+         *   那是「系统栏已隐藏」时的行为；现在不隐藏了，不需要。
+         *   ★ 用户从屏幕边缘上滑，系统仍会临时唤出系统栏。 */
+        controller.setAppearanceLightStatusBars(false);
+        controller.setAppearanceLightNavigationBars(false);
+        /* ★ 让系统栏背景透明 —— 内容能画到系统栏下面。
+           ★ API 35 (Android 15) 起这两个 setter 被废弃（edge-to-edge 强制透明），
+           ★ 系统会忽略；保留这段是为了 API 30~34 的机型。 */
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
+            getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+        }
 
         /* ★ 保持屏幕常亮：经营游戏常常要盯着屏幕算备货量，
            屏幕一暗就打断思路。

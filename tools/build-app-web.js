@@ -81,9 +81,16 @@ const html = `<!DOCTYPE html>
       overscroll-behavior: none;
     }
     /* ★ 画布铺满整个可视区。
-       100dvh 会随浏览器工具栏收起/展开而变 —— 在 App 里没这个问题，
-       但用 dvh 比 vh 稳（App 内嵌 WebView 偶尔有地址栏残留）。 */
-    #gc { display: block; width: 100vw; height: 100vh; height: 100dvh; }
+       ★★ V20.8：这里**不再**用 100vw / 100dvh 定尺寸 ★★
+       ★ 原因：那与绘制坐标（window.innerWidth / window.innerHeight）
+       ★   是**两个不同的来源**。
+       ★ 两者不一致时（WebView 在系统栏显隐、软键盘、分屏拖动时
+       ★   dvh 与 innerHeight 会短暂不一致），画布被整体拉伸 ——
+       ★   文字变形、圆形变椭圆、**点击区与视觉位置错位**。
+       ★ 改为：CSS 只给「兜底值」，真实尺寸由 main.js 的 setupCanvas()
+       ★   用内联 style 精确设成 innerWidth/innerHeight —— 保证 1:1。
+       ★ 100% 是兜底：JS 没跑起来时也不会露出白边。 */
+    #gc { display: block; width: 100%; height: 100%; }
     /* ★ 加载遮罩：bundle 有 733KB，首次解析约 100~300ms，
        这段时间是白屏 —— 放个背景色 + 品牌字，别让用户看到空白。 */
     #boot {

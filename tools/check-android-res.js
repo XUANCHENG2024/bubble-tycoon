@@ -76,6 +76,11 @@ except Exception as e:
 console.log('\n--- ② Manifest 关键项 ---');
 {
   const mf = path.join(appDir, 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
+  /* ★ MainActivity 源码也要读 —— V20.8 的一些断言针对它 */
+  const mainJavaPath = path.join(appDir, 'android', 'app', 'src', 'main', 'java',
+    'com', 'bubbletycoon', 'game', 'MainActivity.java');
+  const mainJava = fs.existsSync(mainJavaPath)
+    ? fs.readFileSync(mainJavaPath, 'utf8') : '';
   if (fs.existsSync(mf)) {
     const s = fs.readFileSync(mf, 'utf8');
     check(/android:screenOrientation="unspecified"/.test(s),
@@ -93,8 +98,58 @@ console.log('\n--- ② Manifest 关键项 ---');
     check(perms.length <= 2, '权限数 ≤ 2（实际 ' + perms.length + '：' + perms.join(', ') + '）');
     /* ★ 标签内部不能有注释 —— 这是我踩过的坑 */
     check(!/<[^>]*<!--/.test(s), '标签内部没有注释（XML 不允许）');
+    /* ★ V20.8：MainActivity 必须注册 AppInsets 插件 ——
+       ★ 不注册的话原生 inset 永远拿不到，安全区又会退回 0。 */
+    check(/registerPlugin\(AppInsetsPlugin\.class\)/.test(mainJava),
+      'MainActivity 注册了 AppInsetsPlugin（原生安全区来源）');
+    /* ★ 不应再 hide(systemBars()) ——
+       ★ 一旦隐藏，systemBars() inset 恒为 0，手势条就避不开。 */
+    check(!/controller\.hide\(WindowInsetsCompat\.Type\.systemBars\(\)\)/.test(mainJava),
+      'MainActivity 未隐藏系统栏（隐藏会让 inset 恒为 0）');
+    check(/setDecorFitsSystemWindows\(getWindow\(\), false\)/.test(mainJava),
+      'MainActivity 开启 edge-to-edge（内容延伸到系统栏之下）');
   } else {
     check(false, 'AndroidManifest.xml 存在');
+  }
+}
+
+/* ---------- ②' 图标密度与自适应图标（V20.8）---------- */
+console.log('\n--- ②\' 图标密度与自适应图标 ---');
+{
+  const resDir = path.join(appDir, 'android', 'app', 'src', 'main', 'res');
+  const FG = { mdpi: 108, hdpi: 162, xhdpi: 216, xxhdpi: 324, xxxhdpi: 432 };
+  const LAUNCHER = { mdpi: 48, hdpi: 72, xhdpi: 96, xxhdpi: 144, xxxhdpi: 192 };
+
+  /* ★ 自适应图标：Android 8+ 没有它就会退回 legacy 图标并被裁圆 */
+  const anydpi = path.join(resDir, 'mipmap-anydpi-v26');
+  check(fs.existsSync(path.join(anydpi, 'ic_launcher.xml')),
+    '存在 mipmap-anydpi-v26/ic_launcher.xml（Android 8+ 自适应图标）');
+  check(fs.existsSync(path.join(anydpi, 'ic_launcher_round.xml')),
+    '存在 mipmap-anydpi-v26/ic_launcher_round.xml');
+  /* 背景色资源必须存在，否则 adaptive-icon 引用不到 */
+  const bg = path.join(resDir, 'values', 'ic_launcher_background.xml');
+  check(fs.existsSync(bg), '存在 values/ic_launcher_background.xml（自适应图标背景色）');
+
+  /* ★ 各密度前景层必须是**对应尺寸**，不能是同一份 432×432 */
+  for (const [dpi, size] of Object.entries(FG)) {
+    const f = path.join(resDir, 'mipmap-' + dpi, 'ic_launcher_foreground.png');
+    if (!fs.existsSync(f)) { check(false, 'mipmap-' + dpi + '/ic_launcher_foreground.png 存在'); continue; }
+    const b = fs.readFileSync(f);
+    const w = b.readUInt32BE(16), h = b.readUInt32BE(20);
+    check(w === size && h === size,
+      'mipmap-' + dpi + '/ic_launcher_foreground.png 是 ' + w + '×' + h
+      + '（应为 ' + size + '×' + size + '）');
+  }
+
+  /* 主图标尺寸校验 */
+  for (const [dpi, size] of Object.entries(LAUNCHER)) {
+    const f = path.join(resDir, 'mipmap-' + dpi, 'ic_launcher.png');
+    if (!fs.existsSync(f)) { check(false, 'mipmap-' + dpi + '/ic_launcher.png 存在'); continue; }
+    const b = fs.readFileSync(f);
+    const w = b.readUInt32BE(16), h = b.readUInt32BE(20);
+    check(w === size && h === size,
+      'mipmap-' + dpi + '/ic_launcher.png 是 ' + w + '×' + h
+      + '（应为 ' + size + '×' + size + '）');
   }
 }
 

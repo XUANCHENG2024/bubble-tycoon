@@ -36,10 +36,74 @@ var FONT = '"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif';
  *      --fs-xs: 10px  --fs-sm: 11px  --fs-md: 12px
  *      --fs-lg: 14px  --fs-xl: 16px  --fs-display: 22px
  *    两版共用一套分档，才能保证「同一信息两版同样重」。
- * ------------------------------------------------------------ */
-var FS = {
+ * ------------------------------------------------------------
+ *
+ *  ★★★★★ V20.8：FS 改为 **getter**，由全局缩放系数驱动 ★★★★★
+ *
+ *  ★★★ 根因：缩放系数形同虚设 ★★★
+ *   V20.7 引入了 L.scale（0.94~1.10）用于「按屏幕宽度缩放字号」，
+ *   ★ 但只提供了 `fs(L, key)` 这一个入口，
+ *   ★ 而全仓 **361 处**直接写 `FS.xs` / `FS.md`（只有 36 处用了 fs(L,...)）。
+ *   ★ 也就是说：**95% 的文字根本没有被缩放**。
+ *   ★ 后果：
+ *     - 320 宽的小屏上，10px 的字仍然 10px → 一行放不下几个字 → 被截断
+ *     - 414 宽的大屏上，字还是 10px → 显得小、留白多
+ *   ★ 而 L.scale 这个「看起来做了适配」的参数，
+ *     实际效果几乎为零 —— 这是比「没做适配」更糟的：
+ *     ★ 它让人误以为已经适配过了。
+ *
+ *  ★★★ 修法：让 FS 本身就是一个「会缩放的令牌表」 ★★★
+ *   · FS 的每个键都变成 getter，读取时乘上当前全局缩放系数
+ *   · 新增 GFX.setTextScale(s)：由 layoutOf 在每次布局时调用
+ *   · ★ 这样 361 处 `FS.xs` 一行不改就自动跟随缩放 ——
+ *     ★ **改一处生效全部**，而不是指望 361 个调用点都记得写 fs(L,...)
+ *
+ *  ★ 为什么 scale 存在 gfx.js 而不是 ui.js：
+ *   layoutOf 在 ui.js 里，而 FS 在 gfx.js 里；
+ *   ★ 若 scale 存在 ui.js，gfx.js 就拿不到（gfx 先加载）。
+ *   ★ 存在 gfx.js，ui.js 通过 GFX.setTextScale() 写进去 —— 依赖方向单一。
+ *
+ *  ★ 兼容性：FS.xs 等**读取**接口完全不变，
+ *   ★ 只有「重新赋值 FS.xs = 12」这种写法会失效（仓库里没有）。
+ */
+var _textScale = 1;
+
+/** 设置全局字号缩放系数（由 ui.js 的 layoutOf 调用）。 */
+function setTextScale(s) {
+  var v = Number(s);
+  /* ★ 保护：非法值退回 1。
+     ★ 缩放系数一旦变成 0 或 NaN，全屏文字会消失 —— 那是灾难级故障。 */
+  if (!isFinite(v) || v <= 0.2 || v > 3) v = 1;
+  _textScale = v;
+}
+
+/** 取当前全局字号缩放系数。 */
+function getTextScale() { return _textScale; }
+
+/* ★ 基础字号（未缩放）—— 数值必须与 styles.css 的 :root 完全一致 */
+var FS_BASE = {
   xs: 10, sm: 11, md: 12, lg: 14, xl: 16, display: 22,
 };
+
+/* ★ FS 是「会缩放的令牌表」——
+   每个键都是 getter，读取时才乘上 _textScale。
+   ★ 用 defineProperty 而不是对象字面量的 get 语法，
+     是为了让 getter 的 enumerable 保持 true（Object.keys 能列全）。 */
+var FS = {};
+Object.keys(FS_BASE).forEach(function (k) {
+  Object.defineProperty(FS, k, {
+    enumerable: true,
+    configurable: true,
+    get: function () {
+      var v = FS_BASE[k] * _textScale;
+      /* ★ 取整到 0.5px ——
+         *   Canvas 的 font 只接受整数时会四舍五入到整数，
+         *   但布局计算（宽度预留）用小数更准。
+         *   ★ 取整到 0.5 是为了「字号是整数但不至于太糙」的折中。 */
+      return Math.round(v * 2) / 2;
+    },
+  });
+});
 
 /* ------------------------------------------------------------
  *  文本
@@ -131,7 +195,13 @@ function text(ctx, str, x, y, o) {
   ctx.textAlign = o.align || 'left';
   ctx.textBaseline = o.baseline || 'top';
   var s = String(str == null ? '' : str);
-  if (o.maxW && textW(ctx, s, size, o.weight || 400) > o.maxW) {
+  /* ★ V20.8 修正：maxW 的存在性判断不能用 `o.maxW &&` ——
+   *   maxW=0 时它是 falsy → **完全不截断** → 文字直接画出容器。
+   *   （单元测试 tools/test-text-truncate.js 抓到的真实缺陷。）
+   *   这里显式区分「没给 maxW」与「maxW 就是一个很小的数」。 */
+  var hasMaxW = (o.maxW !== undefined && o.maxW !== null);
+  var maxW = hasMaxW ? Math.max(0, Number(o.maxW)) : 0;
+  if (hasMaxW && textW(ctx, s, size, o.weight || 400) > maxW) {
     /* ★★ 截断：二分查找最长可容纳的前缀 ★★
      * ★ 原来是从尾部逐字符删（while + slice）——
      *   每次都重新 measureText，一次截断是 O(n²) 次测量；
@@ -139,25 +209,46 @@ function text(ctx, str, x, y, o) {
      *   4000 条上限会被瞬间打满 → 缓存整体失效 → 性能塌方。
      * ★ 二分：O(log n) 次测量，缓存条目也只多 O(log n) 条。
      *
-     * ★ 切点选择：优先在**空格**处断（英文不断词），
-     *   找不到就按字符断（中文每个字都是独立字符，断开不会切坏字形）。
+     * ★★★★ V20.8：三处执行顺序修正（这是被单元测试抓到的真缺陷）★★★★
+     * ★ 原来的顺序是「①按 maxW 二分 → ②回退到空格 → ③为「…」腾空间再砍尾」
+     *   —— 顺序错了：
+     *   ★ ③ 从尾部砍字符，把 ② 刚做好的词边界又砍掉了
+     *     （"welcome to bubble" 被砍成 "welcome to bubbl…" —— 半个单词）。
+     *   ★ 而且 ① 的预算里**没有扣掉「…」的宽度**，
+     *     导致结果必然超宽，要靠 ③ 事后补救 → 补救又破坏了 ②。
+     * ★ 现在的正确顺序：
+     *   ① 先算出「…」占多少宽度，从预算里**先扣掉**
+     *   ② 二分找「正文 + …」都能放下的最长前缀
+     *   ③ 只有在断点落在英文单词中间、且那个单词很短（≤12 字符）时才回退到空格
+     *      —— 回退会丢信息，丢太多（>40%）反而比断词更糟，所以要克制
      */
-    var lo = 1, hi = s.length - 1, best = 1;
-    while (lo <= hi) {
-      var mid = (lo + hi) >> 1;
-      if (textW(ctx, s.slice(0, mid), size, o.weight || 400) <= o.maxW) {
-        best = mid; lo = mid + 1;
-      } else { hi = mid - 1; }
+    var weight = o.weight || 400;
+    var ellW = textW(ctx, '\u2026', size, weight);
+    /* 连「…」都放不下 → 什么都不画（画半个省略号更糟） */
+    if (ellW > maxW) {
+      s = '';
+    } else {
+      /* ★ 预算 = maxW − 「…」宽度（先扣，再二分） */
+      var budget = maxW - ellW;
+      var lo = 0, hi = s.length - 1, best = 0;
+      while (lo <= hi) {
+        var mid = (lo + hi) >> 1;
+        if (textW(ctx, s.slice(0, mid), size, weight) <= budget) {
+          best = mid; lo = mid + 1;
+        } else { hi = mid - 1; }
+      }
+      var cut = s.slice(0, best);
+      /* ★ 词边界回退：只有「断点确实落在英文单词中间」且「被切掉的尾词很短」时才回退。
+         ★ 尾词 > 12 字符 → 不回退（宁可断词也别丢掉一大半内容）。 */
+      if (cut.length > 0 && cut.charAt(cut.length - 1) !== ' ') {
+        var sp = cut.lastIndexOf(' ');
+        var tailLen = cut.length - (sp + 1);
+        if (sp > 0 && tailLen <= 12) cut = cut.slice(0, sp);
+      }
+      /* ★ 去掉尾部多余空格（"welcome to " + "…" → "welcome to…"） */
+      cut = cut.replace(/\s+$/, '');
+      s = cut + '\u2026';
     }
-    var cut = s.slice(0, best);
-    /* ★ 若断点落在单词中间（英文），回退到最近的空格 */
-    var sp = cut.lastIndexOf(' ');
-    if (sp > best * 0.6 && sp > 0) cut = cut.slice(0, sp);
-    /* ★ 「…」本身也要占宽度 —— 留出它的空间再截一次 */
-    while (cut.length > 0 && textW(ctx, cut + '…', size, o.weight || 400) > o.maxW) {
-      cut = cut.slice(0, -1);
-    }
-    s = cut + '…';
   }
   ctx.fillText(s, x, y);
   return size * 1.4;
@@ -418,6 +509,8 @@ if (typeof globalThis !== 'undefined') {
     rr: rr, fillRR: fillRR, card: card, bar: bar, chip: chip,
     button: button, cardBtn: cardBtn, lineChart: lineChart,
     shortNum: shortNum, sheet: sheet,
+    /* ★ V20.8：全局字号缩放（见 FS 的注释）*/
+    setTextScale: setTextScale, getTextScale: getTextScale,
     hitReset: hitReset, hitAt: hitAt, addHit: addHit, setHitOffset: setHitOffset,
     clipPush: clipPush, clipPop: clipPop,
     get hits() { return HIT.list; },

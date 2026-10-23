@@ -28,6 +28,8 @@ var VIEW = {
   tut: { on: false, step: 0, rect: null },
   tutRush: 0,               /* 引导「点击加速」那一步已点的次数 */
   ins: { top: 0, bottom: 0 },
+  /* ★ 左右安全区（V20.8）—— 横屏时刘海/挖孔在侧边 */
+  insLeft: 0, insRight: 0,
   lastServed: 0,
   lastLost: 0,
 };
@@ -94,6 +96,14 @@ function layoutOf(W, H) {
   var vp = viewportClass(W, H);
   var scale = scaleOf(W);
 
+  /* ★★ V20.8：把缩放系数推给 gfx ★★
+   * ★ FS 现在是 getter，读取时乘上这个系数 ——
+   * ★ 所以**必须在这里设一次**，否则全局字号还是 1 倍，
+   * ★ 361 处 `FS.xs` 就等于没缩放（这正是 V20.7 的问题）。
+   * ★ layoutOf 是所有绘制的必经之路（draw() 第一行就调它），
+   * ★ 所以在这里设一次就覆盖了所有绘制路径。 */
+  if (typeof GFX !== 'undefined' && GFX.setTextScale) GFX.setTextScale(scale);
+
   /* HUD 分两行：第一行四个数值胶囊，第二行是目标进度条 + 右上角图标按钮。
      图标按钮必须独占第二行 —— 它们以前压在第一行右上角，390 宽时图标区从
      x=228 一直伸到 374，而「净资产」那格占 287~374，等于被整个盖住。 */
@@ -127,11 +137,29 @@ function layoutOf(W, H) {
      否则「开门营业」这类钉在底部的按钮会被 Home 指示条盖住。 */
   var bodyH = H - hudH - tabH - (ins.bottom || 0);
 
+  /* ★★ 左右安全区（V20.8）★★
+   * 横屏时刘海/挖孔在**侧边** —— 内容会被物理遮挡。
+   * ★ 这时候内容区不能贴边，要往里让。
+   * ★ 注意：限宽居中时左右本来就有留白，
+   *   取「安全区与居中留白的较大者」—— 两种约束都要满足。 */
+  var insL = (VIEW.insLeft || 0), insR = (VIEW.insRight || 0);
+  var sideGuard = Math.max(insL, insR);
+  if (sideGuard > 0) {
+    var avail = W - sideGuard * 2;
+    if (contentW > avail) { contentW = avail; }
+    contentX = Math.max(contentX, sideGuard);
+    /* 居中后可能偏移，重新按「内容宽 + 两侧安全区对称」算一次 */
+    contentX = Math.round((W - contentW) / 2);
+    if (contentX < sideGuard) contentX = sideGuard;
+  }
+
   return {
     W: W, H: H, hudH: hudH, tabH: tabH,
     bodyY: hudH + tabH,
     bodyH: bodyH,
     padTop: ins.top, padBottom: ins.bottom,
+    /* ★ 左右安全区（V20.8）*/
+    padLeft: insL, padRight: insR,
     /* ★ 新增：缩放与视口分类，供各处计算字号与间距 */
     scale: scale,
     wide: vp.wide, short: vp.short, foldable: vp.foldable,
@@ -153,10 +181,18 @@ function layoutOf(W, H) {
  * ★ 现在统一乘 L.scale —— 而 L.scale 只在窄屏上偏离 1，
  *   宽屏靠「限宽居中」而不是「放大字号」，
  *   （放大字号会让 32 个配方按钮在平板上占更多空间，反而更挤）
+ *
+ * ★★ V20.8：这里的缩放**已经由 FS 自己做了** ★★
+ *   FS 现在是 getter，读的时候就会乘上全局缩放系数（见 gfx.js）。
+ *   ★ 所以本函数**不能再乘一次** —— 那样就缩放了两遍
+ *   （320 屏上 10px → 10×0.94×0.94 = 8.8px，中文直接糊了）。
+ *   ★ 本函数保留是为了兼容既有调用点，
+ *     语义变成「取当前缩放下的该档字号」。
  */
 function fs(L, key) {
-  var base = FS[key] || FS.md;
-  return Math.round(base * (L && L.scale ? L.scale : 1));
+  /* ★ 直接读 FS 的 getter —— 它已经是缩放后的值。
+     ★ L 参数保留但不再用于计算（保留签名是为了不改 36 处调用点）。 */
+  return FS[key] || FS.md;
 }
 
 
@@ -3242,20 +3278,29 @@ function drawTutorial(ctx, L) {
       if (above > (L.hudH || 60) + 40) cy = above;
     }
   }
-  GFX.fillRR(ctx, 16, cy, W - 32, ch, 18, T.bg2, T.line2);
-  text(ctx, (VIEW.tut.step + 1) + '/' + TUTORIAL.length, 30, cy + 12, { size: FS.xs, color: T.txt3 });
-  text(ctx, step.title, 30, cy + 26, { size: FS.lg, weight: 900, color: T.txt, maxW: W - 70 });
+  /* ★★ V20.8：说明卡片改用**内容区**坐标 ★★
+   * ★ 原先是硬编码 `16` 与 `W - 32` ——
+   *   在平板/横屏上（内容限宽 640 居中），
+   *   这张卡片会横跨整个视口（1024/1180 宽），
+   *   ★ 而下面被限宽的内容只有 608 —— 视觉上像「另一个界面」。
+   * ★ 改为 L.padX / L.innerW，与其他面板保持同一套栅格。 */
+  GFX.fillRR(ctx, L.padX, cy, L.innerW, ch, 18, T.bg2, T.line2);
+  var tx0 = L.padX + 14;
+  var tw = L.innerW - 28;
+  text(ctx, (VIEW.tut.step + 1) + '/' + TUTORIAL.length, tx0, cy + 12, { size: FS.xs, color: T.txt3 });
+  text(ctx, step.title, tx0, cy + 26, { size: FS.lg, weight: 900, color: T.txt, maxW: tw });
   var ty = cy + 48;
-  ty += para(ctx, GFX.plainText(step.text), 30, ty,
-    { size: FS.md, color: T.txt2, maxW: W - 70, lineH: 17 });
+  ty += para(ctx, GFX.plainText(step.text), tx0, ty,
+    { size: FS.md, color: T.txt2, maxW: tw, lineH: 17 });
   if (hint) {
     ty += 6;
     ty += para(ctx, hint + (step.advance === 'rush'
       ? '（' + Math.min(3, (VIEW.tutRush || 0) + 1) + '/3）' : ''),
-      30, ty, { size: FS.md, weight: 700, color: T.amber, maxW: W - 70, lineH: 16 });
+      tx0, ty, { size: FS.md, weight: 700, color: T.amber, maxW: tw, lineH: 16 });
   }
-  GFX.button(ctx, 30, cy + ch - 46, (W - 78) / 2, 36, '跳过引导', { kind: 'ghost', act: 'tutskip', size: FS.md });
-  GFX.button(ctx, 30 + (W - 78) / 2 + 16, cy + ch - 46, (W - 78) / 2, 36, '下一步 →',
+  var bw = (L.innerW - 46) / 2;
+  GFX.button(ctx, tx0, cy + ch - 46, bw, 36, '跳过引导', { kind: 'ghost', act: 'tutskip', size: FS.md });
+  GFX.button(ctx, tx0 + bw + 16, cy + ch - 46, bw, 36, '下一步 →',
     { kind: 'primary', act: 'tutnext', size: FS.md });
 }
 
