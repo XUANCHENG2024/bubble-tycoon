@@ -64,6 +64,52 @@ var PLAT = (function () {
    */
   function clampIns(v) { return Math.max(0, Math.min(60, Math.round(num(v, 0) || 0))); }
 
+  /* ---------- CSS env() 安全区探针（V20.7）----------
+   *
+   * ★ 为什么需要探针：
+   *   `env(safe-area-inset-top)` 是**函数**，不能直接在
+   *   getComputedStyle 里读（那只能读自定义属性与普通属性）。
+   *   标准做法：造一个隐藏元素，把 env() 写进它的 padding，
+   *   再读该元素的 computed padding。
+   *
+   * ★ 前提：页面必须有 `viewport-fit=cover`，
+   *   否则 env() 在所有平台上都返回 0。
+   *   —— App 的 index.html 与 H5 版都有这一条。
+   *
+   * ★ 缓存：结果缓存起来（安全区在一次运行里不变），
+   *   但**旋转后可能变** —— 所以提供 clearEnvInsetsCache()，
+   *   由 resize 处理调用。
+   */
+  var _envInsets = null;
+
+  function readEnvInsets() {
+    if (_envInsets) return _envInsets;
+    var out = { top: 0, bottom: 0 };
+    try {
+      if (typeof document !== 'undefined' && document.body) {
+        var probe = document.createElement('div');
+        probe.style.cssText = [
+          'position:fixed', 'top:0', 'left:0', 'width:0', 'height:0',
+          'visibility:hidden', 'pointer-events:none', 'z-index:-1',
+          'padding-top:env(safe-area-inset-top, 0px)',
+          'padding-bottom:env(safe-area-inset-bottom, 0px)',
+        ].join(';');
+        document.body.appendChild(probe);
+        var cs = getComputedStyle(probe);
+        out.top = parseFloat(cs.paddingTop) || 0;
+        out.bottom = parseFloat(cs.paddingBottom) || 0;
+        if (probe.parentNode) probe.parentNode.removeChild(probe);
+      }
+    } catch (e) { /* 拿不到就用 0 */ }
+    out.top = clampIns(out.top);
+    out.bottom = clampIns(out.bottom);
+    _envInsets = out;
+    return out;
+  }
+
+  /** 旋转 / 折叠屏展开后安全区可能变 —— 清缓存让下次 info() 重读 */
+  function clearEnvInsetsCache() { _envInsets = null; }
+
   function info() {
     var w = 375, h = 667, dpr = 2, it = 0, ib = 0;
     try {
@@ -78,31 +124,29 @@ var PLAT = (function () {
           it = si.statusBarHeight || 0;
         }
       } else if (isApp) {
-        /* ★ App（Capacitor）：StatusBar 插件能给准确的状态栏高度，
-           比 env(safe-area-inset-top) 可靠 ——
-           后者在部分 Android 厂商 ROM 上返回 0（刘海屏判断不准）。
-           ★ 拿不到就退回 env()（WebView 里仍能算出来）。 */
+        /* ★ App（Capacitor）：尺寸直接取 WebView 视口。
+           ★ WebView resize 后 innerWidth/innerHeight 会更新 ——
+             这正是 V20.7 的 resize 处理能拿到新尺寸的依据。 */
         w = window.innerWidth || w; h = window.innerHeight || h;
         dpr = window.devicePixelRatio || dpr;
-        try {
-          var SB = window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.StatusBar;
-          if (SB && typeof SB.getInfo === 'function') {
-            /* getInfo 是异步的 —— 但状态栏高度通常已由原生注入到 CSS 变量，
-               所以这里不阻塞，只做同步兜底。 */
-          }
-        } catch (e) { /* 忽略 */ }
-        /* ★ 安全区用 CSS 变量读（Capacitor 7 会把原生 inset 注入到 :root）*/
-        try {
-          var cs = getComputedStyle(document.documentElement);
-          it = parseFloat(cs.getPropertyValue('--ion-safe-area-top')) || 0;
-          ib = parseFloat(cs.getPropertyValue('--ion-safe-area-bottom')) || 0;
-          /* ★ 状态栏是「覆盖」还是「占位」由 App 决定：
-             我们在 capacitor.config 里没设 overlay，
-             默认状态栏**占位**（内容从状态栏下方开始），
-             所以 inset 应该为 0 —— 只有 overlay 时才需要减。 */
-          if (!it) it = 0;
-          if (!ib) ib = 0;
-        } catch (e) { /* 忽略 */ }
+        /* ★★ 安全区：用 CSS env() 探针读 ★★
+         *
+         * ★ 原来的写法是读 `--ion-safe-area-top` / `--ion-safe-area-bottom`
+         *   —— ★★ 那是 **Ionic 框架**的变量，本项目**没用 Ionic**，
+         *   ★★ 所以它永远不存在 → inset 恒为 0 →
+         *   ★★ 结果：Android 底部导航栏（手势条/三键）盖住底部按钮，
+         *   ★★ 而玩家「暂停 / 开门营业」点不到 —— 而且不报任何错。
+         *
+         * ★ 正确做法：**CSS env() 探针**。
+         *   env() 是函数，不能在 getComputedStyle 里直接读 ——
+         *   必须建一个隐藏元素，把 env() 写进 padding，再读它的 computed padding。
+         *   ★ index.html 里已有 viewport-fit=cover（必需，否则 env() 全是 0），
+         *     Android 15+ (API 35) 强制 edge-to-edge，iOS 一直支持 ——
+         *     所以这条路径在两个平台上都有效。
+         */
+        var ins = readEnvInsets();
+        it = ins.top;
+        ib = ins.bottom;
       } else {
         w = window.innerWidth || w; h = window.innerHeight || h;
         dpr = window.devicePixelRatio || dpr;
@@ -437,6 +481,8 @@ var PLAT = (function () {
     createAudio: createAudio,
     /* ★ App 存储启动前要先 appStoreReady() 把存档读进内存 */
     appStoreReady: appStoreReady,
+    /* ★ 旋转 / 折叠屏展开后安全区可能变 —— 清缓存让下次 info() 重读 */
+    clearEnvInsetsCache: clearEnvInsetsCache,
     /* 触感反馈。
        本作核心是连点出杯位，这类玩法最吃「按下去有回弹」。
        抖音有 tt.vibrateShort / vibrateLong；浏览器没有对应能力，直接 no-op ——

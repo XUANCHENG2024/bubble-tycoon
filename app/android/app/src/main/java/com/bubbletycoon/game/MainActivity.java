@@ -3,6 +3,10 @@ package com.bubbletycoon.game;
 import android.os.Bundle;
 import android.view.WindowManager;
 
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
+
 import com.getcapacitor.BridgeActivity;
 
 public class MainActivity extends BridgeActivity {
@@ -15,16 +19,38 @@ public class MainActivity extends BridgeActivity {
            ★ 必须在 super.onCreate 之后 —— Bridge 还没建好时注册会失败。 */
         registerPlugin(BubbleStorePlugin.class);
 
-        /* ★ 全屏沉浸：游戏不该有状态栏。
-           ★ 用 FLAG_FULLSCREEN（不是 setDecorFitsSystemWindows(false)）——
-             前者只是隐藏状态栏，WebView 的可视区仍然是「除导航栏外的整屏」，
-             布局最省事、最不容易出刘海/手势条遮挡的问题。
-           ★ 如果改成 edge-to-edge（内容延伸到状态栏下），
-             就要改用 safe-area inset 来避让 —— 本作已经在 platform.js 里
-             预留了 insTop/insBottom，但**默认方案更简单可靠**。 */
-        getWindow().setFlags(
-            WindowManager.LayoutParams.FLAG_FULLSCREEN,
-            WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        /* ★★★ 全屏沉浸（V20.7）★★★
+         *
+         * ★★ 为什么不能只靠 FLAG_FULLSCREEN ★★
+         *   FLAG_FULLSCREEN 只隐藏**状态栏**，导航栏（手势条/三键）还在。
+         *   ★ 而 targetSdk 35 → **Android 15 强制 edge-to-edge**：
+         *   系统栏一律**覆盖**在应用内容之上，WebView 拿到的是全屏尺寸。
+         *   ★ 结果：导航栏盖住 WebView 底部，
+         *   ★ 而平台的 inset 读不到（见 platform.js 的 env() 探针说明），
+         *   ★ → 底部「暂停 / 开门营业」按钮**被盖住、点不到**。
+         *
+         * ★★ 现在的做法（三步，缺一不可）★★
+         *   ① setDecorFitsSystemWindows(false)
+         *      → 内容延伸到系统栏之下（edge-to-edge）
+         *   ② 隐藏系统栏（沉浸式）
+         *      → 状态栏与导航栏都不占位也不覆盖
+         *   ③ 手指上滑可临时唤出系统栏
+         *      → BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+         *      ★ 不给这个的话，系统栏一旦显示就再也不消失。
+         *
+         * ★ 为什么这样不需要在 JS 里算 inset：
+         *   沉浸式下内容铺满全屏，底部本来就没有被遮挡的东西。
+         *   ★ 而**万一**系统栏被临时唤出，WebView 会收到 resize，
+         *   ★ V20.7 的 resize 处理会重算布局
+         *     （此时 env() 探针能读到 inset 并重新避让）。
+         */
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+
+        WindowInsetsControllerCompat controller =
+            WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        controller.hide(WindowInsetsCompat.Type.systemBars());
+        controller.setSystemBarsBehavior(
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
 
         /* ★ 保持屏幕常亮：经营游戏常常要盯着屏幕算备货量，
            屏幕一暗就打断思路。

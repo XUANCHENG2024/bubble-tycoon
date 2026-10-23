@@ -36,6 +36,75 @@ function setupCanvas() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
+/* ---------------- 尺寸变化（V20.7）----------------
+ *
+ * ★★★ 为什么必须处理 ★★★
+ *   Android 的 Activity 配了
+ *     android:configChanges="orientation|…|screenSize|…"
+ *   意思是**旋转时 Activity 不重建** —— WebView 只是被 resize 了。
+ *   ★ 而 Canvas 版原先只在 boot() 时算一次 CW/CH，
+ *     于是旋转后：
+ *     · canvas 的 CSS 尺寸变了（浏览器把画布拉伸到新视口）
+ *     · 但内部绘制坐标还是老的（CW/CH 没更新）
+ *     → **画面被整体拉伸变形**（这正是用户反馈的「拉伸」）
+ *
+ * ★ 而且这不只发生在旋转时：
+ *   · 折叠屏展开 / 折叠
+ *   · 分屏 / 自由窗口（Android 12+ 的分屏可以随时拖）
+ *   · 手机横竖屏切换
+ *   ★ 都是「WebView 尺寸变了但页面没重新加载」。
+ *
+ * ★ H5 版没这个问题 —— 它靠 CSS 百分比与 flex 自动重排。
+ *   ★ Canvas 版必须**自己**重算尺寸与重绘。
+ *
+ * ★ 为什么用 ResizeObserver 而不是 window.resize：
+ *   · Android WebView 的 window.resize 在部分机型上不触发
+ *   · ResizeObserver 直接观察元素尺寸变化，更可靠
+ *   · 但两者都监听 —— 双保险（任一触发即可）
+ */
+function handleResize() {
+  if (!canvas) return;
+  /* ★ 安全区缓存要先清 ——
+     旋转 / 折叠屏展开后刘海与指示条的位置会变，
+     而 env() 探针的结果是缓存的。 */
+  if (PLAT.clearEnvInsetsCache) PLAT.clearEnvInsetsCache();
+  var i = PLAT.info();
+  /* ★ 只有真的变了才重做 —— resize 事件可能高频触发
+     （拖动分屏条时每帧一次），而 setupCanvas 会重设 canvas.width
+     （那会**清空画布**，导致闪烁）。 */
+  if (i.w === CW && i.h === CH
+    && (i.insTop || 0) === (VIEW.ins.top || 0)
+    && (i.insBottom || 0) === (VIEW.ins.bottom || 0)) return;
+
+  /* ★ 尺寸变了 → 重设画布并重绘。
+     ★ setupCanvas 里设 canvas.width/height 会清空画布，
+     ★ 但下一帧 loop() 会立刻重画 —— 所以视觉上只是一帧闪白。 */
+  setupCanvas();
+  /* ★ 重画一次，不等下一帧 rAF —— 旋转后立刻就能看到正确画面，
+     而不用等 16ms（其实也无所谓，但这样更确定）。 */
+  try { draw(ctx, CW, CH, 0); } catch (e) { /* 下一帧还会画 */ }
+}
+
+/** 注册尺寸监听（浏览器 / WebView 环境） */
+function watchResize() {
+  if (typeof window === 'undefined') return;
+  /* ① window.resize —— 浏览器与大部分 WebView 会触发 */
+  try {
+    window.addEventListener('resize', handleResize);
+  } catch (e) { /* 忽略 */ }
+  /* ② ResizeObserver —— 直接观察画布元素，更可靠 */
+  try {
+    if (typeof ResizeObserver === 'function' && canvas) {
+      var ro = new ResizeObserver(handleResize);
+      ro.observe(canvas);
+    }
+  } catch (e) { /* 忽略 */ }
+  /* ③ orientationchange —— 老 WebView 的兼容 */
+  try {
+    window.addEventListener('orientationchange', handleResize);
+  } catch (e) { /* 忽略 */ }
+}
+
 /* ---------------- 反馈层 ---------------- */
 function toast(msg) {
   VIEW.toasts.push({ msg: msg, life: 1900 });
@@ -1451,6 +1520,10 @@ function boot() {
     VIEW.sound = false;
   }
   PLAT.bindTouch(canvas, onDown, onMove, onUp);
+  /* ★ V20.7：监听尺寸变化（旋转 / 折叠屏 / 分屏）——
+     Android 的 configChanges 含 screenSize，旋转时 Activity 不重建，
+     只会 resize WebView —— 不重算尺寸的话画面会被拉伸。 */
+  watchResize();
   /* 从侧边栏回来时给一句提示：入口在经营面板首屏，玩家得先开一局才看得到 */
   if (CAPS.fromSidebar()) toast('🎁 欢迎回来，开局后可领复访补给');
   requestAnimationFrame(loop);

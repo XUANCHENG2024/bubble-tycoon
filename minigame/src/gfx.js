@@ -132,9 +132,32 @@ function text(ctx, str, x, y, o) {
   ctx.textBaseline = o.baseline || 'top';
   var s = String(str == null ? '' : str);
   if (o.maxW && textW(ctx, s, size, o.weight || 400) > o.maxW) {
-    /* 手动省略：ellipsis 需要额外参数且部分环境不支持 */
-    while (s.length > 1 && textW(ctx, s + '…', size, o.weight || 400) > o.maxW) s = s.slice(0, -1);
-    s += '…';
+    /* ★★ 截断：二分查找最长可容纳的前缀 ★★
+     * ★ 原来是从尾部逐字符删（while + slice）——
+     *   每次都重新 measureText，一次截断是 O(n²) 次测量；
+     *   而且每个中间结果都会进 textW 的缓存（key 含完整字符串），
+     *   4000 条上限会被瞬间打满 → 缓存整体失效 → 性能塌方。
+     * ★ 二分：O(log n) 次测量，缓存条目也只多 O(log n) 条。
+     *
+     * ★ 切点选择：优先在**空格**处断（英文不断词），
+     *   找不到就按字符断（中文每个字都是独立字符，断开不会切坏字形）。
+     */
+    var lo = 1, hi = s.length - 1, best = 1;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (textW(ctx, s.slice(0, mid), size, o.weight || 400) <= o.maxW) {
+        best = mid; lo = mid + 1;
+      } else { hi = mid - 1; }
+    }
+    var cut = s.slice(0, best);
+    /* ★ 若断点落在单词中间（英文），回退到最近的空格 */
+    var sp = cut.lastIndexOf(' ');
+    if (sp > best * 0.6 && sp > 0) cut = cut.slice(0, sp);
+    /* ★ 「…」本身也要占宽度 —— 留出它的空间再截一次 */
+    while (cut.length > 0 && textW(ctx, cut + '…', size, o.weight || 400) > o.maxW) {
+      cut = cut.slice(0, -1);
+    }
+    s = cut + '…';
   }
   ctx.fillText(s, x, y);
   return size * 1.4;

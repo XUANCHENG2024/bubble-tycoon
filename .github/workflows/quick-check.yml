@@ -128,6 +128,16 @@ jobs:
 
       - name: PWA 检查（manifest / service worker / 发布白名单）
         run: node tools/check-pwa.js
+
+      - name: Canvas 多分辨率适配诊断（11 种设备）
+        # ★ 抓的是「横向越界 / 固定元素被安全区遮挡 / 文字被截断」
+        #   —— 这三类都与滚动无关，是可靠的判据。
+        run: node tools/diag-canvas-layout.js
+
+      - name: Android 资源合法性（XML / Manifest / Java）
+        # ★ 抓的是「XML 标签内插注释」这类只在构建时才暴露的错误 ——
+        #   而 Gradle 的报错不告诉你是哪一行。
+        run: node tools/check-android-res.js
         # ★ 依赖 app/node_modules（Capacitor CLI）——
         #   CI 里要先 npm install 一次。
         run: |

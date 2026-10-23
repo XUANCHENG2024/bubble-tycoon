@@ -48,21 +48,264 @@ function drawBg(ctx, W, H) {
 /* ------------------------------------------------------------
  *  布局：把各区域高度集中定义，改一处全局生效
  * ---------------------------------------------------------- */
+
+/**
+ * 视口分类 —— 决定「内容怎么排」。
+ *
+ * ★ 为什么需要它：
+ *   原先只有 `H < 600` 一个断点，而**宽度完全没参与判断**。
+ *   于是平板（768/1024 宽）上：
+ *   · 面板宽 = 视口宽 − 32 = 736~992px
+ *   · 一行文字横跨 736px —— 而中文正常阅读宽度是 30~40 字（约 300~400px）
+ *   · 32 个配方按钮排成 8 列 × 4 行，每个只有 80px 宽
+ *   ★ 表现就是「在手机上没问题，在平板上像被拉伸的网页」。
+ *
+ * ★ 三类视口：
+ *   narrow  < 600  —— 手机竖屏（主力场景）
+ *   wide   ≥ 600  —— 平板 / 横屏 / 折叠屏展开
+ *   short  < 620 高 —— 横屏手机（高度紧张）
+ */
+function viewportClass(W, H) {
+  return {
+    wide: W >= 600,
+    short: H < 620,
+    /* ★ 折叠屏展开态：宽但不算平板（673~899 之间）——
+       这类设备竖着拿是手机，横着拿是小平板，两种都要能用。 */
+    foldable: W >= 600 && W < 900,
+  };
+}
+
+/**
+ * 全局缩放系数 —— 所有字号、间距都乘它。
+ *
+ * ★ 为什么不是「直接用物理像素」：
+ *   固定 px 在 320 宽的小屏上挤（10px 的字太小），
+ *   在 768 宽的平板上又显得小（22px 的标题在大屏上不够看）。
+ *   ★ 所以按基准宽 375 等比缩放，并**夹在合理区间**里 ——
+ *     太小看不清，太大在平板上会挤爆布局。
+ */
+function scaleOf(W) {
+  if (W >= 600) return 1;              /* 宽屏另走「限宽居中」路线，不靠放大字号 */
+  return Math.max(0.94, Math.min(1.10, W / 375));
+}
+
 function layoutOf(W, H) {
   var ins = VIEW.ins || { top: 0, bottom: 0 };
+  var vp = viewportClass(W, H);
+  var scale = scaleOf(W);
+
   /* HUD 分两行：第一行四个数值胶囊，第二行是目标进度条 + 右上角图标按钮。
      图标按钮必须独占第二行 —— 它们以前压在第一行右上角，390 宽时图标区从
      x=228 一直伸到 374，而「净资产」那格占 287~374，等于被整个盖住。 */
-  var hudH = 88, tabH = 40;
-  if (H < 600) { hudH = 80; tabH = 36; }
+  var hudH = Math.round(88 * scale), tabH = Math.round(40 * scale);
+  if (vp.short) { hudH = Math.round(80 * scale); tabH = Math.round(36 * scale); }
   /* 顶部给刘海 / 状态栏让出高度，底部给 Home 指示条让出高度。
      Canvas 没有 env(safe-area-inset-*)，这两个值由 platform.js 向宿主问来。 */
   hudH += ins.top;
+
+  /* ★★ 宽屏：内容限宽居中 ★★
+   * 平板上把内容限制在 640px 并居中 ——
+   * · 一行文字不再横跨 992px（那是「一行太长」的根因）
+   * · 卡片宽度有上限，视觉上才像「App」而不是「拉伸的网页」
+   * · 左右留白是**有意的**（不是 bug）——
+   *   所以底色（drawBg）仍铺满整屏，只有内容居中。
+   *
+   * ★ 阈值为什么是 600 而不是 640：
+   *   折叠屏展开态常见宽度 673~899（Fold 内屏 673、Flip 外屏 720+）。
+   *   ★ 673 宽时若不限宽，面板仍有 641px —— 一行 40 个字还是太长。
+   *   ★ 所以判定用「宽屏」这个类（≥600），限宽值用 640 ——
+   *     673 宽时面板 = min(673, 640) - 32 = 608，正好合适。
+   */
+  var MAX_CONTENT = 640;
+  var contentW = W, contentX = 0;
+  if (vp.wide) {
+    contentW = Math.min(W, MAX_CONTENT);
+    contentX = Math.round((W - contentW) / 2);
+  }
+
+  /* ★ 底部安全区：内容区高度必须**减掉**它 ——
+     否则「开门营业」这类钉在底部的按钮会被 Home 指示条盖住。 */
+  var bodyH = H - hudH - tabH - (ins.bottom || 0);
+
   return {
     W: W, H: H, hudH: hudH, tabH: tabH,
     bodyY: hudH + tabH,
+    bodyH: bodyH,
     padTop: ins.top, padBottom: ins.bottom,
+    /* ★ 新增：缩放与视口分类，供各处计算字号与间距 */
+    scale: scale,
+    wide: vp.wide, short: vp.short, foldable: vp.foldable,
+    /* ★ 内容区（宽屏时是居中的那一块） */
+    contentX: contentX, contentW: contentW,
+    /* ★ 内容区左右留白：宽屏时按内容宽算，窄屏时固定 16 */
+    padX: contentX + 16,
+    innerW: contentW - 32,
   };
+}
+
+/* ------------------------------------------------------------
+ *  字号：随缩放系数走
+ * ---------------------------------------------------------- */
+/**
+ * 取缩放后的字号。
+ * ★ 原先 FS 是固定 px（xs:10 … display:22），
+ *   320 宽的小屏上 10px 偏小、768 宽的平板上 22px 偏小。
+ * ★ 现在统一乘 L.scale —— 而 L.scale 只在窄屏上偏离 1，
+ *   宽屏靠「限宽居中」而不是「放大字号」，
+ *   （放大字号会让 32 个配方按钮在平板上占更多空间，反而更挤）
+ */
+function fs(L, key) {
+  var base = FS[key] || FS.md;
+  return Math.round(base * (L && L.scale ? L.scale : 1));
+}
+
+
+/* ============================================================
+ *  标题页 · 横屏两栏版（V20.7）
+ *
+ * ★ 为什么单独一个函数而不是给 drawTitle 加分支：
+ *   单列版与两栏版的**元素顺序完全一样**（难度→开始→存档→信息），
+ *   只是排布方式不同。分成两个函数后每个都保持线性可读 ——
+ *   ★ 而把两套排布塞进一个函数会得到 400 行的 if/else 迷宫。
+ *
+ * ★ 布局：
+ *   左栏：Logo + 副标题 + 难度选择 + 开始营业 + 继续/挑战/日榜
+ *   右栏：存档槽 + 元信息 + 战绩榜
+ *   底部：签到 / 说明 / 导入 / 导出（横跨两栏）
+ * ============================================================ */
+function drawTitleWide(ctx, L, m) {
+  var H = L.H;
+  var gap = 16;
+  /* ★ 两栏等宽 */
+  var colW = Math.floor((L.innerW - gap) / 2);
+  var lx = L.padX, rx = L.padX + colW + gap;
+  var ly = 16 + L.padTop;
+  var ry = ly;
+
+  /* ─────────── 左栏：品牌 + 难度 + 开始 ─────────── */
+  var lcx = lx + colW / 2;
+  text(ctx, '\uD83E\uDDCB', lcx, ly, { size: 34, align: 'center' });
+  ly += 40;
+  text(ctx, '奶茶星球', lcx, ly,
+    { size: 24, weight: 900, align: 'center', color: T.txt });
+  ly += 28;
+  text(ctx, 'BUBBLE TYCOON · 30 天街头奶茶帝国', lcx, ly,
+    { size: fs(L, 'sm'), align: 'center', color: T.txt3, maxW: colW });
+  ly += 22;
+
+  text(ctx, '选择难度', lcx, ly, { size: fs(L, 'sm'), align: 'center', color: T.txt3 });
+  ly += 16;
+  var cw = (colW - 16) / 3, ch = 62;
+  var ds = Object.keys(DIFFICULTY).map(function (k) { return DIFFICULTY[k]; });
+  for (var i = 0; i < ds.length; i++) {
+    var d = ds[i];
+    GFX.cardBtn(ctx, lx + i * (cw + 8), ly, cw, ch, [
+      { t: d.emoji, size: FS.display },
+      { t: d.name, size: FS.md, weight: 800 },
+      { t: money(d.goal), size: FS.xs, color: T.amber },
+    ], { act: 'diff', id: d.key, on: VIEW.diff === d.key, pressed: isPressed('diff', d.key), center: true });
+  }
+  ly += ch + 12;
+
+  var played = (m.dailyDate === todayKey() && m.dailyBest != null);
+  GFX.button(ctx, lx, ly, colW, 44, '\uD83D\uDE80 开始营业',
+    { kind: 'primary', act: 'start', size: FS.lg, pressed: isPressed('start') });
+  ly += 50;
+
+  /* ★ 「继续存档 / 每日挑战 / 日榜」放左栏底部 */
+  if (hasAnySave()) {
+    var bwT = (colW - 16) / 3;
+    GFX.button(ctx, lx, ly, bwT, 36, '\uD83D\uDCBE 继续',
+      { kind: 'ghost', act: 'continue', size: fs(L, 'xs'), pressed: isPressed('continue') });
+    GFX.button(ctx, lx + bwT + 8, ly, bwT, 36, '\uD83D\uDCC5 挑战',
+      { kind: 'amber', act: 'daily', size: fs(L, 'xs'), pressed: isPressed('daily') });
+    GFX.button(ctx, lx + (bwT + 8) * 2, ly, bwT, 36, '\uD83C\uDFC6 日榜',
+      { kind: 'ghost', act: 'dailyrank', size: fs(L, 'xs'), pressed: isPressed('dailyrank') });
+    ly += 42;
+  } else {
+    var bw2 = (colW - 10) / 2;
+    GFX.button(ctx, lx, ly, bw2, 36, played ? '\uD83D\uDCC5 最佳 ' + money(m.dailyBest) : '\uD83D\uDCC5 每日挑战',
+      { kind: 'amber', act: 'daily', size: fs(L, 'xs'), pressed: isPressed('daily') });
+    GFX.button(ctx, lx + bw2 + 10, ly, bw2, 36, '\uD83C\uDFC6 日榜',
+      { kind: 'ghost', act: 'dailyrank', size: fs(L, 'xs'), pressed: isPressed('dailyrank') });
+    ly += 42;
+  }
+
+  /* ─────────── 右栏：存档槽 + 元信息 + 战绩榜 ─────────── */
+  var lg = loginState(m);
+  text(ctx, '\uD83D\uDCBE 存档槽', rx, ry, { size: fs(L, 'sm'), color: T.txt3 });
+  ry += 15;
+  var sw = (colW - 16) / 3;
+  for (var k = 0; k < CFG.SAVE_SLOTS; k++) {
+    var info = slotInfo(k);
+    var lines = info
+      ? [
+        { t: '槽 ' + (k + 1) + (getSlot() === k ? ' ✓' : ''), size: fs(L, 'sm'), weight: 800 },
+        { t: 'Day ' + info.day + (info.endless ? ' ∞' : ''), size: fs(L, 'xs'), color: T.txt2 },
+        { t: money(info.worth), size: fs(L, 'xs'), color: T.amber },
+      ]
+      : [{ t: '槽 ' + (k + 1), size: fs(L, 'sm'), weight: 800 },
+        { t: '空', size: fs(L, 'xs'), color: T.txt3 }];
+    GFX.cardBtn(ctx, rx + k * (sw + 8), ry, sw, 50, lines,
+      { act: 'slot', id: String(k), on: getSlot() === k, pressed: isPressed('slot', String(k)) });
+  }
+  ry += 58;
+
+  var rcx = rx + colW / 2;
+  text(ctx, '\uD83C\uDF1F 声望 ' + m.bp + ' ★（' + money(prestigeStartCash(m.bp)) + '）',
+    rcx, ry, { size: fs(L, 'xs'), align: 'center', color: T.txt2, maxW: colW });
+  ry += 15;
+  text(ctx, '\uD83C\uDFC6 最高 ' + money(m.best.normal || 0) + ' · \uD83C\uDFAE ' + m.runs + ' 局',
+    rcx, ry, { size: fs(L, 'xs'), align: 'center', color: T.txt2, maxW: colW });
+  ry += 15;
+  text(ctx, lg.claimed
+    ? '\uD83D\uDD25 连登 ' + lg.streak + ' 天 · 明日 ' + money(lg.next)
+    : '\uD83D\uDD25 连登 ' + lg.streak + ' 天 · 今天还没签到',
+    rcx, ry, { size: fs(L, 'xs'), align: 'center', color: lg.claimed ? T.amber : T.txt3, maxW: colW });
+  ry += 15;
+  if (!STORAGE_OK) {
+    text(ctx, '\u26A0\uFE0F 存储不可用', rcx, ry, { size: fs(L, 'xs'), align: 'center', color: T.red });
+    ry += 15;
+  }
+
+  /* 战绩榜：右栏底部，放得下几行放几行 */
+  var top = (m.runsTop || []).filter(Boolean);
+  if (top.length) {
+    ry += 3;
+    text(ctx, '\uD83C\uDFC5 本机战绩榜', rcx, ry, { size: fs(L, 'xs'), align: 'center', color: T.txt3 });
+    ry += 14;
+    /* ★ 底部那排小按钮要占 42px，所以榜单最多到那之上 */
+    var floor = H - 42 - L.padBottom - 6;
+    var showN = Math.max(0, Math.min(top.length, Math.floor((floor - ry) / 14)));
+    for (var ti = 0; ti < showN; ti++) {
+      var tr = top[ti];
+      var td = DIFFICULTY[tr.diff] || DIFFICULTY.normal;
+      var tres = tr.result === 'bankrupt' ? '\uD83D\uDCB8 破产'
+        : (tr.endless ? '∞ ' + num(tr.milestone) + ' 阶'
+          : (num(tr.worth) >= num(td.goal, Infinity) ? '\uD83C\uDFAF 达标' : '未达标'));
+      text(ctx, ['\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49'][ti] + ' ' + money(num(tr.worth)), rx, ry,
+        { size: fs(L, 'xs'), color: T.amber, maxW: colW * 0.4 });
+      text(ctx, td.emoji + td.name + ' · ' + tres,
+        rx + colW, ry, { size: fs(L, 'xs'), align: 'right', color: T.txt3, maxW: colW * 0.55 });
+      ry += 14;
+    }
+  }
+
+  /* ─────────── 底部一排：横跨两栏 ─────────── */
+  var by = H - 40 - L.padBottom;
+  var bw3 = (L.innerW - 24) / 4;
+  GFX.button(ctx, L.padX, by, bw3, 36,
+    !lg.claimed ? '\uD83D\uDD25 签到 ' + money(lg.next) : '\uD83C\uDF81 已签',
+    { kind: lg.claimed ? 'ghost' : 'amber', act: 'login', size: fs(L, 'xs'),
+      disabled: !!lg.claimed, pressed: isPressed('login') });
+  GFX.button(ctx, L.padX + bw3 + 8, by, bw3, 36, '\uD83D\uDCD6 玩法说明',
+    { kind: 'ghost', act: 'help', size: fs(L, 'xs'), pressed: isPressed('help') });
+  GFX.button(ctx, L.padX + (bw3 + 8) * 2, by, bw3, 36, '\uD83E\uDDE5 导入',
+    { kind: 'ghost', act: 'import', size: fs(L, 'xs'), pressed: isPressed('import') });
+  GFX.button(ctx, L.padX + (bw3 + 8) * 3, by, bw3, 36, '\uD83E\uDDE4 导出',
+    { kind: 'ghost', act: 'export', size: fs(L, 'xs'), pressed: isPressed('export') });
+
+  ctx.textAlign = 'left';
 }
 
 /* ============================================================
@@ -71,21 +314,47 @@ function layoutOf(W, H) {
 function drawTitle(ctx, L) {
   var W = L.W, H = L.H;
   var m = META();
-  var x = 16, w = W - 32;
+  /* ★ 标题页也限宽居中 ——
+     宽屏上用视口中心会让标题跑到屏幕正中，而下面的按钮在内容区里，
+     两者对不齐（尤其「开始营业」这种大按钮，一眼就能看出歪了）。 */
+  var x = L.padX, w = L.innerW;
+  /* ★ 居中元素的中心 = 内容区中心（不是视口中心） */
+  var cx = L.contentX + L.contentW / 2;
   var y = 34 + L.padTop;
+
+  /* ★★ 横屏（矮屏）用两栏布局 ★★
+   * ★ 为什么需要：
+   *   标题页是单列纵向流，完整高度约 500px ——
+   *   而横屏手机只有 390~414px 高，**放不下**（诊断实测：
+   *   「🏆 本机战绩榜」那一段落到 498px，直接超出屏幕）。
+   * ★ 做法：竖屏时保持单列（那是主力场景），
+   *   横屏时拆成两栏 ——
+   *   左栏：Logo + 副标题 + 难度选择 + 开始营业
+   *   右栏：存档槽 + 元信息 + 战绩榜
+   *   ★ 底部那排小按钮（签到/说明/导入/导出）横跨两栏宽度。
+   */
+  var twoCol = L.short && L.contentW >= 560;
+  if (twoCol) {
+    drawTitleWide(ctx, L, m);
+    return;
+  }
 
   /* Logo */
   ctx.textAlign = 'center';
-  text(ctx, '🧋', W / 2, y, { size: 40, align: 'center' });
-  y += 50;
-  text(ctx, '奶茶星球', W / 2, y, { size: 26, weight: 900, align: 'center', color: T.txt });
-  y += 30;
-  text(ctx, 'BUBBLE TYCOON · 30 天街头奶茶帝国', W / 2, y,
-    { size: FS.sm, align: 'center', color: T.txt3 });
+  text(ctx, '🧋', cx, y, { size: Math.round(40 * L.scale), align: 'center' });
+  y += Math.round(50 * L.scale);
+  text(ctx, '奶茶星球', cx, y,
+    { size: Math.round(26 * L.scale), weight: 900, align: 'center', color: T.txt });
+  y += Math.round(30 * L.scale);
+  /* ★ 副标题给 maxW —— 宽屏限宽后它仍按内容宽算，
+     而窄屏上 320 宽时这行英文 + 中文会溢出（实测被截成「12 / …」那类）。
+     ★ 用 maxW 让它走「截断 + 省略号」而不是画出屏幕。 */
+  text(ctx, 'BUBBLE TYCOON · 30 天街头奶茶帝国', cx, y,
+    { size: fs(L, 'sm'), align: 'center', color: T.txt3, maxW: w });
   y += 26;
 
   /* 难度三选一 */
-  text(ctx, '选择难度', W / 2, y, { size: FS.sm, align: 'center', color: T.txt3 });
+  text(ctx, '选择难度', cx, y, { size: fs(L, 'sm'), align: 'center', color: T.txt3 });
   y += 18;
   var cw = (w - 16) / 3, ch = 72;
   var ds = Object.keys(DIFFICULTY).map(function (k) { return DIFFICULTY[k]; });
@@ -161,15 +430,15 @@ function drawTitle(ctx, L) {
   /* 元信息 */
   text(ctx, '🌟 声望 ' + m.bp + ' ★（开局基金 ' + money(prestigeStartCash(m.bp)) + '）   🏆 最高 '
     + money(m.best.normal || 0) + '   🎮 已玩 ' + m.runs + ' 局',
-    W / 2, y, { size: FS.sm, align: 'center', color: T.txt2 });
+    cx, y, { size: fs(L, 'sm'), align: 'center', color: T.txt2 });
   y += 17;
   text(ctx, lg.claimed
     ? '🔥 连登 ' + lg.streak + ' 天 · 明日 ' + money(lg.next) + (lg.pending > 0 ? '（' + money(lg.pending) + ' 开局到账）' : '')
     : '🔥 连登 ' + lg.streak + ' 天 · 今天还没签到',
-    W / 2, y, { size: FS.sm, align: 'center', color: lg.claimed ? T.amber : T.txt3 });
+    cx, y, { size: fs(L, 'sm'), align: 'center', color: lg.claimed ? T.amber : T.txt3 });
   y += 18;
   if (!STORAGE_OK) {
-    text(ctx, '⚠️ 存储不可用，本局进度无法保存', W / 2, y,
+    text(ctx, '⚠️ 存储不可用，本局进度无法保存', cx, y,
       { size: FS.sm, align: 'center', color: T.red });
     y += 16;
   }
@@ -179,7 +448,7 @@ function drawTitle(ctx, L) {
   var top = (m.runsTop || []).filter(Boolean);
   if (top.length) {
     y += 4;
-    text(ctx, '🏅 本机战绩榜', W / 2, y, { size: FS.xs, align: 'center', color: T.txt3 });
+    text(ctx, '🏅 本机战绩榜', cx, y, { size: fs(L, 'xs'), align: 'center', color: T.txt3 });
     y += 15;
     var room = Math.floor((H - 32 - y) / 15);
     var showN = Math.max(0, Math.min(top.length, Math.min(3, room)));
@@ -198,7 +467,13 @@ function drawTitle(ctx, L) {
   }
   ctx.textAlign = 'left';
   if (y < H - 26) {
-    text(ctx, '💡 ' + VIEW.tip, W / 2, H - 24, { size: FS.sm, align: 'center', color: T.txt3, maxW: W - 40 });
+    /* ★★★ 底部提示必须避开 Home 指示条 ★★★
+     * 原来画在 H - 24 —— 而在有指示条的机型上（844 高 / 指示条 34）
+     * 那一行正好落在安全区里，被指示条压着（诊断实测：底边 831 > 安全区底线 810）。
+     * ★ 正确做法：减去 padBottom 再往上留一点余量。 */
+    var tipY = H - 24 - num(L.padBottom, 0);
+    text(ctx, '💡 ' + VIEW.tip, cx, tipY,
+      { size: fs(L, 'sm'), align: 'center', color: T.txt3, maxW: w });
   }
 }
 
@@ -225,15 +500,20 @@ function drawHUD(ctx, L, s) {
   ctx.fillStyle = g; ctx.fillRect(0, 0, W, hudH);
   ctx.strokeStyle = T.line; ctx.lineWidth = 1;
   ctx.beginPath(); ctx.moveTo(0, hudH); ctx.lineTo(W, hudH); ctx.stroke();
+  /* ↑ 底色与分隔线铺满整屏（那是背景），但下面的内容居中 —— 这个对比是有意的 */
 
   var y = 10 + L.padTop;
-  var cw = (W - 32 - 12) / 4;
-  GFX.chip(ctx, 16, y, cw, 40,
+  /* ★ HUD 也跟着内容区限宽居中 ——
+     否则平板上四个胶囊横跨 992px，而下面的进度条与图标挤在右边，
+     视觉上完全对不齐。 */
+  var hx = L.padX, hw = L.innerW;
+  var cw = (hw - 12) / 4;
+  GFX.chip(ctx, hx, y, cw, 40,
     'DAY', s.endless ? s.day + ' 无尽' + s.milestone : s.day + ' / ' + CFG.DAYS, T.txt);
-  GFX.chip(ctx, 16 + cw + 4, y, cw, 40, '现金', money(num(s.cash)),
+  GFX.chip(ctx, hx + cw + 4, y, cw, 40, '现金', money(num(s.cash)),
     num(s.cash) < 0 ? T.red : T.amber);
-  GFX.chip(ctx, 16 + (cw + 4) * 2, y, cw, 40, '口碑', String(Math.round(num(s.rep))), T.txt);
-  GFX.chip(ctx, 16 + (cw + 4) * 3, y, cw, 40, '净资产', money(num(netWorth(s))), T.amber);
+  GFX.chip(ctx, hx + (cw + 4) * 2, y, cw, 40, '口碑', String(Math.round(num(s.rep))), T.txt);
+  GFX.chip(ctx, hx + (cw + 4) * 3, y, cw, 40, '净资产', money(num(netWorth(s))), T.amber);
   y += 44;
 
   /* 右上角图标按钮：独占第二行右侧，不再压住数值胶囊 */
@@ -243,7 +523,9 @@ function drawHUD(ctx, L, s) {
     { t: '📖', act: 'help' }, { t: '📈', act: 'chart' },
   ];
   var iconW = icons.length * bs + (icons.length - 1) * gap;
-  var bx = W - 16 - bs;
+  /* ★ 图标区右对齐到**内容区**右缘（不是视口右缘）——
+     宽屏限宽居中后，图标若还贴视口右边，会与下面的进度条脱节。 */
+  var bx = hx + hw - bs;
   for (var i = 0; i < icons.length; i++) {
     GFX.fillRR(ctx, bx, iy, bs, bs, 9, T.card2, T.line);
     text(ctx, icons[i].t, bx + bs / 2, iy + (bs - 15) / 2, { size: FS.lg, align: 'center' });
@@ -254,7 +536,7 @@ function drawHUD(ctx, L, s) {
   }
 
 /* 目标进度条：宽度让出图标区，文字改到进度条下方左对齐（原来右对齐会顶到图标） */
-  var barW = Math.max(60, W - 32 - iconW - 10);
+  var barW = Math.max(60, L.innerW - iconW - 10);
   /* ★ V13.8：负债警示（与 H5 端对等）。
      之前 debtDays 只存在于数据里，两版 UI 都不显示：
      玩家看到红色「¥-450」却不知道还能撑几天、怎么才算过关。
@@ -313,21 +595,29 @@ function drawTabs(ctx, L) {
     { k: 'up', t: '⬆️', n: '升级' }, { k: 'staff', t: '👥', n: '员工' },
     { k: 'rival', t: '🏙️', n: '商圈' }, { k: 'ach', t: '🏅', n: '成就' },
   ];
-  var w = W / tabs.length;
+  /* ★ tab 栏也跟着内容区限宽居中 ——
+     否则平板上六个 tab 横跨 992px，而 HUD 的胶囊在中间的 640px 里，
+     两层对不齐（截图上一眼就能看出来）。 */
+  var tx0 = L.contentX, tw_total = L.contentW;
+  var w = tw_total / tabs.length;
   for (var i = 0; i < tabs.length; i++) {
     var on = VIEW.tab === tabs[i].k;
     var t = tabs[i];
     /* emoji 与文字分两行：挤在一行时宽度不够，
        分两行后 emoji 12px + 文字 10px 稳稳落在 65px 内。*/
-    text(ctx, t.t, i * w + w / 2, y + 4, { size: FS.md, align: 'center' });
-    text(ctx, t.n, i * w + w / 2, y + 21, {
-      size: FS.xs, align: 'center', color: on ? T.pink : T.txt3, maxW: w - 6,
+    text(ctx, t.t, tx0 + i * w + w / 2, y + 4, { size: fs(L, 'md'), align: 'center' });
+    text(ctx, t.n, tx0 + i * w + w / 2, y + 21, {
+      size: fs(L, 'xs'), align: 'center', color: on ? T.pink : T.txt3, maxW: w - 6,
     });
     if (on) {
       ctx.fillStyle = T.pink;
-      ctx.fillRect(i * w + w * 0.3, y + h - 3, w * 0.4, 2.5);
+      ctx.fillRect(tx0 + i * w + w * 0.3, y + h - 3, w * 0.4, 2.5);
     }
-    GFX.addHit(i * w, y, w, h, 'tab', t.k, null);
+    /* ★ 命中区必须跟着 tx0 偏移 ——
+       ★ 否则平板上「画在中间、点在左边」——
+         这正是用户反馈的**点击区域偏移**。
+       ★ 绘制与命中必须用同一个 x，否则偏移量永远对不上。 */
+    GFX.addHit(tx0 + i * w, y, w, h, 'tab', t.k, null);
   }
 }
 
@@ -342,7 +632,16 @@ function drawPanelArea(ctx, L, s) {
   var pinH = (s.phase === 'prep' && VIEW.tab === 'manage') ? 54 + num(L.padBottom, 0) : 0;
   GFX.clipPush(ctx, 0, top, W, H - pinH);
   var y = top + 10 - (VIEW.scroll[VIEW.tab] || 0);
-  var x = 16, w = W - 32;
+  /* ★★★ 宽屏：内容限宽居中 ★★★
+   * ★ 为什么不能用 ctx.translate 平移：
+   *   GFX.addHit 记录的是**绝对坐标**，而 translate 不影响它 ——
+   *   于是「画在 A 处、点在 B 处才命中」，正是用户反馈的
+   *   **点击区域偏移**。所以必须改 x / w 本身。
+   * ★ 平板上内容限宽 640px 居中：
+   *   · 一行文字不再横跨 992px（正常阅读宽度 30~40 字）
+   *   · 卡片有宽度上限，视觉上像 App 而不是「拉伸的网页」
+   *   · 左右留白是有意的（底色仍铺满整屏） */
+  var x = L.padX, w = L.innerW;
 
   var fn = PANELS[VIEW.tab];
   if (fn) y = fn(ctx, x, y, w, s);
@@ -351,7 +650,9 @@ function drawPanelArea(ctx, L, s) {
 
   if (pinH) {
     var by = L.H - pinH;
-    GFX.fillRR(ctx, 0, by - 8, W, pinH + 8, 0, 'rgba(30,12,55,.97)', T.line);
+    /* ★ 底部那条底板也要限宽 —— 否则宽屏上它横跨全屏，
+       与居中的按钮对不上（按钮在中间，底板铺满 → 视觉断裂）。 */
+    GFX.fillRR(ctx, L.contentX, by - 8, L.contentW, pinH + 8, 0, 'rgba(30,12,55,.97)', T.line);
     /* 教程第⑥步要高亮这颗按钮：记下真实矩形（以前 TUT_RECT 硬编码
        bodyY+340，指到采购卡去了）。 */
     (VIEW.panelRects = VIEW.panelRects || {}).open = { x: x, y: by + 6, w: w, h: 44 };
@@ -1876,14 +2177,18 @@ function drawGuestIso(ctx, cx, cy, c, T2) {
 function drawStage(ctx, L, s) {
   var W = L.W, top = L.bodyY, H = L.H - top;
   var sim = s.sim;
-  var x = 16, w = W - 32;
+  /* ★ 舞台也限宽居中 ——
+     等距队列是**按列数**排的（ISO.TW 固定），
+     宽屏上如果铺满 992px，队列会偏到左边一大片空白。
+     ★ 而限宽后队列正好在内容区中间，与 HUD / tab 对齐。 */
+  var x = L.padX, w = L.innerW;
   var y = top + 10;
 
   /* 时间条 */
   GFX.bar(ctx, x, y + 10, w, 7, num(sim.t) / num(sim.duration), { color: T.cyan });
   var tb = sim.paused ? '⏸ 已暂停' : (sim.closing ? '🔔 打烊清场中…'
     : '营业中 ' + Math.max(0, Math.ceil(num(sim.duration) - num(sim.t))) + 's');
-  text(ctx, tb, x + w / 2, y - 2, { size: FS.sm, align: 'center', color: T.txt2 });
+  text(ctx, tb, x + w / 2, y - 2, { size: fs(L, 'sm'), align: 'center', color: T.txt2 });
   y += 28;
 
   /* 四个实时数值 */
@@ -1896,9 +2201,10 @@ function drawStage(ctx, L, s) {
   ];
   for (var i = 0; i < 4; i++) {
     GFX.fillRR(ctx, x + i * (lw + 6), y, lw, 38, 10, T.card, T.line);
-    text(ctx, live[i].k, x + i * (lw + 6) + lw / 2, y + 4, { size: FS.xs, align: 'center', color: T.txt3 });
+    text(ctx, live[i].k, x + i * (lw + 6) + lw / 2, y + 4,
+      { size: fs(L, 'xs'), align: 'center', color: T.txt3 });
     text(ctx, live[i].v, x + i * (lw + 6) + lw / 2, y + 16,
-      { size: FS.lg, weight: 800, align: 'center', color: live[i].c, maxW: lw - 6 });
+      { size: fs(L, 'lg'), weight: 800, align: 'center', color: live[i].c, maxW: lw - 6 });
   }
   y += 48;
 
@@ -2101,7 +2407,16 @@ GFX.clipPush(ctx, x - 2, viewTop, w + 4, viewH);
   if (VIEW.stageMax > 0) {
     var trh = viewH * (viewH / contentH);
     var try0 = viewTop + (viewH - trh) * (sc / VIEW.stageMax);
-    GFX.fillRR(ctx, x + w + 2, try0, 3, Math.max(18, trh), 2, 'rgba(53,229,240,.45)');
+    /* ★ 滚动条要画在**视口右缘之内**，不能画在内容区右缘 + 2 ——
+       ★ 窄屏时 x+w = W-16，+2 刚好在屏内；
+         ★ 而宽屏限宽后 x+w 是内容区右缘（离视口右缘还有几百像素），
+           +2 会跑到内容区外面（诊断实测：390 宽时右边 394 > 390）。
+       ★ 正确做法：**贴视口右缘**，但用 safe-area 避让手势条。 */
+    var sbX = W - 5 - L.padBottom * 0;   /* 贴右缘，宽 3px */
+    /* ★ 但如果内容区右缘离视口右缘很近（窄屏），就贴着内容区画 ——
+       否则滚动条会压在卡片上。 */
+    if (W - (x + w) < 12) sbX = x + w - 5;
+    GFX.fillRR(ctx, sbX, try0, 3, Math.max(18, trh), 2, 'rgba(53,229,240,.45)');
   }
   y = viewTop + viewH;
 

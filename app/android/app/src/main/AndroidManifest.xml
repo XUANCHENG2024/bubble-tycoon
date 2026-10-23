@@ -26,13 +26,26 @@
         android:theme="@style/AppTheme"
         android:hardwareAccelerated="true">
 
+            <!-- ★★ V20.7：允许横屏（不再是 portrait 锁定）★★
+                 ★ 为什么放开：
+                   · Google Play 对大屏适配有要求 ——
+                     锁竖屏的 App 在平板上体验差，影响商店评分与推荐。
+                   · 平板用户横持是常态。
+                   · ★ 旋转后的「拉伸」问题已在 Canvas 版修好
+                     （V20.7 的 resize 处理：window.resize + ResizeObserver
+                     → 重算 CW/CH 并重绘）。
+                 ★ 用 unspecified（跟随系统）而不是 sensorLandscape ——
+                   后者会**强制横屏**，竖着拿手机的玩家会晕。
+                 ★ 注意 configChanges 里含 orientation|screenSize ——
+                   意味着旋转时 Activity **不重建**，只 resize WebView，
+                   ★ 所以 resize 处理是必需的（已加）。 -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
             android:name=".MainActivity"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
-            android:screenOrientation="portrait"
+            android:screenOrientation="unspecified"
             android:exported="true">
 
             <intent-filter>
