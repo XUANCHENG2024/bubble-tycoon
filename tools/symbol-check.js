@@ -20,7 +20,7 @@ const root = path.join(__dirname, '..');
 const GROUPS = [
   {
     name: 'H5（index.html 的 script 顺序）',
-    files: ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js'],
+    files: require('./frontend-files.js').H5_FILES,
   },
   {
     name: '抖音小游戏（build-minigame.js 的拼接顺序）',

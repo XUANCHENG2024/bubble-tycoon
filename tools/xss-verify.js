@@ -8,6 +8,7 @@
  *  所以这里统一数 img / script / [onerror] / [onload] 的个数。
  * ============================================================ */
 const fs = require('fs'), path = require('path');
+const { inlineScripts } = require('./inline-scripts.js');
 const { JSDOM, VirtualConsole } = require('./jsdom-loader');
 
 const root = path.join(__dirname, '..');
@@ -15,8 +16,7 @@ const vc = new VirtualConsole(); const errors = [];
 vc.on('jsdomError', e => errors.push(e.message));
 
 let html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-html = html.replace(/<script src="js\/([a-z]+)\.js"><\/script>/g,
-  (m, n) => '<script>' + fs.readFileSync(path.join(root, 'js', n + '.js'), 'utf8') + '<\/script>');
+html = inlineScripts(root, html);
 const dom = new JSDOM(html, { runScripts: 'dangerously', url: 'http://localhost/', pretendToBeVisual: true, virtualConsole: vc });
 const { window } = dom, doc = window.document;
 

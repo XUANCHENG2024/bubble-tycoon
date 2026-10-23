@@ -39,7 +39,7 @@ function get(path) {
 
 (async () => {
   console.log('=== 产物冒烟 · ' + BASE + ' ===\n');
-  const files = ['index.html', 'styles.css', 'js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js'];
+  const files = ['index.html', 'styles.css'].concat(require('./frontend-files.js').H5_FILES);
   const src = {};
   for (const f of files) {
     const r = await get(f);

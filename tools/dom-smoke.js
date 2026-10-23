@@ -81,7 +81,7 @@ ctx.window = ctx; ctx.globalThis = ctx;
  *  解析失败 —— H5 端表现为白屏，控制台只留一句 "already been declared"。
  *  这类错误加载后再怎么查都只剩白屏，所以先扫一遍源码。
  * ============================================================ */
-const FILES = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js'];
+const { H5_FILES: FILES } = require('./frontend-files.js');
 {
   const seen = {};
   for (const f of FILES) {

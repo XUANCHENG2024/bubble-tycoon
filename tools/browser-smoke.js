@@ -9,6 +9,7 @@ const { JSDOM, VirtualConsole } = require('./jsdom-loader');
 
 const root = path.join(__dirname, '..');
 const errors = [];
+const { inlineScripts } = require('./inline-scripts.js');
 
 const vc = new VirtualConsole();
 vc.on('jsdomError', e => errors.push('jsdomError: ' + (e.message || e)));
@@ -16,8 +17,7 @@ vc.on('error', (...a) => errors.push('console.error: ' + a.join(' ')));
 
 /* 把 <script src> 内联成 <script>...</script>，让 jsdom 以经典脚本执行（全局词法作用域） */
 let html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-html = html.replace(/<script src="js\/([a-z]+)\.js"><\/script>/g,
-  (m, name) => '<script>' + fs.readFileSync(path.join(root, 'js', name + '.js'), 'utf8') + '<\/script>');
+html = inlineScripts(root, html);
 
 const dom = new JSDOM(html, {
   runScripts: 'dangerously',

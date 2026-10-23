@@ -293,6 +293,38 @@ console.log('\n--- ⑤ 出杯反馈与音阶 ---');
     '飘字 pointer-events:none（不挡后续点击）');
 }
 
+
+/* ---------- ⑥ slotInfo 缓存（性能） ---------- */
+console.log('\n--- ⑥ 槽位摘要缓存 ---');
+{
+  /* ★ 这条守的是 V20 引入的一个真实退化：
+     加了「主档损坏→读备份」的兜底后，我最初让兜底路径**不写缓存**，
+     于是主档一损坏，标题页每帧都要重解析一次坏 JSON + 一次备份 JSON。
+     实测退化 2.6 倍（0.045 → 0.114 ms/次），
+     低端机每帧 6 次 = 6.86ms —— 还在预算内，但白烧。
+     ★ 修法：缓存主档**与**备份两份结果，任一原文没变就复用。
+     ★ 断言用「解析次数」而不是「耗时」——
+       耗时受机器影响会抖，解析次数是确定的。 */
+  const { window } = buildH5Env();
+  window.eval('window.S = newGame("normal", 0, null); window.S.cash = 999; saveGame(window.S);');
+  const key = window.eval('slotKey(0)');
+
+  /* 把主档改成损坏（真实场景：写入过程中浏览器被杀） */
+  window.eval('storeBackend().set(' + JSON.stringify(key) + ', 42);');
+
+  /* ★ 数一数 parseSlotRaw 被调了几次 */
+  window.eval('window.__parseCount = 0;');
+  window.eval('var __orig = parseSlotRaw; parseSlotRaw = function(k, raw){ window.__parseCount++; return __orig(k, raw); };');
+  for (let i = 0; i < 10; i++) window.eval('slotInfo(0);');
+  const n = window.eval('window.__parseCount');
+  check(n <= 2,
+    '主档损坏时 slotInfo 不重复解析（10 次调用只解析 ' + n + ' 次）');
+
+  /* 缓存后仍要能读到摘要（不能为了性能牺牲正确性） */
+  const info = window.eval('(function(){ var v = slotInfo(0); return v ? "day=" + v.day : "无"; })()');
+  check(/day=/.test(info), '损坏场景仍能读到摘要（' + info + '）');
+}
+
 console.log('');
 if (fails === 0) {
   console.log('✔ 难度曲线与存档容错全部通过（' + checks + ' 项）');

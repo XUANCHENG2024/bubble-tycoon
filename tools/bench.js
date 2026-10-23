@@ -60,7 +60,7 @@ function makeCtx() {
 const ctx = makeCtx();
 /* bundle 是 CommonJS 模块作用域，顶层声明不会挂到 globalThis，
    必须像 probe.js 那样显式导出一份（这也是两套测试能访问引擎的原因）。 */
-const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
+const src = require('./frontend-files.js').H5_FILES
   .map(f => fs.readFileSync(path.join(root, f), 'utf8')).join('\n')
   + '\n;globalThis.__D={CFG,DIFFICULTY,ING,RECIPES,UPGRADES,TRAITS,STRATEGY_CARDS,QUESTS,ACHIEVEMENTS,'
   + 'newGame,sanitizeState,openShop,tick,endDay,nextDay,autoFill,menuSlots,stationCount,hireStaff,'

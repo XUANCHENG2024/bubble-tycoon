@@ -150,6 +150,15 @@
 
 <script src="js/data.js"></script>
 <script src="js/engine.js"></script>
+<!-- V20.2：ui.js 按功能拆分（商圈/员工/研发/成就）。
+     ★ 顺序要求：这些模块必须在 ui.js **之前**加载 ——
+       ui.js 里的 PANEL_RENDERERS 会引用它们。
+       ★ 虽然引用都在函数体内（惰性求值，调用时才解析），
+         但提前加载能避免「首次渲染时函数还不存在」的时序风险。 -->
+<script src="js/ui/stores.js"></script>
+<script src="js/ui/staff.js"></script>
+<script src="js/ui/lab.js"></script>
+<script src="js/ui/ach.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/main.js"></script>
 </body>

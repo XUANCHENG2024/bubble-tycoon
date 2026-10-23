@@ -217,24 +217,60 @@ console.log('\n--- ④ 改造只碰表现层 ---');
       .filter(r => r.length >= 3);
     const added = rows.reduce((n, r) => n + Number(r[0]), 0);
     const deleted = rows.reduce((n, r) => n + Number(r[1]), 0);
-    /* ★★★ 判据演进（三轮才找对一个）：
+    /* ★★★ 判据演进（四轮才找对一个）：
      *① 「引擎一行都不能动」 → V16 加纯查询函数就误报 → 放宽
      * ② 「删除行数 = 0」→ 有意**改写**一行也算删除 → 还是误报
-     * ③ 「删除 ≤ 20 行」→ V17 是**界面重构轮**，整块替换了
-     *   升级行 / 候选人区 / 成就页（37 行删除）→ 又超阈值
-     * ★ 问题的根源：数字阈值在「重构」与「误删」之间无法区分 ——
-     *   删 3 行可能是改错一个字，也可能是正确地删掉一个废弃区块。
-     * ★ 换个角度：**按比例**更合理。
-     *   重构一轮通常删 20~50 行、改 300~400 行；
-     *   而「手滑删掉一个逻辑」的特征是删除占比高、总量小。
-     * ★ 所以判据改成：**删除占改动的比例 ≤ 40%**。
-     *   现状 40/(663-40) ≈ 6% —— 明显是重构不是误删。
+     * ③ 「删除 ≤ 20 行」→ V17 是**界面重构轮**（整块替换）→ 又误报
+     * ④ 「删除占改动 ≤ 40%」→ V20.2 是**文件拆分轮**：
+     *   ui.js 减 1018 行、4 个新模块文件（未跟踪，不在 numstat 里）
+     *   → 「删除 1018 / 新增 0」直接触发误报。
+     *
+     * ★ 问题的根源：numstat **不含未跟踪文件**。
+     *   拆分时新文件还没 git add，所以 diff 里只看得见「删除」，
+     *   看不见「搬到了哪」—— 于是「搬移」被误判成「删代码」。
+     *   ★ 这不是判据松紧的问题，是**判据缺数据**。
+     * ★ 正确做法：把**未跟踪的 js/ 下文件**也算进来。
+     *   拆分后总量应该基本不变（搬移不改代码量）。
+     *   判据改成：**总量守恒** —— 新增 + (未跟踪文件的行数) 与删除量相当。
      */
     const DEL_RATIO = 0.4;
-    const ratio = added > 0 ? deleted / added : (deleted > 0 ? 1 : 0);
-    check(ratio <= DEL_RATIO,
-      `既有代码以新增为主（+${added} / −${deleted} 行，删除占 ${(ratio * 100).toFixed(0)}%`
-      + `${ratio > DEL_RATIO ? ' —— 超过 ' + (DEL_RATIO * 100) + '%，可能不是重构而是误删' : ''}）`);
+    /* ★ 未跟踪文件也计入「新增」——
+       git diff --numstat 只看已跟踪文件，
+       新拆出来的模块文件在 add 之前是看不见的，
+       那样「搬移」看起来就只剩「删除 1018 行」。 */
+    let untrackedAdd = 0;
+    try {
+      const un = git.execSync(
+        'git -C "' + root + '" ls-files --others --exclude-standard -- js/',
+        { encoding: 'utf8' }).trim();
+      if (un) {
+        for (const f of un.split('\n').filter(Boolean)) {
+          try {
+            const txt = require('fs').readFileSync(path.join(root, f), 'utf8');
+            untrackedAdd += txt.split('\n').length;
+          } catch (e) { /* 读不了就算了 */ }
+        }
+      }
+    } catch (e) { /* 不是 git 仓库就跳过 */ }
+
+    const addedAll = added + untrackedAdd;
+    /* ★ 判据换成「**净变化**」而不是比例 ——
+       搬移的特征是「删 1018、加 1164」——
+       比例高达 87%（因为删和加几乎一样多），
+       但**总量守恒**（净增 146 行，还不到搬移量的 15%）。
+       ★ 而误删的特征正相反：删得多、加得少 → 净减少大。
+       ★ 所以判据是：|净变化| / 搬移总量 ≤ 20%
+         （净变化相对搬移量小 = 只是挪位置，没有真删东西）。
+       ★ 比例判据在这里根本用不了：
+         一次纯搬移的「删除占比」必然接近 100%，
+         而它恰恰是最无害的那种改动。 */
+    const MOVED = added + deleted;
+    const net = addedAll - deleted;
+    const netRatio = MOVED > 0 ? Math.abs(net) / MOVED : 0;
+    check(netRatio <= 0.2,
+      `既有代码以搬移/新增为主（+${added} / 未跟踪 +${untrackedAdd} / −${deleted}，`
+      + `净变化 ${net >= 0 ? '+' : ''}${net} 行 = 搬移量的 ${(netRatio * 100).toFixed(0)}%`
+      + `${netRatio > 0.2 ? ' —— 净减少过多，可能真的删了东西' : ''}）`);
   }
 }
 

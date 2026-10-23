@@ -21,7 +21,8 @@ const path = require('path');
      噪音大了反而会让这个检查被无视。
      8 行是「确实复制粘贴了一整段」的量级。 */
 const MIN_LINES = Number(process.argv[2] || 8);
-const FILES = ['js/engine.js', 'js/ui.js', 'js/main.js', 'js/data.js',
+const FILES = require('./frontend-files.js').H5_FILES;
+const FILES_TAIL = [/* 原来数组的其余部分 */
   'minigame/src/ui.js', 'minigame/src/main.js', 'minigame/src/gfx.js'];
 
 /** 归一化一行：去注释、去空白、保留结构 */

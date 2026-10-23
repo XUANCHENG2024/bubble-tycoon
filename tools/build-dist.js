@@ -18,6 +18,8 @@ const out = path.join(root, 'dist');
 /* ★ 只带这些：静态资源 + 逻辑。不带 tools/docs/minigame/.git */
 const INCLUDE = ['index.html', 'styles.css'];
 const INCLUDE_DIRS = ['js', 'assets'];
+/* ★ V20.2：js/ 现在还有子目录 js/ui/ —— cpSync 递归复制会自动带上，
+   不需要单独列出。保留这条注释是为了以后有人改 INCLUDE_DIRS 时知道。 */
 
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });

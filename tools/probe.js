@@ -69,7 +69,7 @@ ctx.AudioContext = function () {
 };
 ctx.window = ctx; ctx.globalThis = ctx;
 
-const src = ['js/data.js', 'js/engine.js', 'js/ui.js', 'js/main.js']
+const src = require('./frontend-files.js').H5_FILES
   .map(f => fs.readFileSync(path.join(root, f), 'utf8')).join('\n')
   + '\n;globalThis.__D={CFG,ING,RECIPES,UPGRADES,TRAITS,EVENTS,ACHIEVEMENTS,DIFFICULTY,SHOP_COSTS,WEATHERS,NEWS,UI,'
   + 'STAGES,STAGE_DIFFS,STAGE_CHAPTERS,STAGE_DAYS,SIGNATURE_TIERS,SPECIAL_CUSTOMERS,ENDING_AXES,CONTRACTS,CUSTOMER_TYPES,'

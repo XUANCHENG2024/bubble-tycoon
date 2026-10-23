@@ -9,6 +9,7 @@
  * ============================================================ */
 const fs = require('fs'), path = require('path');
 const { JSDOM, VirtualConsole } = require('./jsdom-loader');
+const { inlineScripts } = require('./inline-scripts.js');
 
 const root = path.join(__dirname, '..');
 
@@ -32,8 +33,7 @@ const ANDROID = {
 };
 
 const rawHtml = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-const srcHtml = rawHtml.replace(/<script src="js\/([a-z]+)\.js"><\/script>/g,
-  (m, n) => '<script>' + fs.readFileSync(path.join(root, 'js', n + '.js'), 'utf8') + '<\/script>');
+const srcHtml = inlineScripts(root, rawHtml);
 
 let step = 0, failed = 0;
 function ok(m) { console.log(`  ✔ ${++step}. ${m}`); }

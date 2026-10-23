@@ -18,6 +18,7 @@
 const fs = require('fs'), path = require('path');
 const root = path.join(__dirname, '..');
 const { JSDOM, VirtualConsole } = require('./jsdom-loader');
+const { inlineScripts } = require('./inline-scripts.js');
 
 /** 引擎里本工具需要的符号（用 window.eval 显式导出 —— jsdom 的经典脚本作用域） */
 const EXPORT = `({
@@ -49,7 +50,16 @@ function buildH5Env() {
   /* 把 <script src> 内联 —— 让 jsdom 以经典脚本执行（全局词法作用域），
      与浏览器里 <script src> 的行为一致 */
   let html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
-  html = html.replace(/<script src="js\/([a-z]+)\.js"><\/script>/g,
+  /* ★ V20.2：路径要支持**子目录**（js/ui/stores.js）——
+     原来的正则是 js\/([a-z]+)\.js，只认 js/ 下的直接文件，
+     于是拆分出来的模块**根本没被加载**，
+     而测试报的是「storesPanelHtml is not defined」——
+     ★ 症状离病因很远：看起来像拆分坏了，其实是加载器没跟上。
+     ★ 教训：**拆文件必须同时改加载器**，
+       而这里的加载器是「从 index.html 解析」，
+       好处是它自动跟随 index.html 变化（改对 index.html 就够）。
+     ★ 路径里的点号要转义（ui.stores 会被当成正则的「任意字符」）。 */
+  html = html.replace(/<script src="js\/([\w./-]+)\.js"><\/script>/g,
     (m, name) => '<script>' + fs.readFileSync(path.join(root, 'js', name + '.js'), 'utf8') + '<\/script>');
 
   const dom = new JSDOM(html, {

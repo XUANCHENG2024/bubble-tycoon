@@ -16,7 +16,8 @@ const { buildH5Env } = require('./h5-env.js');
 
 const root = path.join(__dirname, '..');
 const css = fs.readFileSync(path.join(root, 'styles.css'), 'utf8');
-const uiJs = fs.readFileSync(path.join(root, 'js/ui.js'), 'utf8');
+const UI_FILES = require('./frontend-files.js').H5_FILES.filter(f => /js\/ui/.test(f));
+const uiJs = UI_FILES.map(f => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
 
 /* 研发界面涉及的文件范围 */
 const LAB_FUNCS = ['renderLab', 'recipeNodeCardHtml', 'labFoldNavHtml', 'cityBarHtml', 'sigCardHtml'];

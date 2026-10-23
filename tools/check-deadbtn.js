@@ -31,7 +31,12 @@ console.log('=== 死按钮检查（V17）===\n');
 console.log('--- ① 静态：data-act 是否有处理路径 ---');
 {
   const root = path.join(__dirname, '..');
-  const uiSrc = fs.readFileSync(path.join(root, 'js/ui.js'), 'utf8');
+  /* ★ V20.2：ui.js 拆成了 ui.js + js/ui/*.js，
+     静态分析必须扫**全部**，否则拆出去的 data-act 会被漏掉
+     —— 那样「死按钮检查」会漏报（它本该是最严的那道闸）。
+     ★ 用 frontend-files 的清单自动跟随，以后再拆文件也不用改这里。 */
+  const UI_FILES = require('./frontend-files.js').H5_FILES.filter(f => /js\/ui/.test(f));
+  const uiSrc = UI_FILES.map(f => fs.readFileSync(path.join(root, f), 'utf8')).join('\n');
   const mainSrc = fs.readFileSync(path.join(root, 'js/main.js'), 'utf8');
 
   const uiActs = new Set();
