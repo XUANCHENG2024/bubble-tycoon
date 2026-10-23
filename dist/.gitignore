@@ -1,0 +1,4 @@
+# dist 是构建产物（由 tools/build-dist.js 生成），不进版本库。
+# 但目录本身需要保留一个文件，否则 git 不会跟踪它。
+*
+!.gitignore
