@@ -120,5 +120,52 @@ function build() {
   console.log('  未压缩体积对首屏包很关键：当前为纯文本 JS，gzip 后通常可压到 1/3 左右。');
 }
 
+/**
+ * ★★ V20.3：源文件变更检测
+ *
+ * ★ 为什么要它：
+ *   bundle.js 是构建产物（被 .gitignore 忽略）。
+ *   改了 js/engine.js 之后，如果**不重新打包**，
+ *   本地 minigame-smoke 测的还是**旧引擎**。
+ *
+ *   ★★ 这造成了一种极其隐蔽的假象：
+ *     本地测旧 bundle → 全过；CI 上没有 bundle.js（gitignore 了）
+ *     → 会自动用**新引擎**重新打包 → 测的是新代码 → 挂。
+ *     ★ 于是我看到的是「本地过、CI 挂」的**平台差异**假象，
+ *       实际上根本不是平台问题，是**版本不一致**。
+ *     ★ 我为此绕了一大圈（查行尾、查 ICU、加诊断 workflow），
+ *       真正的答案是「先把 bundle 重新构建」。
+ *
+ *   ★ 检测方式：把源文件的内容哈希写进 bundle 旁边的标记文件，
+ *     下次构建时比对 —— 不一致就重建。
+ *   ★ 不用 mtime：git checkout 会改 mtime，
+ *     而内容可能完全一样（会造成无谓的重建）。
+ */
+function srcFingerprint() {
+  const crypto = require('crypto');
+  const h = crypto.createHash('sha1');
+  for (const [label, file] of PARTS) {
+    h.update(label);
+    h.update(fs.readFileSync(file));
+  }
+  return h.digest('hex');
+}
+
+function buildIfNeeded() {
+  const stamp = path.join(root, 'minigame', '.bundle-stamp');
+  const fp = srcFingerprint();
+  const dest = path.join(root, 'minigame', 'bundle.js');
+  let old = '';
+  try { old = fs.readFileSync(stamp, 'utf8').trim(); } catch (e) { /* 没有就是首次 */ }
+
+  if (old === fp && fs.existsSync(dest)) {
+    console.log('· bundle.js 已是最新（源文件未变），跳过重建');
+    return;
+  }
+  console.log('· 源文件已变更（或首次），重建 bundle.js');
+  build();
+  fs.writeFileSync(stamp, fp);
+}
+
 checkConfig();
-build();
+buildIfNeeded();

@@ -1,5 +1,7 @@
 # ── 构建产物 ───────────────────────────────────────
-# minigame/bundle.js 由 tools/build-minigame.js 生成，不入库
+# minigame/bundle.js
+# V20.3：源文件哈希标记（bundle 是否最新的判据）
+minigame/.bundle-stamp 由 tools/build-minigame.js 生成，不入库
 # （601KB 的机器产物，入库只会让每次 clone 都多拉一份）
 minigame/bundle.js
 

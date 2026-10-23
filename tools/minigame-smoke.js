@@ -37,10 +37,17 @@ function fakeCtx() {
 /* bundle 是构建产物，源码改了必须先重打。
    忘记打包时自己补一步，别让使用者拿到一个莫名其妙的 ENOENT。 */
 const BUNDLE_PATH = path.join(root, 'minigame', 'bundle.js');
-if (!fs.existsSync(BUNDLE_PATH)) {
-  console.log('  · 未找到 minigame/bundle.js，先自动打包…');
+/* ★★ V20.3：总是先确保 bundle.js 与当前源码一致。
+   原来只在「文件不存在」时才打包 —— 于是改了引擎却没重建时，
+   **本地测的是旧代码**，CI 上（没有 bundle.js）测的是新代码，
+   造成「本地过 / CI 挂」的假象。
+   ★ build-minigame 现在带源文件哈希检测，会自动判断要不要重建。 */
+try {
   require('child_process').execFileSync(process.execPath,
     [path.join(root, 'tools', 'build-minigame.js')], { stdio: 'inherit' });
+} catch (e) {
+  console.error('✘ minigame 打包失败');
+  process.exit(1);
 }
 const BUNDLE = fs.readFileSync(BUNDLE_PATH, 'utf8');
 
@@ -1493,20 +1500,43 @@ console.log('=============== O. 菜系与制作工坊（Canvas） ==============
       `Canvas 显示「阶段目标」（${/阶段目标/.test(t9) ? '有' : '无'}）`);
     check(!/目标 ¥38,000/.test(t9) || /阶段目标/.test(t9),
       'Canvas 不把最终目标当阶段目标');
-    /* 锚点日应显示「已达」 */
-    e9.inCtx('(function(){var S=__MINIGAME.S;S.day=5;S.cash=3420;S.invested=0;})()');
+    /* ★★★ 锚点日应显示「已达」
+     *
+     * ★★★ V20.3：这里原来硬编码 `S.cash=3420` 与正则 `¥3,420` ——
+     *   那是**旧口径**（goal 38000 × MILESTONE_RATIO[0]=0.09 = 3420）的值。
+     *   V20 把阶段目标改成每档独立的绝对值（normal 第一锚点 = ¥5200），
+     *   于是 3420 < 5200 → 不再「已达」，断言在 Linux 上失败。
+     *   ★ **根因是我 V20 改了引擎却没同步改测试期望值** ——
+     *     这类「测试里写死了数据表的值」的隐患：
+     *     改数据表 → 改引擎 → **还要记得改测试**，三处联动最容易漏。
+     *
+     * ★ 现在改成**从数据源推导期望值**：
+     *   用引擎自己的 nextGoalOf 算出锚点金额与达标线，
+     *   再让测试去验证 Canvas 画出来的东西与之一致。
+     *   ★ 以后再改 STAGE_GOALS，测试会自动跟着变，不会脱节。
+     */
+    const anchor1 = e9.inCtx('(function(){'
+      + 'var S=__MINIGAME.S; S.day=5;'
+      + 'var g=nextGoalOf(S);'
+      + 'return g.value + "|" + Math.round(g.value * 1.05);})()');
+    const [aValue, aCash] = anchor1.split('|').map(Number);
+    e9.inCtx('(function(){var S=__MINIGAME.S;S.day=5;S.cash=' + aCash + ';S.invested=0;})()');
     e9.frames(2);
     drawnTexts.length = 0;
     e9.frames(1);
-    check(/已达第/.test(drawnTexts.join(' ')), 'Canvas 锚点日显示「✔ 已达第 N 阶段目标」');
-    /* Day1 的百分比应远高于老口径的 7% */
-    e9.inCtx('(function(){var S=__MINIGAME.S;S.day=1;S.cash=2500;S.invested=0;})()');
+    check(/已达第/.test(drawnTexts.join(' ')),
+      `Canvas 锚点日显示「✔ 已达第 N 阶段目标」（锚点 ¥${aValue}）`);
+    /* Day1 的百分比应反映**新锚点**（旧口径只有 7%） */
+    e9.inCtx('(function(){var S=__MINIGAME.S;S.day=1;S.cash=' + Math.round(aValue * 0.6) + ';S.invested=0;})()');
     e9.frames(2);
     drawnTexts.length = 0;
     e9.frames(1);
-    const pct9 = (drawnTexts.join(' ').match(/阶段目标 ¥3,420 · (\d+)%/) || [])[1];
-    check(pct9 && Number(pct9) > 50,
-      `Canvas Day1 阶段进度 ${pct9 || '?'}%（老口径只有 7%）`);
+    /* ★ 用动态正则：金额部分从锚点推导，不写死 */
+    const re9 = new RegExp('阶段目标 ¥' + aValue.toLocaleString('en-US').replace(/,/g, ',')
+      + ' · (\\d+)%');
+    const pct9 = (drawnTexts.join(' ').match(re9) || [])[1];
+    check(pct9 && Number(pct9) > 40,
+      `Canvas Day1 阶段进度 ${pct9 || '?'}%（锚点 ¥${aValue}，旧口径只有 7%）`);
   }
 
   /* ---- V13.9 对等：Canvas 抄底徽章 ---- */
