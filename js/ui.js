@@ -107,7 +107,19 @@ const SFX = {
   reach() { [784, 988, 1319].forEach((f, i) => this.tone(f, 0.18, 'sine', 0.09, i * 0.09)); },
 
   coin() { this.tone(1180, 0.07, 'triangle', 0.09); this.tone(1620, 0.09, 'triangle', 0.07, 0.05); },
-  serve() { this.tone(880, 0.06, 'sine', 0.06); },
+  /* ★ V20：出杯音支持音阶递进。
+     chain = 连续出杯的次数（0~8），每级升一个半音。
+     ★ 为什么用音阶而不是准备多个音效文件：
+       零依赖的项目不该为了一点反馈引入音频资源，
+       而音阶只改一个数字 —— 成本几乎为零，且天然带「进展感」。
+     ★ 上限 8 级：再高就尖得刺耳了，而且玩家听不出区别。 */
+  serve(chain) {
+    const n = Math.max(0, Math.min(8, Number(chain) || 0));
+    const f = 880 * Math.pow(2, n / 12);
+    this.tone(f, 0.06, 'sine', 0.06);
+    /* 连续 3 级以上加一个泛音，让高音不显得单薄 */
+    if (n >= 3) this.tone(f * 2, 0.04, 'sine', 0.03);
+  },
   bad() { this.sweep(320, 130, 0.22, 'sawtooth', 0.09); },
   up() { [523, 659, 784].forEach((f, i) => this.tone(f, 0.12, 'triangle', 0.1, i * 0.06)); },
   ach() { [659, 880, 1047, 1319].forEach((f, i) => this.tone(f, 0.16, 'triangle', 0.1, i * 0.08)); },
@@ -2777,6 +2789,69 @@ function achRowHtml(s, a) {
 }
 
 /* ---------------- 营业舞台 ---------------- */
+/* ============================================================
+ *  营业中的即时反馈（V20）
+ * ============================================================
+ *
+ * ★ 要解决的问题：
+ *   玩家在营业中连续点击出杯时（这占了整局**大部分时间**），
+ *   反馈只有两样 —— 杯子消失 + 一声固定的「叮」。
+ *   ★ 结果是：连续点 20 下和点 1 下，听起来一模一样。
+ *   玩家的手在忙，眼和耳却是空的 —— 反馈与投入不成比例，
+ *   「越忙越没感觉」是经营游戏最常见的手感流失。
+ *
+ * ★ 三个改动：
+ *   ① 飘字：出杯时在该工位上方浮出「+¥12」之类的小字
+ *   ② 音阶递进：连续出杯时音高逐级上行（连续音阶）
+ *   ③ 断连归零：停手 1.2 秒后音阶回落，让节奏有「拍子」
+ *
+ * ★ 为什么音阶递进比换音效更有效：
+ *   换音效要准备多个音频资源，而音阶只是改一个数字 ——
+ *   零依赖的项目里这是最划算的做法。
+ *   ★ 且音阶天然带「进展感」，玩家会不自觉地想继续点下去。
+ */
+
+/** 出杯飘字
+ *  ★ 参数用**对象**而不是位置参数 ——
+ *    （host, x, y, text, kind）五个位置参数里有两个数字（x/y），
+ *    传错顺序不会报错、只会显示成「top: 12px」这种诡异结果，
+ *    我自己就踩了一次（把 y 当成 text 传，飘出的是数字）。
+ *    对象形式多写几个键，却让调用点自解释。 */
+UI.serveFloat = function (host, opt) {
+  const o = opt || {};
+  if (!host || !host.appendChild || !document.createElement) return;
+  const el = document.createElement('div');
+  el.className = 'serve-float' + (o.kind ? ' ' + o.kind : '');
+  el.textContent = o.text == null ? '' : String(o.text);
+  el.style.left = (o.x != null ? o.x : 0) + 'px';
+  el.style.top = (o.y != null ? o.y : 0) + 'px';
+  host.appendChild(el);
+  /* ★ 动画结束后移除：留在 DOM 里会在长时间营业时累积成几百个节点，
+     手机上这是内存与掉帧的常见来源。 */
+  setTimeout(() => {
+    if (el.parentNode) el.parentNode.removeChild(el);
+  }, 900);
+};
+
+/** 音阶递进器：连续出杯时音高逐级上行 */
+UI.serveChain = { n: 0, timer: 0, lastAt: 0 };
+
+/** 触发一次出杯反馈（音 + 飘字）
+ *  @param {object} host 飘字宿主元素
+ *  @param {object} opt  { x, y, text, kind }
+ */
+UI.serveFeedback = function (host, opt) {
+  const o = opt || {};
+  const now = Date.now();
+  const ch = UI.serveChain;
+  /* ★ 间隔超过 1.2 秒视为「重新开始」——
+     不然玩家喝口茶回来，系统还在用上次的高音阶。 */
+  ch.n = (now - ch.lastAt < 1200) ? Math.min(ch.n + 1, 8) : 0;
+  ch.lastAt = now;
+  SFX.serve(ch.n);
+  if (o.text) UI.serveFloat(host, o.x, o.y, o.text, o.kind);
+};
+
 UI.stageInit = function () {
   const s = window.S;
   /* 与 stageSync 保持同一口径：sim 为空（还没开门 / 已读档回 prep）时
@@ -2860,7 +2935,24 @@ UI.stageSync = function () {
 
   /* 出杯 / 流失音效 */
   if (servedNow !== UI.lastServed) {
-    if (servedNow > UI.lastServed) { SFX.serve(); UI.lastServed = servedNow; }
+    if (servedNow > UI.lastServed) {
+      /* ★ V20：走统一反馈（音阶 + 飘字）——
+         原来只有一声固定的「叮」，连点 20 下与点 1 下完全一样。 */
+      const n = servedNow - UI.lastServed;
+      const stage = $('stage');
+      /* 一次涨多杯（比如老板大招清场）时才飘字，且放在舞台中上部 ——
+         ★ 每次都飘会在连点时糊成一片，反而看不清。 */
+      for (let k = 0; k < Math.min(n, 3); k++) UI.serveFeedback(stage, null);
+      if (n > 3 && stage) {
+        UI.serveFloat(stage, {
+          x: Math.round(stage.clientWidth * 0.5),
+          y: Math.round(stage.clientHeight * 0.32),
+          text: '+' + n + ' 杯',
+          kind: 'burst',
+        });
+      }
+      UI.lastServed = servedNow;
+    }
     else UI.lastServed = servedNow;
   }
   if (sim.lost !== UI.lastLost) {

@@ -11,7 +11,12 @@
  *   硬测目标值意义不大（玩家水平差异大），
  *   但「easy 比 hard 容易」这种次序错误必须守住。
  */
+const fs = require('fs');
+const path = require('path');
 const { buildH5Env } = require('./h5-env.js');
+
+/* ⑤ 那一段要读 styles.css 确认 pointer-events —— 需要项目根路径 */
+const root = path.join(__dirname, '..');
 
 let fails = 0, checks = 0;
 function check(cond, label) {
@@ -228,6 +233,66 @@ console.log('\n--- ④ 存档损坏恢复 ---');
   /* ★ 删了之后读档必须拿不到东西（不能从备份复活） */
   check(w.eval('loadGame(0) === null'), '清档后读档拿不到任何数据');
 }
+
+/* ---------- ⑤ 营业即时反馈与音频节奏 ---------- */
+console.log('\n--- ⑤ 出杯反馈与音阶 ---');
+{
+  const { window, doc } = buildH5Env();
+  window.eval('window.S = newGame("normal", 0, null); window.S.cash = 300000;');
+  window.eval('UI.setTab("manage"); UI.renderAll();');
+
+  /* ★ 音阶：连续出杯时基频单调递增。
+     ★ 断言只看**基频**（<1500Hz）——
+       第 3 级起会叠一个 2 倍泛音，不排除的话数组看起来就不单调了。
+       我第一次写断言没排除泛音，报了个「音阶不递增」的假失败。 */
+  window.eval('window.__log = []; SFX.tone = function (f) { window.__log.push(Math.round(f)); };');
+  for (let i = 0; i < 7; i++) window.eval('UI.serveFeedback(document.getElementById("stage"), null);');
+  const all = JSON.parse(window.eval('JSON.stringify(window.__log)'));
+  const base = all.filter(f => f < 1500);
+  check(base.length >= 5 && base.every((f, i) => i === 0 || f > base[i - 1]),
+    '连续出杯基频单调递增（' + base.join(' → ') + '）');
+
+  /* 音高封顶（连点 20 次也不能刺耳） */
+  window.eval('window.__log = []; window.UI.serveChain.lastAt = Date.now();');
+  for (let i = 0; i < 20; i++) window.eval('UI.serveFeedback(document.getElementById("stage"), null);');
+  const top = Math.max(...JSON.parse(window.eval('JSON.stringify(window.__log)')).filter(f => f < 1500));
+  check(top <= 1600, '音阶封顶（连点 20 次最高 ' + top + 'Hz，不刺耳）');
+
+  /* 停手后归零 */
+  window.eval('window.UI.serveChain.lastAt = Date.now() - 5000; window.__log = [];');
+  window.eval('UI.serveFeedback(document.getElementById("stage"), null);');
+  const back = JSON.parse(window.eval('JSON.stringify(window.__log)'))[0];
+  check(back === 880, '停手 1.2 秒后音阶回落基准（' + back + 'Hz）');
+
+  /* ★ 飘字参数用对象而不是位置参数 ——
+     （host, x, y, text, kind）里两个数字挨着，
+     传错顺序不报错、只显示成「top: 12px」这种诡异结果（我踩过）。 */
+  window.eval('UI.serveFloat(document.getElementById("stage"), {text: "12", kind: "serve"});');
+  const fl = window.eval('(function(){var e=document.querySelector("#stage .serve-float");'
+    + 'return e ? e.textContent + "|" + e.className : "";})()');
+  check(fl.indexOf('12') === 0 && /serve/.test(fl),
+    '飘字参数为对象形式（文本=' + fl.split('|')[0] + '）');
+
+  /* 批量飘字要带坐标 */
+  window.eval('UI.serveFloat(document.getElementById("stage"), {x: 100, y: 60, text: "5", kind: "burst"});');
+  const pos = window.eval('(function(){var e=document.querySelector("#stage .serve-float.burst");'
+    + 'return e ? e.style.left : "";})()');
+  check(pos === '100px', '批量飘字按坐标定位（' + pos + '）');
+
+  /* ★ 边界：host / opt 为 null 都不能崩 ——
+     舞台可能在页面隐藏时被清掉（stageEnd 会重置引用）。 */
+  let crash = false;
+  try {
+    window.eval('UI.serveFloat(null, {text: "x"});');
+    window.eval('UI.serveFeedback(null, null);');
+  } catch (e) { crash = true; }
+  check(!crash, 'host / opt 为 null 时不崩溃');
+
+  /* 飘字不能挡点击 */
+  check(fs.readFileSync(path.join(root, 'styles.css'), 'utf8').indexOf('pointer-events: none') >= 0,
+    '飘字 pointer-events:none（不挡后续点击）');
+}
+
 console.log('');
 if (fails === 0) {
   console.log('✔ 难度曲线与存档容错全部通过（' + checks + ' 项）');
