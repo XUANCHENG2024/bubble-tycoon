@@ -4,10 +4,9 @@
 #   Settings → Pages → Build and deployment → Source 改为 **GitHub Actions**
 #   否则本 workflow 不会触发（Pages 还在用 Deploy from branch 模式）。
 #
-# ★ 为什么 H5 版不需要构建步骤：
+# ★ 为什么 H5 版不需要打包器：
 #   本作是纯静态站点（index.html + styles.css + js/），
 #   没有打包、没有编译 —— 直接把仓库内容发布出去就是产物。
-#   所以这个 job 只做「上传 + 发布」，不做任何 build。
 #   （小游戏端才需要 node tools/build-minigame.js 生成 bundle.js，
 #     但那是给抖音开发者工具用的，不参与 Pages。）
 on:
@@ -35,12 +34,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # ★★★ 关键：先构建，再发布 dist/ ★★★
+      #
+      # ★ 为什么用 build-dist.js 而不是手列文件清单：
+      #   原来 path: '.' —— 把**整个仓库**都发了出去：
+      #     tools/（30+ 测试脚本）、docs/（内部文档）、
+      #     minigame/（小游戏端源码）、legal/（协议文本）
+      #   ★ 多发约 2.2MB，且把内部实现与测试脚本一并公开。
+      #
+      # ★ 我一度想手写一份清单（index.html / styles.css / js / assets），
+      #   但那会是**第二处产物定义** —— 以后往 js/ 加文件，
+      #   很可能只改了 build-dist.js 而忘了改清单，
+      #   结果就是「本地能跑、线上少一个文件」。
+      #   ★ 产物清单必须**只有一个来源**。
+      #
+      # ★ build-dist.js 自带引用完整性自检 ——
+      #   它会检查 index.html 引用的每个资源是否都在，
+      #   少文件时直接失败，不会发布出一个坏掉的站点。
+      - name: 构建发布产物
+        run: node tools/build-dist.js
+
+      - name: 启动自检（★ 别跳过）
+        # ★ 真的执行一遍：脚本顺序 / 模块挂载 / 6 个面板渲染。
+        #   文件在 ≠ 脚本按顺序执行成功 —— 顺序错了就是白屏。
+        run: node tools/check-dist-boot.js
+
       - uses: actions/configure-pages@v5
 
-      # upload-pages-artifact 会把整个仓库打包（对纯静态站点即产物）
+      # ★ 只发布 dist/ —— 里面正好是 H5 需要的全部内容
+      #   （含 js/ui/ 子目录，build-dist 递归复制）
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
-
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          path: 'dist'
+          retention-days: 1
