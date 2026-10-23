@@ -49,3 +49,7 @@ npm-debug.log*
 # ★ 这些是二进制大文件，不进版本库；
 #   要分发用 GitHub Releases 或直接拷贝。
 releases/
+
+# ── Release 上传临时文件 ─────────────────────────
+.rel.json
+.rel-up.txt
