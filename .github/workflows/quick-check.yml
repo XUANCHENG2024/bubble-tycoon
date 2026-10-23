@@ -19,6 +19,13 @@ concurrency:
   group: quick-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  # ★ 失败时建 Issue（诊断信息要公开可读 —— Actions 日志要管理员权限才能下，
+  #   API 取 logs 返回 403、check-run 的 output 也是空的，
+  #   看不到失败详情就只能靠猜）
+  issues: write
+
 jobs:
   test:
     name: 引擎 + UI 快速检查
@@ -52,19 +59,31 @@ jobs:
         run: node tools/dom-smoke.js
 
       - name: 真实 DOM 冒烟（H5）
-        run: node tools/run-ci-test.js tools/browser-smoke.js
+        run: |
+          set -o pipefail
+          node tools/run-ci-test.js tools/browser-smoke.js 2>&1 | tee /tmp/ci-test.log
+
 
       - name: 小游戏冒烟（Canvas 端对等）
-        run: node tools/run-ci-test.js tools/minigame-smoke.js
+        run: |
+          set -o pipefail
+          node tools/run-ci-test.js tools/minigame-smoke.js 2>&1 | tee /tmp/ci-test.log
+
 
       - name: 移动端布局
-        run: node tools/run-ci-test.js tools/mobile-smoke.js
+        run: |
+          set -o pipefail
+          node tools/run-ci-test.js tools/mobile-smoke.js 2>&1 | tee /tmp/ci-test.log
+
 
       - name: 符号对等（两版引擎符号一致性）
         run: node tools/symbol-check.js
 
       - name: XSS 注入
-        run: node tools/run-ci-test.js tools/xss-verify.js
+        run: |
+          set -o pipefail
+          node tools/run-ci-test.js tools/xss-verify.js 2>&1 | tee /tmp/ci-test.log
+
 
       - name: 存档可控字段转义（逐字段污染 + 扫全部面板）
         run: node tools/check-escape.js
