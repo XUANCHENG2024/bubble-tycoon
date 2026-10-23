@@ -1,0 +1,35 @@
+{
+  "appId": "com.bubbletycoon.game",
+  "appName": "奶茶星球",
+  "webDir": "www",
+  "bundledWebRuntime": false,
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false,
+    "backgroundColor": "#170a2e"
+  },
+  "ios": {
+    "contentInset": "always",
+    "backgroundColor": "#170a2e",
+    "limitsNavigationsToAppBoundDomains": true,
+    "scrollEnabled": false
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    },
+    "SplashScreen": {
+      "launchShowDuration": 800,
+      "backgroundColor": "#170a2e",
+      "showSpinner": false,
+      "androidSplashResourceName": "splash",
+      "splashFullScreen": true,
+      "splashImmersive": false
+    }
+  },
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "https"
+  }
+}

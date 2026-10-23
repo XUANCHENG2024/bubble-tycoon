@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- V20.4：启动屏用纯色而非图片 ——
+     一张 1MB 的 PNG × 20 个密度 = 20MB 白白进包，
+     而启动屏本来就只需要一个底色。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#170a2e"/>
+</shape>

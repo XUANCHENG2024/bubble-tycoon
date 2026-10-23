@@ -1472,3 +1472,136 @@ if (typeof globalThis !== 'undefined') {
     get audio() { return AUDIO; },
   };
 }
+
+/* ★★★ V20.4：App（Capacitor）自启动 ★★★
+ *
+ * ★ 为什么需要：
+ *   抖音小游戏由**平台运行时**调 boot()（game.js 之外的事）；
+ *   浏览器预览页由 preview.html 手动调；
+ *   ★ 而 App 的 WebView 里**没有人会调 boot()** ——
+ *     index.html 只加载 bundle.js，不认识 __MINIGAME。
+ *     结果就是：App 打开后一片空白，引擎从未启动。
+ *
+ * ★ 为什么必须等存储就绪：
+ *   App 的存储是原生同步插件，读写虽然同步，但**插件本身**要等
+ *   Capacitor 桥接就绪（window.Capacitor.Plugins 存在）才能用。
+ *   ★ 若此时就 boot()，engine.js 顶层的 loadMeta() 会读到空存档，
+ *     而且**不报任何错** —— 玩家看到的是「每次开 App 都是新游戏」。
+ *   ★ 所以：先等 appStoreReady()，再 boot。
+ *
+ * ★ 双重保险：即使存储初始化失败（Promise reject），
+ *   也要照常 boot —— 游戏能玩比存档完整更重要。
+ */
+if (typeof PLAT !== 'undefined' && PLAT.isApp) {
+  (function () {
+    /* 要预读的键：3 个存档槽 + 元数据。
+       ★ 与 engine.js 的 SAVE_SLOTS / META_KEY 对应，
+         这里写死是为了不依赖 engine 的常量（那时还没加载完）。 */
+    var KEYS = [
+      'bubbleTycoonSaveV3_0', 'bubbleTycoonSaveV3_1', 'bubbleTycoonSaveV3_2',
+      'bubbleTycoonMetaV3'
+    ];
+    var booted = false;
+    function doBoot() {
+      if (booted) return;
+      booted = true;
+      try { boot(); } catch (e) { /* 启动失败就让它炸，别静默 */ }
+    }
+    try {
+      var p = PLAT.appStoreReady(KEYS);
+      if (p && p.then) {
+        p.then(doBoot, doBoot);   /* 成功与失败都 boot —— 失败时是空存档 */
+      } else {
+        doBoot();
+      }
+    } catch (e) {
+      doBoot();
+    }
+    /* ★ 兜底：万一 appStoreReady 的 Promise 永远不 resolve（插件缺失等），
+       3 秒后无条件启动 —— 宁可没有存档，也不能白屏。 */
+    setTimeout(doBoot, 3000);
+  })();
+}
+
+/* ★★★ V20.4：Android 物理返回键 ★★★
+ *
+ * ★ iOS 没有返回键，Android 有 —— 所以这是**不对称**的能力。
+ *   默认行为是「关掉 Activity」，游戏直接退出，
+ *   玩家刚玩到一半被踢出去，体验很差。
+ *
+ * ★ 正确层级（从内到外）：
+ *   ① 有弹窗        → 关弹窗
+ *   ② 引导中        → 结束引导
+ *   ③ 在子页面       → 回「经营」主页
+ *   ④ 在营业中       → 提示「要收工吗」（不能直接退出，会丢这局进度）
+ *   ⑤ 在标题页       → 二次确认才退出
+ *
+ * ★ 为什么要「二次确认」：
+ *   Android 的返回键**按一下就退**是系统惯例，
+ *   但游戏局中退出意味着这局白玩 —— 至少要拦一下。
+ *
+ * ★ 这里的逻辑只依赖 VIEW 的状态（弹窗/页面/阶段），
+ *   不碰引擎 —— 与 UI 层其他代码同风格。
+ */
+if (typeof PLAT !== 'undefined' && PLAT.isApp) {
+  var BACK_CONFIRM_AT = 0;   /* 上次按返回键的时间（用于二次确认） */
+  var BACK_CONFIRM_MS = 2000;
+
+  function handleBack() {
+    try {
+      /* ① 弹窗 */
+      if (VIEW.modal) {
+        VIEW.modal = null;
+        VIEW.modalScroll = 0;
+        return;
+      }
+      /* ② 引导 */
+      if (VIEW.tut && VIEW.tut.on) {
+        if (typeof TUT !== 'undefined' && TUT.skip) TUT.skip();
+        VIEW.tut.on = false;
+        return;
+      }
+      /* ③ 标题页 / 结局页 → 二次确认退出 */
+      if (VIEW.screen === 'title' || VIEW.screen === 'end') {
+        var now = Date.now();
+        if (now - BACK_CONFIRM_AT < BACK_CONFIRM_MS) {
+          PLAT.exitApp();
+        } else {
+          BACK_CONFIRM_AT = now;
+          toast('再按一次返回键退出');
+        }
+        return;
+      }
+      /* ④ 营业中 → 提示收工（不能直接退，会丢这局） */
+      if (_S && _S.phase === 'open') {
+        var now2 = Date.now();
+        if (now2 - BACK_CONFIRM_AT < BACK_CONFIRM_MS) {
+          PLAT.exitApp();
+        } else {
+          BACK_CONFIRM_AT = now2;
+          toast('正在营业中，再按一次退出');
+        }
+        return;
+      }
+      /* ⑤ 子页面 → 回经营主页 */
+      if (VIEW.tab !== 'manage') {
+        VIEW.tab = 'manage';
+        VIEW.scroll.manage = 0;
+        return;
+      }
+      /* ⑥ 已经在经营主页 → 二次确认退出 */
+      var now3 = Date.now();
+      if (now3 - BACK_CONFIRM_AT < BACK_CONFIRM_MS) {
+        PLAT.exitApp();
+      } else {
+        BACK_CONFIRM_AT = now3;
+        toast('再按一次返回键退出');
+      }
+    } catch (e) {
+      /* ★ 返回键任何时候都不该把游戏卡死 —— 出错就退出去 */
+      try { PLAT.exitApp(); } catch (e2) { }
+    }
+  }
+
+  PLAT.onBack(handleBack);
+}

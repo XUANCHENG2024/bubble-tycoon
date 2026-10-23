@@ -124,6 +124,17 @@ jobs:
       - name: 发布产物启动自检（脚本顺序 / 模块挂载 / 各面板渲染）
         run: node tools/build-dist.js && node tools/check-dist-boot.js
 
+      - name: App 方案检查（同步存储 / 原生插件 / 体积上限）
+        # ★ 依赖 app/node_modules（Capacitor CLI）——
+        #   CI 里要先 npm install 一次。
+        run: |
+          if [ -d app/node_modules ]; then
+            node tools/build-app-web.js
+            node tools/check-app.js
+          else
+            echo '::notice::app/node_modules 不存在，跳过 App 检查（首次 clone 时正常）'
+          fi
+
       - name: 主流程
         run: node tools/e2e-flow.js
 

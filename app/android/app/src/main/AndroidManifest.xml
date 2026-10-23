@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- ★★★ 权限（V20.4）★★★
+         本作**完全离线**（实测：0 处 fetch / XMLHttpRequest / 外链）。
+         ★ 所以只需要两个权限，而且都不涉及隐私：
+           · VIBRATE  —— 触感反馈（连点出杯位的回弹感）
+           · WAKE_LOCK —— 屏幕常亮（经营时要盯着屏幕算备货量）
+         ★ **不申请 INTERNET** ——
+           Capacitor 默认会加（WebView 加载本地资源需要它，
+           但那只影响本地 https://localhost 的虚拟域名，不需要真网络权限）。
+           ★ 去掉它能让 Play Console 的「数据安全」表格填得更干净，
+             也少一条用户会看到的权限弹窗。 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- ★ 声明「不需要网络」：某些发行商商店会因此要求更宽松的审核 -->
+    <uses-feature android:name="android.hardware.touchscreen" android:required="true" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        android:hardwareAccelerated="true">
+
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
+            android:name=".MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:screenOrientation="portrait"
+            android:exported="true">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"></meta-data>
+        </provider>
+    </application>
+</manifest>

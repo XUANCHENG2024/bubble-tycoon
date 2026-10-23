@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- V20.4：自适应图标的背景层 —— 与游戏主色一致，
+     避免图标圆角裁切后露出白边。 -->
+<resources>
+    <color name="ic_launcher_background">#170a2e</color>
+</resources>

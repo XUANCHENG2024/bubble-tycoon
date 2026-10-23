@@ -1,0 +1,21 @@
+# ── Capacitor App 工程 ──────────────────────────────────
+# ★ 依赖不入库（可由 package.json 重建）
+node_modules/
+
+# ★ 构建产物不入库
+#   www/ 由 tools/build-app-web.js 生成
+www/
+#   Android 构建输出
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/capacitor-cordova-android-plugins/
+#   iOS 构建输出（Pods 与 DerivedData 都不该入库）
+ios/App/Pods/
+ios/App/App/public/
+ios/App/build/
+ios/App/App/capacitor.config.json.bak
+
+# ★ 但**原生工程本身要入库**（android/ 与 ios/ 的源码与配置）——
+#   它们是可复现构建的一部分（Capacitor 生成后由人维护）。
