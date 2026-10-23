@@ -279,6 +279,30 @@ console.log('\n--- ⑤ App web 产物 ---');
     'App web 产物体积可控（' + (wwwBytes / 1024 / 1024).toFixed(1) + ' MB）');
 }
 
+/* ---------- ⑥ iOS 插件静态核对（V20.5）----------
+   * ★ iOS 版我没法编译（没有 Mac），所以用静态核对顶一下：
+   *   把插件用到的每个 API 拿去和 node_modules 里的真实源码比对。
+   * ★ 尤其要守住「插件已登记进 packageClassList」——
+   *   cap sync 会覆盖它，而本地 Swift 插件不在 CLI 的扫描范围里。
+   *   漏了这一步 → iOS 找不到插件 → 存储降级 → 可能读档全空。 */
+{
+  const { execFileSync } = require('child_process');
+  const script = path.join(root, 'tools', 'check-ios-plugins.js');
+  let out = '', bad = 0;
+  try {
+    out = execFileSync(process.execPath, [script], { encoding: 'utf8' });
+  } catch (e) {
+    out = (e.stdout || '') + String(e.message);
+  }
+  /* 逐行转成断言 —— 让 check-app 的失败计数真实反映 iOS 的问题 */
+  const lines = out.split('\n').filter(l => /[✔✘]/.test(l));
+  for (const line of lines) {
+    if (line.indexOf('✘') >= 0) { bad++; console.log('  ' + line.trim()); }
+  }
+  check(bad === 0, 'iOS 插件静态核对（' + lines.length + ' 项'
+    + (bad ? '，' + bad + ' 项失败' : '，全过') + '）');
+}
+
 console.log('');
 if (fails === 0) {
   console.log('✔ App 方案检查全部通过（' + checks + ' 项）');

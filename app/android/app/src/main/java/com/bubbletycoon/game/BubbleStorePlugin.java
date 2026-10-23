@@ -95,25 +95,41 @@ public class BubbleStorePlugin extends Plugin {
     }
 
     /**
-     * 批量读（启动预热用）。
-     * ★ 一次 JNI 往返读完所有键，比逐个 get 快得多。
-     * @param call { keys: string[] }
+     * 批量读（启动预热用）—— 一次 JNI 往返读完所有键。
+     * ★ keys 支持两种格式：数组（{"keys":["a","b"]}）或
+     *   逗号分隔字符串（{"keys":"a,b"}）。
+     *   ★ 两种都支持是因为 **iOS 侧故意只用 getString** ——
+     *     Capacitor 的 getArray 返回可选数组，Swift 还要处理 JSValue 元素，
+     *     而那部分代码我**没有 Mac 验证不了编译**，
+     *     所以 iOS 走「只用 getString」这条几乎不会错的路。
+     *   ★ Android 侧两种都收，兼容未来 JS 改成数组。
+     *
+     * @param call { keys: string[] | string }
      * @return { values: { key: value } }
      */
     @PluginMethod
     public void getMany(PluginCall call) {
-        /* ★ 直接用 JSObject 装结果 —— 不需要额外的 Holder 类。
-           JSObject.put(String, Object) 与 put(String, String) 都存在，
-           直接把 String 值塞进去即可。 */
         JSObject values = new JSObject();
         try {
-            com.getcapacitor.JSArray keys = call.getArray("keys");
-            if (keys != null) {
+            /* ① 数组形式 */
+            com.getcapacitor.JSArray arr = call.getArray("keys");
+            if (arr != null) {
                 SharedPreferences p = prefs();
-                for (int i = 0; i < keys.length(); i++) {
-                    String k = keys.getString(i);
+                for (int i = 0; i < arr.length(); i++) {
+                    String k = arr.getString(i);
                     if (k == null) continue;
                     if (p.contains(k)) values.put(k, p.getString(k, ""));
+                }
+            } else {
+                /* ② 逗号分隔字符串 */
+                String joined = call.getString("keys", "");
+                if (joined != null && !joined.isEmpty()) {
+                    SharedPreferences p = prefs();
+                    for (String raw : joined.split(",")) {
+                        String k = raw.trim();
+                        if (k.isEmpty()) continue;
+                        if (p.contains(k)) values.put(k, p.getString(k, ""));
+                    }
                 }
             }
         } catch (Exception e) {

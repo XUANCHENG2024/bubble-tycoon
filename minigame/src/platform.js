@@ -207,9 +207,14 @@ var PLAT = (function () {
         var list = keys || [];
         /* ★ 优先用批量接口 getMany —— 一次桥接往返读完所有键，
            逐个 get 是 N 次往返（启动时 4 个键就是 4 次）。
-           ★ 但不是所有宿主都实现了 getMany，所以要有回退。 */
+           ★ 但不是所有宿主都实现了 getMany，所以要有回退。
+           ★★ keys 传的是**逗号分隔的字符串**而不是数组 ——
+              Capacitor 的 getArray 返回可选数组（Swift 侧还要处理
+              JSValue 元素），而我**没有 Mac 验证不了编译**。
+              只用 getString 是最不容易写错的 API。
+              （Java 侧的 getMany 仍收数组，两边都能兼容这个字符串。）*/
         if (typeof native.getMany === 'function' && list.length) {
-          var batch = native.getMany({ keys: list });
+          var batch = native.getMany({ keys: list.join(',') });
           var vals = batch && batch.values ? batch.values : null;
           if (vals) {
             for (var k in vals) {

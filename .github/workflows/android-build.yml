@@ -89,6 +89,12 @@ jobs:
         working-directory: app
         run: npx cap sync android
 
+      - name: 登记 iOS 本地插件
+        # ★ cap sync 会覆盖 capacitor.config.json 的 packageClassList，
+        #   而本地 Swift 插件不在 CLI 的扫描范围里（只扫 node_modules）
+        #   → 必须补回来，否则 iOS 找不到插件 → 存储降级 → 可能读档全空。
+        run: node tools/fix-ios-plugins.js
+
       - name: 构建 debug APK
         working-directory: app/android
         run: ./gradlew assembleDebug --no-daemon

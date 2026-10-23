@@ -22,7 +22,17 @@ public class BubbleStorePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "BubbleStorePlugin"
     public let jsName = "BubbleStore"
 
-    /// ★ Capacitor 7 要求显式列出方法（Swift 没有宏可用）
+    /// ★ Capacitor 7 要求 Swift 插件显式列出方法。
+    /// ★★ 写法**与官方插件完全一致**（照抄 @capacitor/app 与 @capacitor/status-bar）：
+    ///     public let pluginMethods: [CAPPluginMethod] = [
+    ///         CAPPluginMethod(name: "exitApp", returnType: CAPPluginReturnPromise), …
+    ///     ]
+    /// ★★ CAPPluginReturnPromise 是 CAPBridgedPlugin.h 里的 ObjC 宏
+    ///   （#define CAPPluginReturnPromise @"promise"），
+    ///   Swift 能直接用它 —— 官方插件就是这么写的。
+    ///   ★ 我一度怀疑它不可用（因为它是「宏」），查了官方插件源码才发现
+    ///     官方用的正是它 —— ★ **照抄官方是最省事的验证方式**：
+    ///     官方能编译通过的写法，我抄了就能编译通过。
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "get", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "set", returnType: CAPPluginReturnPromise),
@@ -77,13 +87,25 @@ public class BubbleStorePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     /// 批量读（启动预热用）—— 一次桥接往返读完所有键
+    ///
+    /// ★★★ 为什么用「逗号分隔的字符串」而不是数组参数 ★★★
+    ///   Capacitor 的 `getArray(_:_:)` 返回 **[T]?（可选数组）**，
+    ///   而 `getArray(_:)` 返回 `JSArray?` = `[JSValue]?`。
+    ///   ★ 两者都是可选值，而 JSValue 的元素类型还需要额外转换 ——
+    ///     这类 API 一旦用错，编译期就报错（Swift 不像 JS 有运行时兜底）。
+    ///   ★ 而本作要读的键只有 4 个固定值，用逗号分隔完全够用，
+    ///     且**只用 getString**（一个绝不会出错的 API）。
+    ///   ★ 权衡：牺牲一点通用性，换「几乎不可能编译不过」。
+    ///     这正是本项目当前最需要的 —— 我没有 Mac，**没法验证编译**。
     @objc func getMany(_ call: CAPPluginCall) {
         var values: [String: String] = [:]
-        if let keys = call.getArray("keys", String.self) {
-            for k in keys {
-                let full = KEY_PREFIX + k
+        if let joined = call.getString("keys") {
+            for k in joined.split(separator: ",") {
+                let key = String(k).trimmingCharacters(in: .whitespacesAndNewlines)
+                if key.isEmpty { continue }
+                let full = KEY_PREFIX + key
                 if defaults.object(forKey: full) != nil {
-                    values[k] = defaults.string(forKey: full) ?? ""
+                    values[key] = defaults.string(forKey: full) ?? ""
                 }
             }
         }

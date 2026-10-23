@@ -139,9 +139,19 @@ if (!status()) {
 
 /* ★ 同步 web 产物到原生工程 —— 不做这步构建出来的是旧内容 */
 console.log('· 同步 web 产物到原生工程');
-execFileSync('npx', ['cap', 'sync', 'android'], {
+execFileSync('npx', ['cap', 'sync'], {
   cwd: appDir, stdio: 'inherit', shell: process.platform === 'win32',
 });
+
+/* ★★★ iOS 插件登记（V20.5）★★★ */
+console.log('· 登记 iOS 本地插件');
+try {
+  execFileSync(process.execPath, [path.join(root, 'tools', 'fix-ios-plugins.js')], {
+    stdio: 'inherit', cwd: root,
+  });
+} catch (e) {
+  console.warn('  · iOS 插件登记失败（不影响 Android 构建）');
+}
 
 /* ★ 写 local.properties（告诉 Gradle SDK 在哪）——
    这个文件**不能进版本库**（每台机器路径不同），
