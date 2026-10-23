@@ -19,3 +19,10 @@ ios/App/App/capacitor.config.json.bak
 
 # ★ 但**原生工程本身要入库**（android/ 与 ios/ 的源码与配置）——
 #   它们是可复现构建的一部分（Capacitor 生成后由人维护）。
+
+# ★★ 签名密钥（绝不能进版本库）★★
+# keystore.properties 里是密钥的路径与口令
+keystore.properties
+# 密钥文件本身
+*.jks
+*.keystore

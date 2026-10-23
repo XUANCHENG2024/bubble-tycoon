@@ -34,31 +34,25 @@ public class MainActivity extends BridgeActivity {
 
     /* ★★ Android 物理返回键（V20.4）
      *
-     * ★ Capacitor 的 App 插件会监听 backButton 事件并默认「退出 App」，
-     *   但本作的返回键应该先关弹窗 / 回主页，**不该立刻退出**。
-     * ★ Capacitor 7 的 App 插件默认行为是「没有 App 插件处理时按返回键退出」，
-     *   而我们注册了 backButton 监听器后，**只要 JS 侧注册了就由 JS 决定**。
-     *   —— 所以真正的层级判断放在 JS 侧（platform.js 的 onBack + main.js 的分层逻辑），
-     *   这里只需要保证「App 不在后台时被杀掉也能恢复」。
+     * ★ Capacitor 7 的 App 插件会监听 backButton 事件；
+     *   本作注册了 JS 侧的监听器（platform.js 的 onBack），
+     *   **只要 JS 侧注册了就由 JS 决定** ——
+     *   所以真正的层级判断（弹窗→引导→子页面→营业中→二次确认退出）
+     *   放在 JS 层（那里才有 VIEW 状态）。
+     *   ★ 这里不需要额外处理返回键。
      *
-     * ★ onSaveInstanceState 不重写：Capacitor 的 BridgeActivity 自己处理 WebView 状态，
-     *   重写反而可能破坏它的恢复流程。
+     * ★★ 关于 onResume：本来写了一个「回到前台时 pauseTimers/resumeTimers」
+     *   的钩子，但**它是自相矛盾的** ——
+     *   pauseTimers 紧接着 resumeTimers，等于什么都没做，
+     *   而 WebView 在后台本来就会被系统挂起（rAF 自动停）。
+     *   ★ 「后台暂停」的正确位置是 JS 侧的 visibilitychange
+     *   （引擎要暂停营业计时，见 main.js）。
+     *   ★ 而且那个钩子写成了 protected，编译不过
+     *     （BridgeActivity.onResume 是 public）——
+     *     ★ 教训：**写不出「这个钩子到底做了什么」的代码，
+     *       说明它不该存在**。删掉比修好更诚实。
+     *
+     * ★ onSaveInstanceState 同样不重写：Capacitor 的 BridgeActivity
+     *   自己处理 WebView 状态，重写反而可能破坏它的恢复流程。
      */
-    @Override
-    protected void onResume() {
-        super.onResume();
-        /* ★ 回到前台时不要让游戏继续跑 —— 玩家可能在应用商店里，
-           回来发现游戏已经结束（时间流逝被算进营业）会很莫名。
-           ★ 引擎侧有 phase 状态机，但「后台暂停」必须在原生层做，
-           因为 WebView 被挂起时 JS 的定时器不可靠。 */
-        if (getBridge() != null && getBridge().getWebView() != null) {
-            getBridge().getWebView().pauseTimers();
-            /* ★ 紧接着 pauseTimers 会冻结 rAF 计时，
-               所以紧接着要 resume —— 真正要暂停的是「游戏时间」，
-               由 JS 侧在 visibilitychange 里处理。
-               ★ 这里保持 WebView 正常运行（resumeTimers），
-               只把「音频会话」交给原生处理。 */
-            getBridge().getWebView().resumeTimers();
-        }
-    }
 }

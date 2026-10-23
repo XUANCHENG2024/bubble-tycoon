@@ -1,5 +1,29 @@
 apply plugin: 'com.android.application'
 
+/* ★★ 签名配置（V20.5）★★
+ *
+ * ★ 为什么 release 需要单独的 signingConfigs：
+ *   Capacitor 生成的 build.gradle 里 release **没有** signingConfigs，
+ *   于是 `assembleRelease` 会沿用 **debug 签名**。
+ *   ★ 而 Google Play 明确拒绝 debug 签名的包 ——
+ *     报错出现在上传那一刻，白白浪费一整轮审核。
+ *
+ * ★ 双重密钥体系（Google Play 的要求）：
+ *   · upload keystore —— 用来**上传**（你保住它，换密钥不影响上架）
+ *   · app signing key —— Play 用来**分发**（Google 帮你保管）
+ *   ★ 所以真正需要你保管的只有 upload keystore 一个。
+ *
+ * ★ 密钥绝不能进版本库：配置从 keystore.properties 读，
+ *   那个文件已在 app/.gitignore 里。
+ * ★ 文件不存在时自动退回 debug 签名 ——
+ *   这样别人 clone 下来也能直接构建调试包，不至于卡住。
+ */
+def keystorePropsFile = rootProject.file("keystore.properties")
+def keystoreProps = new Properties()
+if (keystorePropsFile.exists()) {
+    keystoreProps.load(new FileInputStream(keystorePropsFile))
+}
+
 android {
     namespace "com.bubbletycoon.game"
     compileSdk rootProject.ext.compileSdkVersion
@@ -16,10 +40,32 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+
+    signingConfigs {
+        /* ★ 只在配置文件存在时启用正式签名。
+           ★ 否则 release 用 debug 签名 —— 调试期没问题，上架时会被 Play 拒。 */
+        if (keystorePropsFile.exists()) {
+            release {
+                storeFile file(keystoreProps['storeFile'])
+                storePassword keystoreProps['storePassword']
+                keyAlias keystoreProps['keyAlias']
+                keyPassword keystoreProps['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
+            /* ★ minifyEnabled：上架包建议开（体积小 30%+、启动快）。
+               ★ 但**首次上架先不开** ——
+                 R8 混淆后若出问题，崩溃栈会变得难读，
+                 而首版最需要的是「能看懂崩溃日志」。
+                 ★ 稳定后再开，那时规则也该配好了。 */
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (keystorePropsFile.exists()) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

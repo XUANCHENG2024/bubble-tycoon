@@ -44,3 +44,8 @@ npm-debug.log*
 # tools/install-jsdom.js 在 CI 里把 jsdom 装到 .ci-node/
 # （项目根刻意保持零依赖：不装到 node_modules/）
 .ci-node/
+
+# ── 本地构建产物（APK/AAB）────────────────────────
+# ★ 这些是二进制大文件，不进版本库；
+#   要分发用 GitHub Releases 或直接拷贝。
+releases/

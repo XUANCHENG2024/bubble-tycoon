@@ -1473,6 +1473,37 @@ if (typeof globalThis !== 'undefined') {
   };
 }
 
+/* ★★★ V20.5：切后台时自动暂停营业 ★★★
+ *
+ * ★ 为什么要（V20.4 删掉原生 onResume 钩子之后的替代）：
+ *   H5 版（js/main.js）本来就有 visibilitychange 处理 ——
+ *   而 Canvas 版**没有**，只有 H5 版有。
+ *   ★ 于是 App（复用 Canvas 版）切到后台时，营业时间会继续被吃掉：
+ *   玩家在应用商店里逛 10 分钟，回来发现这一局已经结束。
+ *   ★ 而且这在 App 上比在浏览器上更常见（切 App 的频率高得多）。
+ *
+ * ★ 引擎侧有 dt = Math.min(dt, 0.12) 的保护，
+ *   单帧最多推进 0.12 秒 —— 所以不会一次跳 10 分钟，
+ *   但 rAF 在后台本来就停，恢复后的第一帧只推进 0.12 秒，
+ *   ★ 真正的问题是「玩家切后台时游戏是开着的」，
+ *     回来后游戏时间与真实时间对不上（虽然引擎不会一次跳太多）。
+ *   ★ 显式暂停最保险：玩家回来看到「已暂停」提示，
+ *     知道发生了什么，而不是莫名其妙。
+ */
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) return;
+    try {
+      var s = _S;
+      if (!s) return;
+      if (s.phase === 'open' && s.sim) {
+        togglePause(s, true);
+        toast('⏸ 已自动暂停（切回可继续）');
+      }
+    } catch (e) { /* 切后台不该让游戏崩 */ }
+  });
+}
+
 /* ★★★ V20.4：App（Capacitor）自启动 ★★★
  *
  * ★ 为什么需要：

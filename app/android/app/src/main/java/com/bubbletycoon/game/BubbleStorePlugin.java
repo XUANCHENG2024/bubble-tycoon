@@ -102,7 +102,10 @@ public class BubbleStorePlugin extends Plugin {
      */
     @PluginMethod
     public void getMany(PluginCall call) {
-        JSArrayHolder holder = new JSArrayHolder();
+        /* ★ 直接用 JSObject 装结果 —— 不需要额外的 Holder 类。
+           JSObject.put(String, Object) 与 put(String, String) 都存在，
+           直接把 String 值塞进去即可。 */
+        JSObject values = new JSObject();
         try {
             com.getcapacitor.JSArray keys = call.getArray("keys");
             if (keys != null) {
@@ -110,14 +113,14 @@ public class BubbleStorePlugin extends Plugin {
                 for (int i = 0; i < keys.length(); i++) {
                     String k = keys.getString(i);
                     if (k == null) continue;
-                    if (p.contains(k)) holder.put(k, p.getString(k, ""));
+                    if (p.contains(k)) values.put(k, p.getString(k, ""));
                 }
             }
         } catch (Exception e) {
             /* 读不到就当没有 —— 引擎会走「空存档」的正常路径 */
         }
         JSObject ret = new JSObject();
-        ret.put("values", holder.toJsObject());
+        ret.put("values", values);
         call.resolve(ret);
     }
 
@@ -129,18 +132,5 @@ public class BubbleStorePlugin extends Plugin {
     public void clearAll(PluginCall call) {
         prefs().edit().clear().commit();
         call.resolve();
-    }
-
-    /** 小工具：把 java.util.Map 装进 JSObject */
-    private static class JSArrayHolder {
-        private final JSObject obj = new JSObject();
-
-        void put(String k, String v) {
-            obj.put(k, v);
-        }
-
-        JSObject toJsObject() {
-            return obj;
-        }
     }
 }

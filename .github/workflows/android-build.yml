@@ -1,0 +1,139 @@
+# Android APK 构建（CI）
+#
+# ★ 为什么要有这个 workflow：
+#   APK 构建需要 JDK 21 + Android SDK 35，
+#   而**每台开发机的环境都不一样** ——
+#   本机踩过的坑：JDK 17 构建失败（Capacitor 7 要求 21）、
+#   缺 SDK 组件、Gradle 依赖下载超时。
+#   ★ 放在 CI 里，环境是**固定的**（ubuntu-latest + 明确的版本），
+#     谁 clone 下来跑都是同一个结果。
+#
+# ★ 产物：
+#   · app-debug.apk   —— 可直接安装（内部测试用）
+#   · app-release.aab —— 上架包（需要签名密钥）
+#   ★ 两者都作为 artifact 上传，不进版本库（二进制大文件）。
+#
+# ★ 签名密钥的处理：
+#   upload keystore 是**每个上传者自己的**（与你的 Play 账号绑定），
+#   ★ 不能进版本库，也不能由 CI 生成 ——
+#     CI 生成的密钥和你的不匹配，Play 会拒绝更新。
+#   ★ 所以 CI 默认只出 debug 包（不需要密钥）。
+#     要出 release 包，得把密钥作为 GitHub Secret 配好。
+name: Android Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'js/**'
+      - 'minigame/**'
+      - 'tools/build-app-web.js'
+      - 'tools/build-minigame.js'
+      - 'tools/gen-app-icons.js'
+      - '.github/workflows/android-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'js/**'
+      - 'minigame/**'
+      - '.github/workflows/android-build.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: 构建 APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ★ JDK 21 —— Capacitor 7 的 android/build.gradle 里写的是
+      #   sourceCompatibility JavaVersion.VERSION_21
+      #   用 17 会在「无效的目标发行版: 21」上失败。
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安装 Android SDK 组件
+        uses: android-actions/setup-android@v3
+
+      - name: 装 platform 35 与 build-tools
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+
+      - name: 安装 Capacitor 依赖
+        working-directory: app
+        run: npm install --no-audit --no-fund
+
+      - name: 构建 App web 产物（含重打 bundle）
+        run: node tools/build-app-web.js
+
+      - name: 生成图标
+        run: node tools/gen-app-icons.js
+
+      - name: 同步到原生工程
+        working-directory: app
+        run: npx cap sync android
+
+      - name: 构建 debug APK
+        working-directory: app/android
+        run: ./gradlew assembleDebug --no-daemon
+
+      # ★ release 需要 upload keystore ——
+      #   它与你的 Play 账号绑定，不能进版本库。
+      #   配好 Secret（KEYSTORE_BASE64 / KEYSTORE_PASS / KEY_ALIAS）后，
+      #   这一步会自动执行。
+      - name: 构建 release AAB（需签名密钥）
+        working-directory: app/android
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 -d > app/bubbletycoon-upload.jks
+          cat > keystore.properties <<EOF
+          storeFile=bubbletycoon-upload.jks
+          storePassword=$KEYSTORE_PASS
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEYSTORE_PASS
+          EOF
+          ./gradlew bundleRelease --no-daemon
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: bubble-tycoon-apk
+          path: app/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: 上传 AAB（若构建了）
+        uses: actions/upload-artifact@v4
+        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+        with:
+          name: bubble-tycoon-aab
+          path: app/android/app/build/outputs/bundle/release/*.aab
+          if-no-files-found: ignore
+
+      - name: 验证 APK 内容
+        run: |
+          AAPT="$ANDROID_HOME/build-tools/35.0.0/aapt2"
+          APK=$(ls app/android/app/build/outputs/apk/debug/*.apk | head -1)
+          echo "=== 权限（应只有 VIBRATE + WAKE_LOCK，无 INTERNET）==="
+          "$AAPT" dump badging "$APK" | grep uses-permission
+          echo "=== INTERNET 数量（应为 0）==="
+          "$AAPT" dump badging "$APK" | grep -c "android.permission.INTERNET" || echo 0

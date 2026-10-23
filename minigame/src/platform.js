@@ -205,9 +205,30 @@ var PLAT = (function () {
       /* 原生同步插件：直接读，不需要等 */
       try {
         var list = keys || [];
-        for (var i = 0; i < list.length; i++) {
-          var r = native.get({ key: list[i] });
-          if (r && r.value) APP_MEM[list[i]] = String(r.value);
+        /* ★ 优先用批量接口 getMany —— 一次桥接往返读完所有键，
+           逐个 get 是 N 次往返（启动时 4 个键就是 4 次）。
+           ★ 但不是所有宿主都实现了 getMany，所以要有回退。 */
+        if (typeof native.getMany === 'function' && list.length) {
+          var batch = native.getMany({ keys: list });
+          var vals = batch && batch.values ? batch.values : null;
+          if (vals) {
+            for (var k in vals) {
+              if (Object.prototype.hasOwnProperty.call(vals, k) && vals[k] != null) {
+                APP_MEM[k] = String(vals[k]);
+              }
+            }
+          } else {
+            /* 批量没返回结果 → 逐个读 */
+            for (var i = 0; i < list.length; i++) {
+              var r = native.get({ key: list[i] });
+              if (r && r.value) APP_MEM[list[i]] = String(r.value);
+            }
+          }
+        } else {
+          for (var i2 = 0; i2 < list.length; i2++) {
+            var r2 = native.get({ key: list[i2] });
+            if (r2 && r2.value) APP_MEM[list[i2]] = String(r2.value);
+          }
         }
       } catch (e) { /* 读不到就当没有 */ }
       APP_READY = true;
