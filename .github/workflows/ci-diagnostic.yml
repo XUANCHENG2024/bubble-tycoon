@@ -11,10 +11,12 @@
 #
 # ★ 用法：本地用 curl 触发，或推 commit 自动触发
 #   workflow_dispatch:
+# ★ 用法：手动触发（Actions 页 → Run workflow）
+#   触发后把诊断报告推到 ci-diagnostic 分支，用 raw.githubusercontent 读。
+# ★ 刻意**不**挂 push 触发 —— 每次推送都跑一遍太浪费，
+#   而它的用途本来就是「CI 挂了才需要」。
 on:
   workflow_dispatch:
-  push:
-    branches: [ci-diagnostic]
 
 permissions:
   contents: write    # ★ 需要推分支
