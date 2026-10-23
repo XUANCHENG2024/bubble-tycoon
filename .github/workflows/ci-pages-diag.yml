@@ -1,0 +1,94 @@
+# GitHub Pages 发布诊断
+
+> ★ 目的：在 Linux 上复现 GitHub Pages 的 Jekyll 构建，
+>   看 include 到底有没有生效、以及为什么。
+> ★ 结果写到 DIAGNOSIS.md，推到 ci-diagnostic 分支供匿名读取。
+
+name: Pages 发布诊断
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci-pages-diag]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    name: 诊断 Jekyll 发布范围
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 安装 Ruby 的 Jekyll
+        run: |
+          gem install jekyll -v 4.3.3 --no-document 2>&1 | tail -3
+          jekyll --version
+
+      - name: 跑一次 Jekyll 构建（模拟 Pages）
+        run: |
+          set +e
+          jekyll build --destination /tmp/_site --trace 2>&1 | tail -40
+          echo "=== 构建结束 ==="
+          echo ""
+          echo "## 产物清单"
+          echo '```'
+          if [ -d /tmp/_site ]; then
+            (cd /tmp/_site && find . -type f | sort | head -60)
+            echo "---- 文件数 ----"
+            (cd /tmp/_site && find . -type f | wc -l)
+          else
+            echo "（没有产物目录）"
+          fi
+          echo '```'
+
+      - name: 检查配置是否被识别
+        run: |
+          {
+            echo "# Pages 发布诊断"
+            echo ""
+            echo "时间: $(date -u +%FT%TZ)"
+            echo ""
+            echo "## 仓库里的配置文件"
+            echo '```'
+            ls -la _config.yml .nojekyll 2>&1
+            echo '```'
+            echo ""
+            echo "## _config.yml 内容"
+            echo '```'
+            cat _config.yml
+            echo '```'
+            echo ""
+            echo "## Jekyll 读到的配置（合并后）"
+            echo '```'
+            (cd /tmp && cat > _probe.rb <<'RB'
+require 'yaml'
+c = YAML.load_file(ARGV[0])
+puts "include: #{(c['include'] || []).inspect}"
+puts "exclude: #{(c['exclude'] || []).inspect}"
+RB
+            ruby _probe.rb "$GITHUB_WORKSPACE/_config.yml" 2>&1) | head -20
+            echo '```'
+            echo ""
+            echo "## Jekyll 实际产物"
+            echo '```'
+            (cd /tmp/_site 2>/dev/null && find . -type f | sort | head -60) || echo "(无产物)"
+            echo '```'
+          } > DIAGNOSIS.md
+          cat DIAGNOSIS.md
+
+      - name: 推到 ci-pages-diag 分支
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B ci-pages-diag
+          git add DIAGNOSIS.md
+          git commit -m "pages: 诊断报告" || echo "（无变化）"
+          git push origin ci-pages-diag --force
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
