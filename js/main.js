@@ -1144,10 +1144,22 @@ document.querySelectorAll('.tab').forEach(b => {
 $('btnStart').addEventListener('click', () => startGame(chosenDiff));
 $('btnContinue').addEventListener('click', () => {
   const s2 = loadGame();
-  if (!s2) { UI.toast('当前存档槽是空的', 'err'); return; }
+  if (!s2) {
+    /* ★ V20：区分「槽位本来就是空的」与「存档坏了但已尽力恢复」。
+       原来的提示只有「当前存档槽是空的」——
+       而存档损坏时玩家看到的也是这句，他会以为进度没了。 */
+    const anySave = hasAnySave();
+    UI.toast(anySave ? '存档读取失败，可尝试「导入存档」恢复'
+      : '当前存档槽是空的', 'err');
+    return;
+  }
   const off = claimOffline(s2);
   SFX.resume();
   startGame(s2.diff, s2);
+  if (s2.recoveredFromBackup) {
+    /* ★ 必须告诉玩家：静默恢复会让他以为进度莫名倒退。 */
+    UI.toast('⚠️ 主存档损坏，已从备份恢复（进度可能少一点）', 'err');
+  }
   if (off) { UI.showOffline(off); SFX.coin(); }
 });
 $('btnDaily').addEventListener('click', () => doAct('daily', $('btnDaily')));

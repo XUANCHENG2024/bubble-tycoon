@@ -2099,13 +2099,13 @@ const QUEST_COUNT = 3;
  *   简单难度上失败干脆不扣（那里本来就该躺赢）。
  */
 const DIFFICULTY = {
-  easy:   { key: 'easy',   name: '佛系躺赢', emoji: '🌱', cash: 1100, goal: 22000, traffic: 1.15, costMult: 0.88, rentMult: 0.8,
+  easy:   { key: 'easy',   name: '佛系躺赢', emoji: '🌱', cash: 1100, goal: 58000, traffic: 1.15, costMult: 0.88, rentMult: 0.8,
             contractGoal: 0.80, contractPenalty: 0, stageGoal: 0.85,
             desc: '现金流宽松，适合先熟悉玩法' },
-  normal: { key: 'normal', name: '标准创业', emoji: '🔥', cash: 700, goal: 38000, traffic: 1.0, costMult: 1.0, rentMult: 1.0,
+  normal: { key: 'normal', name: '标准创业', emoji: '🔥', cash: 700, goal: 47000, traffic: 1.0, costMult: 1.0, rentMult: 1.0,
             contractGoal: 1.0, contractPenalty: 0.6, stageGoal: 1.0,
             desc: '推荐首次挑战，需要认真经营' },
-  hard:   { key: 'hard',   name: '地狱卷王', emoji: '💀', cash: 520, goal: 48000, traffic: 0.90, costMult: 1.15, rentMult: 1.22,
+  hard:   { key: 'hard',   name: '地狱卷王', emoji: '💀', cash: 520, goal: 54000, traffic: 0.90, costMult: 1.15, rentMult: 1.22,
             contractGoal: 1.22, contractPenalty: 0.35, stageGoal: 1.30,
             desc: '成本高、客流少，建议攒够声望再挑战' },
 };
@@ -2182,11 +2182,46 @@ function endlessGoal(baseGoal, milestone) {
 
 /* ---------- 中期目标 ----------
    30 天只有一个终点太远：中间三周玩家根本不知道自己是领先还是落后，
-   于是既不焦虑也不上心。每 5 天给一个锚点，达成即发一点声望。
-   比例取自 sim.js 的逐日净资产曲线再各下调一点 ——
-   锚点要「好好打就能过」，它的作用是告知节奏，不是再设一道关卡。 */
+   于是既不焦虑也不上心。每 5 天给一个锚点，达成即发一点声望。 */
 const MILESTONE_EVERY = 5;
+
+/* ★★ V20：阶段目标改为**按档位配置**。
+ *
+ * 原来只有一个 MILESTONE_RATIO，且所有档位共用，
+ * 而每档的 goal 差异极大（22000/38000/48000）——
+ * 同一个比例套在三档上，实际难度完全对不上：
+ *   easy   goal 22000，第 14 天就超过 → 剩 16 天没有目标
+ *   normal goal 38000，第 30 天勉强够→ 但锚点最高只到 58%，第 20 天后就无张力
+ *   hard   goal 48000，30 天都到不了 → 但**比 normal 更容易**
+ *          （hard 实测 45085 > normal 39087，
+ *            因为 traffic:0.90 让"少备货少浪费"反而更赚，
+ *            真实玩家会用提高备货吃满客流，模拟器测不出这一层）
+ *
+ * ★ 所以改成每档一组锚点，且是**绝对值**而非比例：
+ *   比例的隐含前提是「所有档位的增长曲线形状相同」，
+ *   实测证明不是 —— easy 是爆发型、hard 是平缓型，比例必然错配。
+ *
+ * ★ 数值来源：tools/probe-curve.js 实测逐日净资产后，
+ *   按锚点日的 1.20 倍反推（够得着但要努力）。
+ *   真实玩家会用策略卡与菜系加成（模拟器不用），所以再上浮 10~15%。
+ */
+const STAGE_GOALS = {
+  easy:   [8600, 13800, 27100, 44700, 53500, 58000],
+  normal: [5200, 7400, 11500, 22000, 30000, 47000],
+  hard:   [5800, 9700, 15500, 29600, 40000, 54000],
+};
+
+/* 兼容旧引用（UI 层用 MILESTONE_RATIO 画刻度）——
+   ★ 保留是为了让刻度条仍能显示；实际判定已改走 STAGE_GOALS。
+   ★ 注意刻度用的是**比例**，而判定用绝对值 —— 两者不再等价，
+     UI 显示的是「相对位置」，判定用的是「真金额」。 */
 const MILESTONE_RATIO = [0.09, 0.17, 0.28, 0.42, 0.58, 1.0];
+
+/* 锚点个数（= MILESTONE_EVERY 窗口数）。
+   ★ 单独导出而不是到处写 MILESTONE_RATIO.length ——
+     两边表示同一件事，但一个是「比例表长度」，一个是「阶段数」，
+     混用会出现「UI 有 6 个刻度但判定只有 5 段」这类错位。 */
+const MILESTONE_EVERY_COUNT = Math.ceil(CFG.DAYS / MILESTONE_EVERY);
 
 /* ============================================================
  *  新手引导脚本

@@ -104,7 +104,7 @@ const src = FILES
   + 'RNG,QUEST_RNG,seedFromText,todayKey,pickCustomerType,initRival,rivalShare,rivalLevel,rivalAction,updateRival,money,clamp,pick,rnd,'
   + 'QUESTS,QUEST_COUNT,questById,questPool,questGoalOf,questRewardOf,rollQuests,bumpQuest,closeQuests,questViews,'
   + 'goalOf,startEndless,togglePause,slotInfo,hasAnySave,getSlot,setSlot,exportSave,importSave,'
-  + 'MILESTONE_EVERY,MILESTONE_RATIO,milestoneOf,endlessPressure,prestigeGain,'
+  + 'MILESTONE_EVERY,MILESTONE_RATIO,MILESTONE_EVERY_COUNT,STAGE_GOALS,milestoneOf,endlessPressure,prestigeGain,'
   + 'prestigeStartCash,claimAchStars,checkAchievements,trafficOf,claimOffline,isBankrupt,'
   + 'STRATEGY_CARDS,cardById,cardMul,cardSum,drawCards,applyCard,shouldOfferCard,serviceTimeOf,'
   + 'rankScore,recordDaily,dailyRecent,newMeta,loadMeta,pushRunRecord};';
@@ -586,8 +586,15 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
   const n = E.newGame('normal', 0);
   const ms1 = E.milestoneOf(n);
   if (!ms1 || ms1.day !== 5) throw new Error('开局应指向 Day 5 这个锚点');
-  const goal = E.goalOf(n);
-  if (ms1.worth !== Math.round(goal * E.MILESTONE_RATIO[0])) throw new Error('锚点金额与比例表不一致');
+  /* ★ V20：锚点金额改走**每档绝对值** STAGE_GOALS，不再是「goal × 比例」。
+       原来这里断言 `worth === goal * MILESTONE_RATIO[0]`，
+       锁的是 V20 之前的旧行为 ——
+       而那个行为正是「easy 第 14 天就通关」的病根：
+       同一组比例套三档，而三档的增长曲线形状根本不同。 */
+  if (ms1.worth !== E.STAGE_GOALS.normal[0]) {
+    throw new Error('锚点金额与阶段目标表不一致：'
+      + ms1.worth + ' ≠ ' + E.STAGE_GOALS.normal[0]);
+  }
 
   /* 窗口推进：Day 6 起指向 Day 10 */
   n.day = 6;

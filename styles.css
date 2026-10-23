@@ -1886,3 +1886,31 @@ body, #app {
   .cui-grid { gap: var(--sp-2); }
   .card { padding-left: var(--sp-4); padding-right: var(--sp-4); }
 }
+
+/* ================= V20：每日结算的「明日建议」 ================= */
+/* ★ 位置在rep-note（回顾）之后、合同之前 ——
+   顺序是「昨天怎样 → 明天怎样 → 额外事项」，符合读报表的心智顺序。 */
+.rep-adv {
+  margin-top: var(--sp-3); padding: var(--sp-3);
+  border-radius: var(--r-md); border: 1px solid rgba(255, 255, 255, .1);
+  background: rgba(255, 255, 255, .04);
+}
+.ra-h { font-size: var(--fs-sm); font-weight: 800; margin-bottom: 4px; }
+.ra-t { font-size: var(--fs-sm); color: var(--txt2); line-height: 1.65; }
+
+/* ★ 按严重度配色 —— 让玩家扫一眼就知道「这条要紧吗」。
+   颜色从下往上加重，与 nextAdvice 的 prio 一致。 */
+.rep-adv.ok       { border-color: rgba(74, 222, 128, .28); background: rgba(74, 222, 128, .07); }
+.rep-adv.ok .ra-h { color: var(--green); }
+.rep-adv.target   { border-color: rgba(53, 229, 240, .28);  background: rgba(53, 229, 240, .06); }
+.rep-adv.target .ra-h { color: var(--cyan); }
+.rep-adv.staff,
+.rep-adv.price    { border-color: rgba(255, 194, 71, .3);   background: rgba(255, 194, 71, .07); }
+.rep-adv.staff .ra-h,
+.rep-adv.price .ra-h { color: var(--amber); }
+.rep-adv.urgency,
+.rep-adv.stockout { border-color: rgba(255, 143, 91, .34);  background: rgba(255, 143, 91, .08); }
+.rep-adv.urgency .ra-h,
+.rep-adv.stockout .ra-h { color: #ff8f5b; }
+.rep-adv.loss     { border-color: rgba(255, 95, 109, .42); background: rgba(255, 95, 109, .1); }
+.rep-adv.loss .ra-h { color: var(--red); }

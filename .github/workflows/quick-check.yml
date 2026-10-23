@@ -84,6 +84,9 @@ jobs:
       - name: 研发界面规范（可访问性 / 设计令牌 / 响应式 / 交互状态）
         run: node tools/check-ui-spec.js
 
+      - name: 难度曲线与存档容错（阶段目标 / 明日建议 / 损坏恢复）
+        run: node tools/check-balance.js
+
       - name: 主流程
         run: node tools/e2e-flow.js
 

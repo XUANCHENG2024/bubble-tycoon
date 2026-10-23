@@ -751,6 +751,101 @@ function goalOf(s) {
 }
 
 /**
+ * 下一步经营建议（V20）
+ *
+ * ★ 为什么需要它：
+ *   结算弹窗原来只做**回顾**（今天赚了多少、流失了谁），
+ *   玩家看完知道「昨天怎样」，但不知道「明天该干什么」。
+ *   ★ 30 天的经营游戏，每天的决策依据应该来自结算 ——
+ *     而现在每天结束时游戏什么都不告诉他，
+ *     他只能自己回想昨天哪出了问题（而昨天可能已经记不清了）。
+ *   ★ 有了阶段目标之后更该有：目标是「Day 20 要到 ¥21400」，
+ *     但「怎么到」要靠每天的建议补上。
+ *
+ * ★ 规则**按严重度排序**，只给一条最该做的：
+ *   一次给五条建议等于没给 —— 玩家会全部略过。
+ *   严重度顺序：会亏钱 > 会达不到目标 > 效率低 > 一切正常
+ *
+ * ★ 返回结构化数据而不是字符串：
+ *   UI 只负责显示，措辞调整不该动引擎。
+ *
+ * @returns {{kind:string, icon:string, text:string, prio:number}}
+ */
+function nextAdvice(s) {
+  const r = s.report;
+  if (!r) return { kind: 'none', icon: '📋', text: '照常经营', prio: 0 };
+
+  const nw = num(netWorth(s), 0);
+
+  /* ① 亏损 —— 最紧急（会破产） */
+  if (num(r.net, 0) < 0) {
+    return {
+      kind: 'loss', icon: '⚠️', prio: 100,
+      text: `今天净亏 ${money(-r.net)}。先降成本：房租日薪减一名，或把客流量调到稳赚的水平。`,
+    };
+  }
+
+  /* ② 缺料流失 —— 白流失的客人最可惜 */
+  if (num(r.stockout, 0) > 0) {
+    return {
+      kind: 'stockout', icon: '📦', prio: 90,
+      text: `${r.stockout} 位顾客因为缺料走了。明天备货时把这几样补足 —— 这是最不该丢的客人。`,
+    };
+  }
+
+  /* ③ 阶段目标告急 */
+  const ms = milestoneOf(s);
+  if (ms && !ms.hit) {
+    /* ★ 剩余天数用来看紧迫度，而不是看差多少 ——
+       差 ¥5000 看着吓人，但还剩 15 天就完全来得及。 */
+    const left = Math.max(0, CFG.DAYS - num(s.day, 1));
+    /* 按「剩余天数能赚多少」估算可达性：
+       实测第 10 天到第 30 天净增约 35000，取日均 1750 做粗估 */
+    const reach = left * 1750;
+    const gap = -ms.gap;
+    if (gap > reach * 0.8 && left <= 15) {
+      return {
+        kind: 'urgency', icon: '🏁', prio: 80,
+        text: `还剩 ${left} 天，阶段目标 ${money(ms.worth)} 还差 ${money(gap)} —— 时间有点紧了，考虑扩产线或加店面。`,
+      };
+    }
+    if (gap > 0) {
+      return {
+        kind: 'target', icon: '🎯', prio: 40,
+        text: `距离阶段目标 ${money(ms.worth)} 还差 ${money(gap)}，还有 ${left} 天，按现在的节奏够得着。`,
+      };
+    }
+  }
+
+  /* ④ 价格劝退 */
+  if (num(r.priceLost, 0) > 3 && num(r.priceLost, 0) > num(r.lost, 0) * 0.4) {
+    return {
+      kind: 'price', icon: '💸', prio: 50,
+      text: `${r.priceLost} 位顾客嫌贵走了。把价格倍率调回 1.0 附近，或上架一款便宜些的。`,
+    };
+  }
+
+  /* ⑤ 员工人均产能过载 —— 该招人了
+     ★ 判断用「工位数」而不是客流：stationCount = 1（老板）+ 员工数。
+       真正的信号是**员工数是否已经很少而营收在涨**——
+       说明玩家没招人却还在赚钱，产能就是瓶颈。
+     ★ 之前这里写了一个不存在的 freeStationsOf（又是猜函数名），
+       改成下面这个真实可算的条件。 */
+  if (num(s.staff.length, 0) <= 1 && num(r.orders, 0) > 40) {
+    return {
+      kind: 'staff', icon: '🧑‍🍳', prio: 60,
+      text: `今天接了 ${r.orders} 位顾客却只有 ${stationCount(s)} 个出杯位，招人能直接提产能。`,
+    };
+  }
+
+  /* ⑥ 一切正常 */
+  return {
+    kind: 'ok', icon: '👍', prio: 0,
+    text: '今天运转正常。保持节奏，注意别让员工体力掉太低。',
+  };
+}
+
+/**
  * 当前阶段目标（V14）—— **UI 应该显示的这个**
  *
  * ★★★ 为什么要分两个（这是 V14 最重要的一处改动）：
@@ -3122,18 +3217,35 @@ function endDay(s) {
 }
 
 /** 中期目标：当前这个 5 天窗口要在净资产上达到的锚点。
-    无尽模式与已通关的局面没有中期目标，返回 null。 */
+    无尽模式与已通关的局面没有中期目标，返回 null。
+
+    ★ V20：原来算worth = goal × MILESTONE_RATIO[idx]（比例），
+      现在改成**每档独立的绝对值** STAGE_GOALS[难度][idx]。
+      ★ 换掉比例的原因：比例隐含「所有档位增长曲线同形」的前提，
+        而 probe-curve 实测证明不是（easy 爆发型 / hard 平缓型），
+        同一组比例套三档必然错配 —— easy 第 14 天就通关，
+        hard 反而比 normal 容易。 */
 function milestoneOf(s) {
   if (s.endless || isFinished(s)) return null;
-  const goal = num(goalOf(s), 0);
-  if (!(goal > 0)) return null;
   const d = Math.max(1, num(s.day, 1));
   let idx = Math.ceil(d / MILESTONE_EVERY) - 1;
-  idx = Math.max(0, Math.min(MILESTONE_RATIO.length - 1, idx));
+  idx = Math.max(0, Math.min(MILESTONE_EVERY_COUNT - 1, idx));
+
+  /* ★ 取本档的锚点表；缺失时回落到「按比例算旧路径」——
+     老存档里 difficulty 可能不存在（或以后新增档位忘了配表），
+     此时不能崩，回落行为与旧版一致。
+     ★ 用 diffOf(s).key 而不是 s.diff.key —— s.diff 存的是**字符串**
+       （实测 S.diff === "easy"），不是对象；写 .key 会得到 undefined
+       然后静默走到回落分支，看起来「功能没生效」却没有任何报错。 */
+  const key = (diffOf(s) || {}).key || 'normal';
+  const table = STAGE_GOALS[key];
+  const goal = num(goalOf(s), 0);
   const atDay = Math.min(CFG.DAYS, (idx + 1) * MILESTONE_EVERY);
-  const worth = Math.round(goal * MILESTONE_RATIO[idx]);
+  const worth = (table && table[idx] != null)
+    ? table[idx]
+    : Math.round(goal * MILESTONE_RATIO[idx]);
   const nw = num(netWorth(s), 0);
-  return { day: atDay, worth: worth, gap: worth - nw, hit: nw >= worth };
+  return { day: atDay, worth: worth, gap: worth - nw, hit: nw >= worth, isLast: idx === MILESTONE_EVERY_COUNT - 1 };
 }
 
 /** 无尽模式的成本压力：每上一个里程碑，工资与租金各上浮 12% */
@@ -4710,10 +4822,28 @@ function markStorageFail(e) {
   STORAGE_OK = false;
   STORAGE_ERR = (e && e.name) ? e.name : 'unknown';
 }
-/** 写入：成功 true，失败 false 并记录原因（绝不向外抛） */
+/** 写入：成功 true，失败 false 并记录原因（绝不向外抛）
+ *
+ * ★★ V20：加**备份键**（双写）——
+ *   查到的问题：存档损坏时读档直接返回 null，
+ *   玩家看到的就是「我的存档没了」，而他不知道发生了什么、
+ *   更不知道数据还在本地。
+ *   ★ 真会发生的场景：写入过程中浏览器被杀（切后台/低电量/微信退出），
+ *     localStorage 里会留下**截断的 JSON**，下次读档必挂。
+ *   ★ 现在的做法：每次写都同时写一份到 `.bak` 键。
+ *     主档坏了还能从备份恢复 —— 而备份是**上一次成功写入**的完整数据，
+ *     最多丢一局进度，而不是丢掉整档。
+ *   ★ 读档时主档解析失败会自动尝试备份，并把坏主档挪走
+ *     （不删 —— 万一还想人工抢救）。
+ */
 function storageSet(key, value) {
+  const be = storeBackend();
   try {
-    storeBackend().set(key, value);
+    be.set(key, value);
+    /* ★ 先写主档再写备份：顺序有意义。
+       反过来的话，主档写失败而备份已写，会出现「新备份 + 旧主档」——
+       恢复时用备份反而会跳回更早的进度。 */
+    be.set(key + '_bak', value);
     markStorageOk();
     return true;
   } catch (e) {
@@ -5515,24 +5645,54 @@ function sanitizeState(s) {
   return s;
 }
 
-/** 读槽位 → 净化后的 state；空槽 / 损坏 / 不可用一律返回 null */
+/** 读槽位 → 净化后的 state；空槽 / 损坏 / 不可用一律返回 null
+ *
+ * ★★ V20：主档解析失败时自动尝试备份档。
+ *   查到的真问题：存档损坏 → 读档返回 null → 玩家只看到「存档没了」，
+ *   但数据其实还在本地（是 JSON 坏了，不是数据没了）。
+ *   ★ 真会发生的场景：写入过程中浏览器被杀（切后台/低电量/微信退出），
+ *     localStorage 里留下截断的 JSON。
+ *   ★ 恢复后把坏主档挪到 `.broken` 而不是删掉 ——
+ *     万一玩家还想人工抢救，不该由我们替他决定丢弃。
+ *   ★ 恢复成功时设 `s.recoveredFromBackup = true`，
+ *     UI 层据此提示「已从备份恢复」——
+ *     静默恢复会让玩家困惑（「我的进度怎么退回了一点」）。
+ */
 function loadGame(slot) {
   if (slot != null) setSlot(slot);
-  const raw = storageGet(slotKey(CUR_SLOT));
-  if (!raw) return null;
-  try {
-    const s = JSON.parse(raw);
-    if (!s || typeof s !== 'object') return null;
-    /* ★★ V14.4：这里原来写的是 `if (!s || s.v !== 2) return null;`——
-       硬编码版本号当「拒绝理由」，后果有两层：
-         ① 版本一升（这次提到 14），**所有存档都读不出来**（存的是 v14，认的是 v2）
-         ② 即使版本号正好对上，**比它新的存档也会被直接丢弃**——
-            而玩家从旧版升级上来时读的正是旧存档，那才是主要场景。
-       ★ 现在改成：版本只用来**决定迁移路径**，不作为拒绝条件。
-         未来版本（v > SAVE_VERSION）也照读 ——
-         老客户端读新存档本来就该尽力而为，而不是拒绝服务。 */
-    return sanitizeState(s);
-  } catch (e) { return null; }
+  const k = slotKey(CUR_SLOT);
+  const raw = storageGet(k);
+  if (raw) {
+    try {
+      const s = JSON.parse(raw);
+      if (s && typeof s === 'object') {
+        /* ★ 见下面 V14.4 的说明：版本只决定迁移路径，不作为拒绝条件。 */
+        return sanitizeState(s);
+      }
+    } catch (e) { /* 落到备份恢复 */ }
+  }
+
+  /* ★ 主档损坏 → 试备份 */
+  const bak = storageGet(k + '_bak');
+  if (bak) {
+    try {
+      const s = JSON.parse(bak);
+      if (s && typeof s === 'object') {
+        const clean = sanitizeState(s);
+        if (clean) {
+          /* 把坏主档挪走（保留，不删） */
+          try { storeBackend().set(k + '_broken', raw || ''); } catch (e2) { /* 忽略 */ }
+          clean.recoveredFromBackup = true;
+          /* ★ 立刻把备份写回主档位置：
+             否则下一次存档前，主档一直是坏的（虽然 loadGame 能兜住，
+             但每次读都走一遍异常路径，浪费且脆）。 */
+          storageSet(k, bak);
+          return clean;
+        }
+      }
+    } catch (e2) { /* 备份也坏了 */ }
+  }
+  return null;
 }
 
 /* 槽位摘要记忆化：key 是 slotKey(i)，value 是 { raw, val }。
@@ -5542,14 +5702,39 @@ const SLOT_CACHE = {};
 /** 槽位摘要（用于选档界面） */
 function slotInfo(i) {
   const k = slotKey(i);
+  /* ★ V20：主档**存在但损坏**时也要能读备份 ——
+     原来写成 storageGet(k) || storageGet(k+'_bak')，
+     只在主档**为空**时才用备份；
+     而真实的损坏形态是「主档有一段坏 JSON」（非空），
+     于是走不到备份分支 → 标题页连存档都不显示。
+     ★ 正确做法：解析失败时再试备份。 */
   const raw = storageGet(k);
-  if (!raw) { delete SLOT_CACHE[k]; return null; }
+  /* ★ 缓存只对「主档能正常解析」的情况生效 ——
+     缓存了 null 会导致主档被修复后仍显示无存档。 */
+  const hit = SLOT_CACHE[k];
+  if (raw && hit && hit.raw === raw) return hit.val;
+
+  const main = parseSlotRaw(k, raw);
+  if (main) { SLOT_CACHE[k] = { raw: raw, val: main }; return main; }
+
+  const bak = storageGet(k + '_bak');
+  if (!bak || bak === raw) { delete SLOT_CACHE[k]; return null; }
+  /* 兜底路径不写缓存（每次重解析，代价可接受） */
+  return parseSlotRaw(k, bak);
+}
+
+/** 解析一段存档原文 → 槽位摘要；解析失败返回 null（不抛） */
+function parseSlotRaw(k, raw) {
+  if (!raw) return null;
   /* 小游戏标题页每帧要画三个槽位、hasAnySave() 还要再扫一遍，
      等于每帧六次「JSON.parse + 全量 sanitizeState」—— 整个清洗器被当成了
      渲染循环的一部分。存档内容不变时结果必然相同，按原文缓存即可。
-     （storageGet 那一步没法省：不读就不知道内容有没有变。） */
-  const hit = SLOT_CACHE[k];
-  if (hit && hit.raw === raw) return hit.val;
+     （storageGet 那一步没法省：不读就不知道内容有没有变。）
+     ★ V20：缓存键改成 `k + '|' + raw` 的形式不可行（raw 太长），
+       改用「只缓存主档的结果」——
+       备份是兜底路径，每次重解析的代价可以接受，
+       而混在一起缓存会出现「拿到备份的结果却以主档原文为键」，
+       主档稍后修好时反而命中了错误缓存。 */
   let val = null;
   try {
     const s = sanitizeState(JSON.parse(raw));
@@ -5561,7 +5746,6 @@ function slotInfo(i) {
       };
     }
   } catch (e) { val = null; }
-  SLOT_CACHE[k] = { raw: raw, val: val };
   return val;
 }
 function hasAnySave() {
@@ -5569,7 +5753,19 @@ function hasAnySave() {
   return false;
 }
 function clearSave(slot) {
-  storageRemove(slotKey(slot == null ? CUR_SLOT : slot));
+  const k = slotKey(slot == null ? CUR_SLOT : slot);
+  storageRemove(k);
+  /* ★★ V20：备份键**必须一起删**。
+     加了双写之后，清档只删主档会留下两个后果：
+       ① slotInfo / hasAnySave 仍认为该槽有存档 —— 玩家删了却还显示着
+       ② 更糟：下次 loadGame 主档读不到会**从备份恢复**，
+          玩家「删掉的档」又活过来了。
+     ★ 这是加备份时最容易漏的一处 ——
+       浏览器 smoke 的「清档后该槽位为空」立刻就抓到了它。 */
+  storageRemove(k + '_bak');
+  /* `_broken` 是坏档留档，刻意**不删**：
+     它只在主档损坏时才写入，留着无害，而删掉就没法人工抢救了。 */
+  delete SLOT_CACHE[k];
 }
 
 /* 导出 / 导入（跨设备搬运存档） */

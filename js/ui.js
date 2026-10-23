@@ -3017,6 +3017,18 @@ UI.showReport = function () {
   if (r.net < 0) note += `⚠️ 今日亏损，注意控制固定成本（房租/工资）。<br>`;
   if (!note) note = '平稳的一天，继续保持。';
 
+  /* ★★ V20：明日建议。
+     原来 note 只做**回顾**（今天赚了多少、流失了谁），
+     玩家看完知道「昨天怎样」但不知道「明天该干什么」——
+     而每天的决策依据本该来自结算。
+     ★ 引擎给的是结构化数据（kind/icon/text/prio），
+       这里只负责显示 —— 措辞要改的话不该动引擎。 */
+  const adv = nextAdvice(s);
+  const adviceHtml = `<div class="rep-adv ${esc(adv.kind)}">
+    <div class="ra-h">${adv.icon} 明日建议</div>
+    <div class="ra-t">${adv.text}</div>
+  </div>`;
+
   /* 不给结算弹窗画 ×：日报是「必须点『进入下一天』才能继续」的强制步骤。
      以前这里有 ×，玩家习惯性关掉后 phase 停在 'report'，再点开门会被
      「今天的账还没结」挡死，而当期内没有任何入口能重新打开日报 ——
@@ -3035,6 +3047,7 @@ UI.showReport = function () {
       <div class="rep-i"><div class="ri-k">口碑</div><div class="ri-v ${r.repDelta >= 0 ? 'p' : 'n'}">${Math.round(r.repAfter)} (${r.repDelta >= 0 ? '+' : ''}${r.repDelta.toFixed(1)})</div></div>
     </div>
     <div class="rep-note">${note}</div>
+    ${adviceHtml}
     ${(r.contractResult || (s.contract && s.contract.done) || r.contract) ? (() => {
       /* 合同结算行：日报是玩家唯一会认真看的页面，合同的成败必须在这里落地，
          否则「备货页给方向、结算页不给交代」等于白给。 */
