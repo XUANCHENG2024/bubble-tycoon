@@ -757,21 +757,32 @@ console.log('\n=============== H. 跨流程闭环 ===============');
      下面按"哪张卡声明了哪个 boost 键"来断言，而不是笼统地比大小。 */
   {
 
+    /* ★ V21：期望值**从卡表推导**，不再写死数字。
+       原来这里写的是 1.25×1.10×0.93 —— 一调卡数值就得回来改测试，
+       而"改了数值忘了改测试"和"改了数值忘了改文案"是同一类事故。
+       （共鸣倍率 1.10 / 1.25 是**规则**，不是数据，保留字面量。） */
+    const fxOf = (id, k) => {
+      const c = E.STRATEGY_CARDS.filter(x => x.id === id)[0];
+      return (c && c.fx && typeof c.fx[k] === 'number') ? c.fx[k] : 1;
+    };
     const one = (function () { const x = E.newGame('normal', 0); x.cards = ['takeout']; return E.cardMul(x, 'traffic'); })();
     const two = (function () { const x = E.newGame('normal', 0); x.cards = ['takeout', 'night']; return E.cardMul(x, 'traffic'); })();
     /* takeout 的 traffic 是 boost → ×1.10；night 的 traffic 是代价 → 不动 */
-    expect('I5a', Math.abs(two - (1.25 * 1.10 * 0.93)) < 0.0001,
-      `同主题 2 张 → 增益键 +10%（${one.toFixed(3)} → ${two.toFixed(3)} = 1.25×1.10×0.93）`);
+    const expTwo = fxOf('takeout', 'traffic') * 1.10 * fxOf('night', 'traffic');
+    expect('I5a', Math.abs(two - expTwo) < 0.0001,
+      `同主题 2 张 → 增益键 +10%（${one.toFixed(3)} → ${two.toFixed(3)} = ${expTwo.toFixed(3)}）`);
     const three = (function () { const x = E.newGame('normal', 0); x.cards = ['takeout', 'night', 'premium']; return E.cardMul(x, 'traffic'); })();
-    /* 第 3 张是溢价主题：它带自己的 traffic 代价 0.92，但引流主题仍是 2 张 */
-    expect('I5b', Math.abs(three - (1.25 * 1.10 * 0.93 * 0.92)) < 0.0001,
+    /* 第 3 张是溢价主题：它带自己的 traffic 代价，但引流主题仍是 2 张 */
+    const expThree = expTwo * fxOf('premium', 'traffic');
+    expect('I5b', Math.abs(three - expThree) < 0.0001,
       `第 3 张属别的主题：只叠它自己的代价，引流倍率仍按 2 张算（${two.toFixed(3)} → ${three.toFixed(3)}）`);
     const cogs3 = (function () { const x = E.newGame('normal', 0); x.cards = ['kitchen', 'bulk', 'chain']; return E.cardMul(x, 'cogs'); })();
     /* kitchen/bulk 的 cogs 是 boost → 各 ×1.25；chain 没有 cogs 这一项 */
-    expect('I5c', Math.abs(cogs3 - (0.86 * 1.25 * 0.85 * 1.25)) < 0.0001,
-      `同主题 3 张 → 增益键 +25%（cogs=${cogs3.toFixed(4)} = 0.86×1.25×0.85×1.25）`);
+    const expCogs = fxOf('kitchen', 'cogs') * 1.25 * fxOf('bulk', 'cogs') * 1.25;
+    expect('I5c', Math.abs(cogs3 - expCogs) < 0.0001,
+      `同主题 3 张 → 增益键 +25%（cogs=${cogs3.toFixed(4)}，期望 ${expCogs.toFixed(4)}）`);
     const single = (function () { const x = E.newGame('normal', 0); x.cards = ['takeout']; return E.cardMul(x, 'traffic'); })();
-    expect('I5d', Math.abs(single - 1.25) < 0.001, '单张（未达共鸣门槛）不加成');
+    expect('I5d', Math.abs(single - fxOf('takeout', 'traffic')) < 0.001, '单张（未达共鸣门槛）不加成');
     /* 代价不跟着涨：加盟模式把每杯收入减 ¥0.6，凑满成本主题也不该变本加厉 */
     const w0 = (function () { const x = E.newGame('normal', 0); x.cards = ['chain']; return E.cardMul(x, 'unitSub'); })();
     const w3 = (function () { const x = E.newGame('normal', 0); x.cards = ['chain', 'kitchen', 'bulk']; return E.cardMul(x, 'unitSub'); })();

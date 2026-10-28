@@ -245,7 +245,14 @@ function playSharedAI(E, diff, bp, sig, opt) {
     /* 打烊三选一：三种口径对照，验证「卡牌只改收益结构、不改收益总量」 */
     if (o.cards && o.cards !== 'none' && Array.isArray(s.cardOffer) && s.cardOffer.length) {
       if (o.cards === 'random') E.applyCard(s, s.cardOffer[Math.floor(rnd() * s.cardOffer.length)].id);
-      else E.applyCard(s, s.cardOffer[0].id);
+      else if (o.cards === 'first') E.applyCard(s, s.cardOffer[0].id);
+      else {
+        /* ★ V21：`--cards=<卡id>` 只拿指定的那一张。
+           没有这个能力，就只能测"整体口径"（none/random/first），
+           永远回答不了"到底哪张卡在亏" —— 而卡池的问题恰恰是逐张的。 */
+        const want = s.cardOffer.filter(c => c.id === o.cards)[0];
+        if (want) E.applyCard(s, want.id);
+      }
     }
     if (E.isBankrupt(s)) { log.push('💸 破产于 Day ' + s.day); break; }
     E.nextDay(s);

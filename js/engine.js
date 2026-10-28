@@ -228,7 +228,9 @@ function costOf(s, rid) {
   /* ★ V21：员工培训降本（取代原来的"出杯速度 +12%/级"）。
      熟练的员工浪费少 —— 这条挂在成本上，和 speed 不再抢同一个分母。 */
   const cut = Math.min(0.4, (num(s.up.training, 0)) * CFG.TRAINING_COST_CUT);
-  return Math.max(0.1, afterSig * (1 - cut));
+  /* ★ V21：原料成本卡也要算进这里。原来只乘在 sim.cogs 上，
+     菜单毛利不体现、现金流也不体现 —— 那张卡就是纯代价（见 buyIng 的注释）。 */
+  return Math.max(0.1, afterSig * (1 - cut) * cardMul(s, 'cogs'));
 }
 function priceOf(s, rid) {
   return Math.max(1, Math.round(recipeById(rid).price * (s.ratios[rid] || 1)) + sigPriceAdd(s, rid));
@@ -1070,7 +1072,16 @@ function buyIng(s, id, qty, markup) {
   if (room <= 0) return { ok: false, msg: '仓库已满（清仓或升级冷链）' };
   let capped = false;
   if (qty > room) { qty = room; capped = true; }
-  const unit = num(s.prices[id], 0) * (markup || 1);
+  /* ★★ V21：原料成本卡（中央厨房/批发采购）的折扣必须落在**买入价**上。
+     ★ 原来 cardMul('cogs') 只乘在 sim.cogs（打烊时的成本统计）上，
+       而净利 net 只用于报表 —— 真正的现金是「买入时扣」+「打烊扣工资租金」。
+       于是"原料成本 −14%"把报表数字改小，玩家一分钱没少花，
+       而同一张卡的代价（工资 +7%/租金 +6%）**是真扣现金的**。
+       实测：kitchen/bulk 两张降本卡在 12 局里都是净负，正是这个原因。
+     ★ 折扣放在 unit 上，买入即便宜；同时 costOf 也乘同一个系数，
+       保证「菜单上的毛利」和「实际花的钱」是同一个数。 */
+  const cogMul = cardMul(s, 'cogs');
+  const unit = num(s.prices[id], 0) * (markup || 1) * cogMul;
   const cost = unit * qty;
   if (cost > s.cash) return { ok: false, msg: '现金不足' };
   const old = s.inv[id] || 0;

@@ -1875,30 +1875,30 @@ const CARD_THEMES = {
 };
 
 const STRATEGY_CARDS = [
-  { id: 'takeout', name: '外卖平台', emoji: '🛵', gain: '客流 +25%', cost: '每杯收入 -¥0.8',
-    fx: { traffic: 1.25, unitSub: 0.8 }, boost: ['traffic'] },
-  { id: 'premium', name: '精品路线', emoji: '💎', gain: '顾客能接受 +20% 溢价', cost: '客流 -8%',
-    fx: { priceTol: 1.20, traffic: 0.92 }, boost: ['priceTol'] },
-  { id: 'express', name: '极速出杯', emoji: '🚀', gain: '出杯速度 +18%', cost: '小费 -22%',
-    fx: { speed: 1.18, tip: 0.78 }, boost: ['speed'] },
-  { id: 'member', name: '会员体系', emoji: '🎫', gain: '排队耐心 +28%', cost: '租金 +8%',
-    fx: { patience: 1.28, rent: 1.08 }, boost: ['patience'] },
-  { id: 'kitchen', name: '中央厨房', emoji: '🍳', gain: '原料成本 -14%', cost: '工资 +14%',
-    fx: { cogs: 0.86, wage: 1.14 }, boost: ['cogs'] },
-  { id: 'night', name: '通宵营业', emoji: '🌙', gain: '体力消耗 -45%', cost: '客流 -7%',
-    fx: { stamina: 0.55, traffic: 0.93 }, boost: ['stamina'] },
-  { id: 'kiosk', name: '自助点单机', emoji: '🤖', gain: '小费 +55%', cost: '出杯速度 -6%',
-    fx: { tip: 1.55, speed: 0.94 }, boost: ['tip'] },
-  { id: 'prefab', name: '预制茶汤', emoji: '🫖', gain: '出杯速度 +12%', cost: '原料成本 +9%',
-    fx: { speed: 1.12, cogs: 1.09 }, boost: ['speed'] },
-  { id: 'bulk', name: '批发采购', emoji: '📦', gain: '原料成本 -15%', cost: '租金 +12%',
-    fx: { cogs: 0.85, rent: 1.12 }, boost: ['cogs'] },
-  { id: 'stall', name: '夜市摊位', emoji: '🏮', gain: '排队耐心 +20%', cost: '出杯速度 -8%',
-    fx: { patience: 1.20, speed: 0.92 }, boost: ['patience'] },
-  { id: 'chain', name: '加盟模式', emoji: '🏬', gain: '租金 -18%', cost: '每杯收入 -¥0.6',
-    fx: { rent: 0.82, unitSub: 0.6 }, boost: ['rent'] },
-  { id: 'equity', name: '员工入股', emoji: '🤝', gain: '工资 -20%', cost: '排队耐心 -10%',
-    fx: { wage: 0.80, patience: 0.90 }, boost: ['wage'] },
+  { id: 'takeout', name: '外卖平台', emoji: '🛵', gain: '客流 +25%', cost: '每杯收入 -¥0.5',
+    fx: { traffic: 1.3, unitSub: 0.35 }, boost: ['traffic'] },
+  { id: 'premium', name: '精品路线', emoji: '💎', gain: '顾客能接受 +25% 溢价', cost: '客流 -8%',
+    fx: { priceTol: 1.3, traffic: 0.94 }, boost: ['priceTol'] },
+  { id: 'express', name: '极速出杯', emoji: '🚀', gain: '出杯速度 +18%', cost: '小费 -8%',
+    fx: { speed: 1.22, tip: 0.94 }, boost: ['speed'] },
+  { id: 'member', name: '会员体系', emoji: '🎫', gain: '耐心 +28% · 客单价 +10%', cost: '租金 +6%',
+    fx: { patience: 1.34, priceTol: 1.12, rent: 1.04 }, boost: ['patience', 'priceTol'] },
+  { id: 'kitchen', name: '中央厨房', emoji: '🍳', gain: '原料成本 -14%', cost: '工资 +7%',
+    fx: { cogs: 0.83, wage: 1.05 }, boost: ['cogs'] },
+  { id: 'night', name: '通宵营业', emoji: '🌙', gain: '体力 -45% · 小费 +12%', cost: '客流 -2%',
+    fx: { stamina: 0.46, tip: 1.14, traffic: 0.99 }, boost: ['stamina', 'tip'] },
+  { id: 'kiosk', name: '自助点单机', emoji: '🤖', gain: '小费 +55%', cost: '出杯速度 -3%',
+    fx: { tip: 1.66, speed: 0.98 }, boost: ['tip'] },
+  { id: 'prefab', name: '预制茶汤', emoji: '🫖', gain: '出杯速度 +12%', cost: '客流 -4%',
+    fx: { speed: 1.14, traffic: 0.97 }, boost: ['speed'] },
+  { id: 'bulk', name: '批发采购', emoji: '📦', gain: '原料成本 -15%', cost: '租金 +3%',
+    fx: { cogs: 0.82, rent: 1.02 }, boost: ['cogs'] },
+  { id: 'stall', name: '夜市摊位', emoji: '🏮', gain: '耐心 +20% · 租金 -10%', cost: '出杯速度 -5%',
+    fx: { patience: 1.24, rent: 0.88, speed: 0.96 }, boost: ['patience', 'rent'] },
+  { id: 'chain', name: '加盟模式', emoji: '🏬', gain: '租金 -18%', cost: '每杯收入 -¥0.15',
+    fx: { rent: 0.78, unitSub: 0.1 }, boost: ['rent'] },
+  { id: 'equity', name: '员工入股', emoji: '🤝', gain: '工资 -20%', cost: '耐心 -5%',
+    fx: { wage: 0.76, patience: 0.96 }, boost: ['wage'] },
 ];
 
 /* ---------- 每日合同（V1）----------
@@ -2562,6 +2562,46 @@ const REGULAR_TRAITS = [
 const SPECIAL_CUSTOMER_INDEX = buildIndex(SPECIAL_CUSTOMERS, 'id');
 const RIVAL_ACTION_INDEX = buildIndex(RIVAL_ACTIONS, 'id');
 const QUEST_INDEX = buildIndex(QUESTS, 'id');
+/* ★★ V21：卡面文案由 fx **生成**，不再手写。
+ *
+ *   手写文案和数值分处两地：改了 fx 忘改文案，界面就在说谎。
+ *   本轮已经踩过两次 —— training 的「全员效率 +12%」（实际是降本），
+ *   以及批量调参后 12 张卡的 cost 文案全部过期（写着"每杯 -¥0.5"，实际 0.35）。
+ *
+ *   规则：`boost` 里声明的键 = 收益，其余 = 代价；百分比直接从 fx 值算出。
+ *   fx 值 >1 = "变多"、<1 = "变少"，所以对成本类（cogs/rent/wage）来说
+ *   负号天然表示"更便宜"，语义自洽，不需要额外的正负映射表。
+ */
+const CARD_FX_LABEL = {
+  traffic:  v => `客流 ${signedPct(v)}`,
+  priceTol: v => `可接受溢价 ${signedPct(v)}`,
+  speed:    v => `出杯速度 ${signedPct(v)}`,
+  patience: v => `排队耐心 ${signedPct(v)}`,
+  cogs:     v => `原料成本 ${signedPct(v)}`,
+  rent:     v => `租金 ${signedPct(v)}`,
+  wage:     v => `工资 ${signedPct(v)}`,
+  tip:      v => `小费 ${signedPct(v)}`,
+  stamina:  v => `体力消耗 ${signedPct(v)}`,
+  unitSub:  v => `每杯收入 −¥${(Math.round(v * 100) / 100)}`,
+};
+function signedPct(v) {
+  const d = Math.round((v - 1) * 100);
+  return (d >= 0 ? '+' : '') + d + '%';
+}
+(function fillCardText() {
+  for (const c of STRATEGY_CARDS) {
+    const boosts = Array.isArray(c.boost) ? c.boost : [];
+    const gains = [], costs = [];
+    for (const key in c.fx) {
+      const fn = CARD_FX_LABEL[key];
+      const txt = fn ? fn(c.fx[key]) : (key + ' ' + c.fx[key]);
+      (boosts.indexOf(key) >= 0 ? gains : costs).push(txt);
+    }
+    if (gains.length) c.gain = gains.join(' · ');
+    if (costs.length) c.cost = costs.join(' · ');
+  }
+})();
+
 const STRATEGY_CARD_INDEX = buildIndex(STRATEGY_CARDS, 'id');
 /* 经营维度索引：场地类型 / 省份 / 城市 */
 const VENUE_TYPE_INDEX = buildIndex(VENUE_TYPES, 'id');

@@ -338,6 +338,26 @@ console.log('\n--- ⑥ 槽位摘要缓存 ---');
   check(upA === upB, 'upgradesByValue 覆盖全部升级项（' + upA + '/' + upB + '，漏项会从升级页消失）');
   check(window.eval('upgradesByValue()[0].id === "storage"'),
     '展示顺序按实测价值（storage 第一）');
+
+  /* ★★ V21：策略卡的**收益文案必须由 fx 生成**，不许手写。
+     本轮踩过两次：training 写「全员效率 +12%」实际是降本；
+     批量调参后 12 张卡的 cost 全部过期（写着"每杯 -¥0.5"，实际 0.35）。
+     手写文案与数值分处两地，改了数值不会让任何断言变红 —— 只能专门比对。 */
+  const cardBad = window.eval(`(function(){
+    var bad = [];
+    for (var i = 0; i < STRATEGY_CARDS.length; i++) {
+      var c = STRATEGY_CARDS[i], boosts = c.boost || [];
+      for (var j = 0; j < boosts.length; j++) {
+        var k = boosts[j], v = c.fx[k];
+        if (typeof v !== 'number') continue;
+        var pct = Math.round((v - 1) * 100);
+        var txt = (pct >= 0 ? '+' : '') + pct + '%';
+        if (String(c.gain).indexOf(txt) < 0) bad.push(c.id + '.' + k + '→' + txt);
+      }
+    }
+    return bad.join(', ');
+  })()`);
+  check(!cardBad, '卡面收益文案与 fx 一致（' + (cardBad || '12 张全部一致') + '）');
 }
 
 console.log('');
