@@ -19,7 +19,14 @@
  *    否则旧缓存不会失效（这是 SW 最常见的"改了没生效"原因）。
  * ============================================================ */
 
-const VERSION = 'v20.6';
+/* ★★ 版本号（V21：v20.6 → v21.0）
+ *   ★ 必须与 index.html 的 <meta name="app-version"> 保持一致。
+ *   ★ 这一轮（V21）改了 js/ui.js、js/engine.js、js/data.js、styles.css，
+ *     全都在 ASSETS 里 —— 而版本号当时没跟着改，正是下面这句注释警告的情形。
+ *   ⇒ 症状：老访客打开时 cache-first 先给旧 JS，要再刷一次才是新版；
+ *     且旧缓存不会被 activate 清掉（CACHE 名没变）。
+ *   ★ 约定：以后凡是改 ASSETS 里的任何文件，这个数字必须一起改。 */
+const VERSION = 'v21.0';
 const CACHE = 'bubble-tycoon-' + VERSION;
 
 /* ★ 要缓存的文件 —— 与 index.html 里引用的一致。

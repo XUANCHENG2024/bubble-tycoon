@@ -1959,3 +1959,33 @@ body, #app {
     0% { opacity: 0; } 25% { opacity: 1; } 100% { opacity: 0; }
   }
 }
+
+/* ---------------- 新版本提示条（V21） ----------------
+   ★ 只在「已装过旧版、新版本接管」时出现，首访不弹（见 index.html 里的判定）。
+   ★ 用吸底胶囊而不是顶部横幅：顶部会被 iOS 状态栏与刘海挤压，
+     而且这个提示不该抢走"开门营业"的注意力。
+   ★ 颜色全部走令牌，不硬编码 —— 换肤时不用回来改这里。 */
+.update-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + var(--sab));
+  transform: translateX(-50%);
+  z-index: 210;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: min(92vw, 460px);
+  padding: 9px 12px 9px 16px;
+  border-radius: var(--r-pill);
+  background: var(--bg-sel);
+  border: 1px solid rgba(139, 92, 255, .6);
+  box-shadow: var(--sh);
+  font-size: var(--fs-md);
+  color: var(--txt);
+  animation: updateIn .3s ease-out;
+}
+.update-bar .btn { padding: 7px 14px; font-size: var(--fs-md); }
+@keyframes updateIn {
+  from { opacity: 0; transform: translate(-50%, 10px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}

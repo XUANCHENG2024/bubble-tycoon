@@ -5,6 +5,29 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <meta name="theme-color" content="#170a2e">
 <title>奶茶星球 · Bubble Tycoon</title>
+<!-- ★★ 分享卡（V21）：线上版独有的一环，App 里没有这个问题。
+     ★ 原来只有 <title>，没有任何 og/twitter 标签 —— 分享链接到微信/QQ/Twitter 时
+       没有标题、没有描述、没有缩略图，只剩一串 URL。线上版的主要增长路径
+       就是"发链接给朋友"，这一步的转化几乎全靠这几个 meta。
+     ★ 图片用 assets/icon-512.png：微信与大部分平台接受 512×512 方图，
+       不需要额外做 1200×630 的横版（少一个资源，也就少一个 404 的机会）。
+     ★ og:url 用绝对地址 —— Pages 部署在 /bubble-tycoon/ 子目录，
+       相对路径在分享解析里会失效。 -->
+<meta name="description" content="30 天从小摊做到奶茶帝国：研发配方、经营门店、应对随机事件，一局 15 分钟。打开即玩，无需下载。">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="奶茶星球">
+<meta property="og:title" content="奶茶星球 · 30 天街头奶茶帝国">
+<meta property="og:description" content="研发配方、经营门店、应对随机事件，30 天把街头小摊做成奶茶帝国。打开即玩，无需下载。">
+<meta property="og:url" content="https://xuancheng2024.github.io/bubble-tycoon/">
+<meta property="og:image" content="https://xuancheng2024.github.io/bubble-tycoon/assets/icon-512.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="奶茶星球 · 30 天街头奶茶帝国">
+<meta name="twitter:description" content="研发配方、经营门店、应对随机事件，30 天把街头小摊做成奶茶帝国。打开即玩。">
+<meta name="twitter:image" content="https://xuancheng2024.github.io/bubble-tycoon/assets/icon-512.png">
+<!-- ★ 版本号（V21）：线上版没法像 App 那样看安装信息，
+     玩家报问题时说"我玩的是哪版"就只能靠这个。
+     ★ 与 sw.js 的 VERSION 保持一致 —— 两处不一致时，缓存清理会失灵。 -->
+<meta name="app-version" content="v21.0">
 <link rel="icon" type="image/png" href="assets/icon-192.png">
 <link rel="apple-touch-icon" href="assets/icon-192.png">
 <!-- ★ PWA（V20.6）：让 H5 版能「装到桌面」并离线玩。
@@ -198,7 +221,36 @@
 
     /* ③ 注册（失败不影响游戏） */
     window.addEventListener('load', function () {
-      navigator.serviceWorker.register('sw.js').catch(function (e) {
+      navigator.serviceWorker.register('sw.js').then(function () {
+        /* ★ V21：新版本接管时提示「刷新后生效」。
+           ★ 为什么需要：sw.js 的 install 里是 skipWaiting() —— 新版本会立刻接管，
+             但**当前页面里跑的仍是旧 JS**。玩家不刷新就一直在旧逻辑里，
+             而界面上没有任何迹象。这是"改了没生效"最常见的一种。
+           ★ 为什么不能首访就弹：首次安装时 clients.claim() 也会触发 controllerchange。
+             用"注册前是否已有 controller"来区分 —— 没有 controller = 首访 = 不提示。
+           ★ 只提示、不自动刷新：自动 reload 会打断正在营业的那一局（游戏内进度不一定存过档）。 */
+        var hadController = !!navigator.serviceWorker.controller;
+        if (!hadController) return;
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          if (document.getElementById('updateBar')) return;
+          var ver = document.querySelector('meta[name="app-version"]');
+          var bar = document.createElement('div');
+          bar.id = 'updateBar';
+          bar.className = 'update-bar';
+          bar.innerHTML = '<span>🎉 新版本已就绪' + (ver ? '（' + ver.content + '）' : '') + '</span>';
+          var btn = document.createElement('button');
+          btn.className = 'btn btn-primary';
+          btn.textContent = '刷新';
+          btn.onclick = function () { location.reload(); };
+          var close = document.createElement('button');
+          close.className = 'btn btn-ghost';
+          close.textContent = '稍后';
+          close.onclick = function () { bar.remove(); };
+          bar.appendChild(btn);
+          bar.appendChild(close);
+          document.body.appendChild(bar);
+        });
+      }).catch(function (e) {
         if (window.console && console.warn) console.warn('SW 注册失败：', e);
       });
     });
