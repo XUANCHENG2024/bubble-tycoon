@@ -116,7 +116,12 @@ function storageCap(s) {
      于是"开分店 = 多来客人、没多料可卖" → 实测 −17.3%，扩张是纯亏。
      ★ 用 shops 而不是 activeBranchCount：仓库容量取决于"有没有这家店"，
        跟这家店派没派人无关（派人是出杯的事，不是囤货的事）。 */
-  return CFG.BASE_STORAGE + s.up.storage * 180
+  /* ★★ V22：库容起点按难度不同 —— 这是三档唯一被验证有效的结构杠杆。
+     （costMult 只压一次性支出，对 30 天总成本影响 <3%；库容是阈值型，
+       起点差 150 就等于"要不要先买冷链"这个决策的答案不同。 */
+  const d = diffOf(s);
+  const base = (d && d.storageBase != null) ? d.storageBase : CFG.BASE_STORAGE;
+  return base + s.up.storage * 180
     + CFG.BRANCH_STORAGE * Math.max(0, pos(s.shops, 1) - 1);
 }
 function menuSlots(s) { return 2 + s.up.menu; }
@@ -3233,7 +3238,10 @@ function endDay(s) {
        而看不见的成本就是会被忽略的成本。 */
   const mgrWage = (s.managers || []).reduce((a, b) => a + num(b.wage, 0), 0);
   const wages = Math.round((s.staff.reduce((a, b) => a + b.wage, 0) + mgrWage) * ep * cardMul(s, 'wage'));
-  let rentRaw = (CFG.RENT_PER_SHOP * s.shops + CFG.SHOP_UPKEEP * (s.shops - 1)) * d.rentMult * ep * cardMul(s, 'rent');
+  /* ★★ V22：costMult 现在**也作用于日租**。
+     原来它只乘在一次性支出（开店/升级）上，对 30 天总成本的影响 <3% ——
+     等于"地狱模式"只在头两天贵一点。挂到日租之后，扩张才变成持续压力。 */
+  let rentRaw = (CFG.RENT_PER_SHOP * s.shops + CFG.SHOP_UPKEEP * (s.shops - 1)) * d.rentMult * d.costMult * ep * cardMul(s, 'rent');
   for (const st of s.staff) if (st.trait === 'wise') rentRaw *= 0.92;
   /* 店长 lean 特性（精打细算）→ 该店租金 -12%，按店长数逐个施加 */
   for (const m of (s.managers || [])) if (managerTrait(m).id === 'lean') rentRaw *= 0.88;
