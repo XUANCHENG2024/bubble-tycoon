@@ -821,6 +821,22 @@ UI.renderManage = function () {
           徽章亮了却没触发成就（或反之）会让玩家困惑。 */
     const vsBase = p / g.base;
     const bargain = vsBase <= CFG.BARGAIN_RATIO;
+    /* ★ V21：抄底时把第二个按钮变成「囤货」。
+       ★ 为什么：帮助里写着"原料低价时多囤，隔天涨价就是纯利润"，
+         但界面只给了 +10 / +补足 / 一键补货 —— 想囤 3 天的量要点几十次。
+         一条被写进教程的策略，操作上却不可行，等于没有。
+       ★ 为什么复用同一个按钮而不是加第四个：窄屏上四个按钮会挤成两行，
+         而"补足"和"囤货"本来就是同一件事的两个量级 —— 按价格自动切换，
+         玩家不需要同时看到两个。 */
+    const needQ = Math.ceil(needInfo.need[g.id] || 0);
+    const gapQ = needInfo.gap[g.id] || 0;
+    const hoardMode = bargain;                      /* 抄底价才切到"囤货" */
+    const hoardQ = Math.max(10, Math.ceil(needQ * 1.5 - (s.inv[g.id] || 0)));
+    const q2 = hoardMode ? hoardQ : Math.max(10, gapQ);
+    const label2 = hoardMode ? '囤货' : (gapQ > 0 ? '补足' : '+30');
+    const title2 = hoardMode
+      ? `📉 抄底价 · 囤到今天的 1.5 倍（约 ${Math.round(needQ * 1.5)}）`
+      : `补足今天的用量（预计需要 ${needQ}）`;
     const pctTxt = Math.round((vsBase - 1) * 100);
     h += `<div class="mkt-row${localSet.has(g.id) ? ' local' : ''}${bargain ? ' bargain' : ''}"
       data-ing="${esc(g.id)}">
@@ -835,9 +851,8 @@ UI.renderManage = function () {
         : ''}</div>
       <div class="mkt-btns">
         <button class="btn btn-ghost" data-act="buy" data-id="${g.id}" data-q="10">+10</button>
-        <button class="btn btn-ghost${(needInfo.gap[g.id] || 0) > 0 ? ' btn-cyan' : ''}"
-          data-act="buy" data-id="${g.id}" data-q="${Math.max(10, needInfo.gap[g.id] || 0)}"
-          title="补足今天的用量（预计需要 ${Math.ceil(needInfo.need[g.id] || 0)}）">${(needInfo.gap[g.id] || 0) > 0 ? '补足' : '+30'}</button>
+        <button class="btn btn-ghost${hoardMode ? ' btn-amber' : (gapQ > 0 ? ' btn-cyan' : '')}"
+          data-act="buy" data-id="${g.id}" data-q="${q2}" title="${title2}">${label2}</button>
         <button class="btn btn-ghost mkt-sell" data-act="sell" data-id="${g.id}"
           title="按当前价${Math.round(CFG.LIQUID_RATE * 100)}% 回购（清仓腾仓位）"
           ${(s.inv[g.id] || 0) > 0 ? '' : 'disabled'}>清仓</button>
