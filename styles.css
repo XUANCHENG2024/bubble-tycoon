@@ -2013,3 +2013,31 @@ body, #app {
   from { opacity: 0; transform: translate(-50%, 10px); }
   to { opacity: 1; transform: translate(-50%, 0); }
 }
+
+/* 装到桌面的图文说明（V21）——
+   ★ 位置抬到 76px 而不是贴着底部：它和「新版本已就绪」那条可能同时出现，
+     两条都贴底会叠在一起。更新提示更重要（它要求动作），所以让说明条站上面。
+   ★ 用 column 而不是横排：说明文字比按钮长，横排会把按钮挤成两行。 */
+.install-howto {
+  position: fixed;
+  left: 50%;
+  bottom: calc(76px + var(--sab));
+  transform: translateX(-50%);
+  z-index: 205;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: min(92vw, 460px);
+  padding: 12px 14px;
+  border-radius: var(--r-lg);
+  background: var(--bg-sel);
+  border: 1px solid rgba(53, 229, 240, .5);
+  box-shadow: var(--sh);
+  font-size: var(--fs-md);
+  color: var(--txt);
+  line-height: 1.5;
+  animation: updateIn .3s ease-out;
+}
+.install-howto span { color: var(--txt2); font-size: var(--fs-sm); }
+.install-howto .btn { align-self: flex-end; padding: 6px 12px; font-size: var(--fs-sm); }

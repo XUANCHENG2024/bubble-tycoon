@@ -74,6 +74,14 @@
       <div class="btn-row">
         <button id="btnExport" class="btn btn-ghost">📤 导出存档</button>
       </div>
+      <!-- ★ V21：装到桌面（PWA）。
+           线上版是网页，玩家关掉标签页就等于卸载 —— 这是留存漏斗最大的一处漏洞。
+           默认隐藏，由底部脚本按「能不能装 / 装没装过」决定显示：
+             · 已装到桌面（standalone）→ 永不显示
+             · Android/桌面 Chrome 支持 beforeinstallprompt → 显示，点了直接弹安装
+             · iOS Safari 不支持程序化安装 → 显示，点了给"分享 → 添加到主屏幕"的图文说明
+             · App（Capacitor）内 → 永不显示（本来就是装好的） -->
+      <button id="btnInstall" class="btn btn-ghost" style="display:none">📲 装到桌面 · 断网也能玩</button>
     </div>
     <div id="slotPick" class="slot-pick"></div>
 
@@ -254,6 +262,90 @@
         if (window.console && console.warn) console.warn('SW 注册失败：', e);
       });
     });
+  } catch (e) { /* 任何异常都不影响游戏启动 */ }
+})();
+</script>
+<script>
+/* ★★ V21：装到桌面（PWA 安装引导）
+ *
+ * ★ 为什么这件事比看起来重要：
+ *   线上版是网页，玩家关掉标签页就等于卸载，下次要重新找链接。
+ *   而"装到桌面"之后：图标在桌面、能离线启动（有 SW）、打开就是游戏 ——
+ *   这是网页版留存漏斗里唯一能补上的一个大洞。
+ *
+ * ★ 三种环境必须分开处理（不能一把梭）：
+ *   ① Android / 桌面 Chrome：有 beforeinstallprompt，可以**程序化弹安装框**。
+ *      ★ 必须 preventDefault() 并自己保存事件 —— 否则浏览器会用自己的时机弹，
+ *        而那个时机通常是"刚进页面"，玩家还不知道游戏是什么，转化最低。
+ *   ② iOS Safari：**不支持**程序化安装，只能引导「分享 → 添加到主屏幕」。
+ *      这是平台限制，不是没做；文案必须写清点哪里。
+ *   ③ App（Capacitor）/ 已装到桌面（standalone）：不显示。
+ *      App 里本来就已经是"装好的"，再提示只会让人困惑。
+ */
+(function () {
+  try {
+    var btn = document.getElementById('btnInstall');
+    if (!btn) return;
+
+    /* ③ App 内不提示 */
+    if (window.Capacitor && window.Capacitor.isNativePlatform
+        && window.Capacitor.isNativePlatform()) return;
+
+    /* ③ 已经装到桌面（standalone 启动）不提示 */
+    var standalone = false;
+    try {
+      standalone = window.matchMedia('(display-mode: standalone)').matches
+        || window.navigator.standalone === true;
+    } catch (e) { /* 老浏览器没有 matchMedia */ }
+    if (standalone) return;
+
+    var ua = navigator.userAgent || '';
+    var isIOS = /iP(hone|ad|od)/.test(ua)
+      || (navigator.platform === 'MacIntel' && (navigator.maxTouchPoints || 0) > 1);
+    var deferred = null;
+
+    function reveal() { btn.style.display = ''; }
+
+    /* ① Android / 桌面 Chrome */
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      deferred = e;
+      reveal();
+    });
+
+    /* ② iOS：没有那个事件，直接给入口。
+       延迟 1.2s —— 不跟开始界面的入场动画抢第一眼。 */
+    if (isIOS) setTimeout(reveal, 1200);
+
+    btn.addEventListener('click', function () {
+      if (deferred) {
+        deferred.prompt();
+        if (deferred.userChoice) {
+          deferred.userChoice.then(function () { deferred = null; btn.style.display = 'none'; });
+        }
+        return;
+      }
+      showHowTo();
+    });
+
+    function showHowTo() {
+      if (document.getElementById('installHowTo')) return;
+      var bar = document.createElement('div');
+      bar.id = 'installHowTo';
+      bar.className = 'install-howto';
+      bar.innerHTML = '<b>📲 装到桌面</b>'
+        + (isIOS
+          ? '<span>点浏览器底部的 <b>分享</b> 图标 → <b>添加到主屏幕</b></span>'
+          : '<span>浏览器菜单 → <b>安装应用</b> 或 <b>添加到主屏幕</b></span>');
+      var close = document.createElement('button');
+      close.className = 'btn btn-ghost';
+      close.textContent = '知道了';
+      close.onclick = function () { bar.remove(); };
+      bar.appendChild(close);
+      document.body.appendChild(bar);
+      /* 12 秒自动收起：这是一条说明，不是需要玩家决策的弹窗 */
+      setTimeout(function () { if (bar.parentNode) bar.remove(); }, 12000);
+    }
   } catch (e) { /* 任何异常都不影响游戏启动 */ }
 })();
 </script>

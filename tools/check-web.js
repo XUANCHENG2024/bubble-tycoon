@@ -128,5 +128,15 @@ check(stamped === realHash, stamped === realHash
 check(sw.indexOf("const CACHE = 'bubble-tycoon-' + VERSION + '-' + ASSETS_HASH;") >= 0,
   'CACHE 名包含内容指纹（否则改文件不会使旧缓存失效）');
 
+/* ⑫ PWA 安装引导：这条链路任何一个环节缺失，玩家就永远装不到桌面。
+      —— 网页版关掉标签页就等于卸载，"装到桌面"是留存漏斗里唯一能补的大洞。 */
+const css = read('styles.css');
+check(/id="btnInstall"/.test(index), '开始界面有「装到桌面」按钮');
+check(/beforeinstallprompt/.test(index), '接管 beforeinstallprompt（Android 可程序化安装）');
+check(/preventDefault\(\)/.test(index), '拦截浏览器自带弹窗（否则会在最差的时机弹）');
+check(/display-mode: standalone|navigator\.standalone/.test(index), '已装到桌面时不再提示');
+check((index.match(/isNativePlatform/g) || []).length >= 2, 'App 内不提示（与 SW 注册各判一次）');
+check(/\.install-howto/.test(css), '安装说明条样式存在（iOS 用）');
+
 console.log(`\n${fail === 0 ? '✔ 全部通过' : '✘ 有失败项'}（${pass} 项通过 / ${fail} 项失败）\n`);
 process.exit(fail === 0 ? 0 : 1);
