@@ -323,6 +323,21 @@ console.log('\n--- ⑥ 槽位摘要缓存 ---');
   /* 缓存后仍要能读到摘要（不能为了性能牺牲正确性） */
   const info = window.eval('(function(){ var v = slotInfo(0); return v ? "day=" + v.day : "无"; })()');
   check(/day=/.test(info), '损坏场景仍能读到摘要（' + info + '）');
+
+  /* ★★ V21：升级项的**文案必须与引擎常量一致**。
+     本轮真实发生过：training 从「出杯速度」改成「每杯成本 −4%」，
+     常量与引擎都改了、**只有文案没改**（一次字符串替换静默失败），
+     于是界面继续显示「全员效率 +12%」，而所有测试都是绿的。
+     这类"界面在说谎"不会让任何断言变红，只能靠专门的一致性检查兜住。 */
+  const trDesc = window.eval('(function(){var t=UPGRADES.find(function(u){return u.id==="training";});return t?t.desc:"";})()');
+  const pct = window.eval('Math.round(CFG.TRAINING_COST_CUT * 100)');
+  check(String(trDesc).indexOf(String(pct) + '%') >= 0,
+    'training 文案含 ' + pct + '%（实际：' + trDesc + '）');
+  const upA = window.eval('upgradesByValue().length');
+  const upB = window.eval('UPGRADES.length');
+  check(upA === upB, 'upgradesByValue 覆盖全部升级项（' + upA + '/' + upB + '，漏项会从升级页消失）');
+  check(window.eval('upgradesByValue()[0].id === "storage"'),
+    '展示顺序按实测价值（storage 第一）');
 }
 
 console.log('');

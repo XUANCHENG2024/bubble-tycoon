@@ -858,7 +858,7 @@ const UPGRADES = [
   { id: 'storage', name: '冷链仓库', emoji: '🧊', max: 6, base: 200, mult: 1.5,
     desc: '库存上限 +180/级', detail: l => `当前：上限 ${CFG.BASE_STORAGE + l * 180}` },
   { id: 'training', name: '员工培训', emoji: '🎓', max: 5, base: 320, mult: 1.68,
-    desc: '全员效率 +12%/级', detail: l => `当前：全员效率 +${l * 12}%` },
+    desc: '原料损耗 −4%/级', detail: l => `当前：每杯成本 −${l * 4}%` },
   { id: 'auto', name: '外卖接单', emoji: '🛵', max: 6, base: 450, mult: 1.85,
     desc: '离线收益与自动出杯', detail: l => `当前：离线 ${offlineRate(l)} 元/分钟` },
 ];
