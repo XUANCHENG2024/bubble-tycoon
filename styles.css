@@ -293,6 +293,22 @@ body::before {
      sticky 跟滚动容器走，语义就是"停在可视区底部"。
    ★ 背景用渐变而不是实色：卡片从下面滑过时不会被一条硬边切断，
      看起来像"内容从按钮后面过"，而不是"按钮盖住了一截"。 */
+/* 吸底栏里的两行提示（V21）——
+   ★ 第一行是今日合同（为什么备货），第二行是客流与库存（备多少）。
+   ★ 之前只定义了 .open-dock，.open-hint 一直是裸样式 ——
+     单行时看不出来，加成两行就露馅（行距挤在一起）。 */
+.open-hint {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: var(--fs-sm);
+  color: var(--txt2);
+  line-height: 1.55;
+}
+.open-hint + .open-hint { margin-top: 2px; }
+.open-hint .oh-dim { color: var(--txt3); }
+
 .open-dock {
   position: sticky; bottom: 0; z-index: 6;
   margin: 7px 0 0;
@@ -2041,3 +2057,22 @@ body, #app {
 }
 .install-howto span { color: var(--txt2); font-size: var(--fs-sm); }
 .install-howto .btn { align-self: flex-end; padding: 6px 12px; font-size: var(--fs-sm); }
+
+/* 成就页「离你最近」（V21）——
+   ★ 这一页原来只有一条总进度条 + 44 个平铺条目（T=0），
+     看完没有任何"下一步"。这三行是它唯一的行动指向。
+   ★ 进度条用 0~100% 而不是"还差多少杯"：成就的目标量级跨度极大
+     （100 杯 ~ 50000 净资产），只有百分比能横向比较。 */
+.near { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0;
+  border-top: 1px dashed rgba(255,255,255,.07); }
+.near:first-of-type { border-top: none; }
+.near-e { font-size: 20px; line-height: 1.2; width: 26px; text-align: center; flex: none; }
+.near-b { flex: 1; min-width: 0; }
+.near-n { font-size: var(--fs-md); font-weight: 700; display: flex; align-items: baseline; gap: 8px; }
+.near-rw { font-size: var(--fs-xs); color: var(--amber); font-weight: 400; margin-left: auto; }
+.near-bar { height: 5px; border-radius: 99px; background: rgba(255,255,255,.09);
+  overflow: hidden; margin-top: 5px; }
+.near-bar i { display: block; height: 100%; border-radius: 99px;
+  background: linear-gradient(90deg, var(--cyan), var(--purple)); }
+.near-d { font-size: var(--fs-xs); color: var(--txt3); margin-top: 4px; }
+.near-d b { color: var(--txt2); }

@@ -358,6 +358,25 @@ console.log('\n--- ⑥ 槽位摘要缓存 ---');
     return bad.join(', ');
   })()`);
   check(!cardBad, '卡面收益文案与 fx 一致（' + (cardBad || '12 张全部一致') + '）');
+
+  /* ★★ V21：成就页的「离你最近」依赖成就的数值进度函数。
+     删掉/写错 prog 不会让任何测试变红 —— 只会让那三行静默消失，
+     页面退回"纯展示"。所以专门锁住：数量够 + 返回值合法。 */
+  const progInfo = window.eval(`(function(){
+    var s = newGame('normal', 0, null), bad = [], n = 0;
+    for (var i = 0; i < ACHIEVEMENTS.length; i++) {
+      var a = ACHIEVEMENTS[i];
+      if (typeof a.prog !== 'function') continue;
+      n++;
+      var p = a.prog(s);
+      if (!p || typeof p[0] !== 'number' || typeof p[1] !== 'number' || !(p[1] > 0)) bad.push(a.id);
+    }
+    return n + '|' + bad.join(',');
+  })()`);
+  const progParts = String(progInfo).split('|');
+  check(Number(progParts[0]) >= 15,
+    '带数值进度的成就 ' + progParts[0] + ' 个（成就页「离你最近」依赖它）');
+  check(!progParts[1], '进度函数返回值合法' + (progParts[1] ? '：' + progParts[1] : ''));
 }
 
 console.log('');

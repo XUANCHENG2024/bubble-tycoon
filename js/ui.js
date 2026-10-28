@@ -1046,7 +1046,21 @@ UI.renderManage = function () {
   const stockTag = shortN > 0
     ? `<b style="color:var(--red)">缺 ${shortN} 人份</b>`
     : `<b style="color:var(--green)">够卖</b>`;
+  /* ★★ V21：吸底栏第一行放「今日合同」。
+     ★ 顺序有讲究：合同是"为什么备货"，客流/库存是"备多少"。
+       先目标后手段，和玩家的思考顺序一致；反过来就成了"先看数字再想为什么"。
+     ★ 合同卡本来在经营页第 2 屏 —— 而它是每天唯一有输赢的目标。
+       把它拎到吸底栏，等于让它和「开门」这个动作同时可见。 */
+  const ctv = contractView(s);
+  const ctLine = ctv
+    ? `<div class="open-hint">${ctv.emoji} ${esc(ctv.name)} ${
+        ctv.prog === null
+          ? `<span class="oh-dim">${ctv.done ? '✅ 已达成' : '打烊结算'}</span>`
+          : `<b style="color:${ctv.done ? 'var(--green)' : 'var(--cyan)'}">${ctv.prefix}${Math.round(ctv.prog)}/${ctv.prefix}${ctv.goal}${ctv.unit}</b>${ctv.done ? ' ✅' : ''}`
+      }</div>`
+    : '';
   h += `<div class="open-dock">
+      ${ctLine}
       <div class="open-hint">👥 明日预计 <b style="color:var(--cyan)">${trfN}</b> 人${evTag} · 库存 ${stockTag}</div>
       <button class="btn btn-primary btn-big" data-act="open" data-tut="open" style="width:100%">🔔 开门营业</button>
     </div>`;
@@ -1833,6 +1847,41 @@ UI.renderAch = function () {
     <div class="ach-note">本局达成给现金；<b>跨局首次</b>达成额外给品牌声望 ★
       （${achStarText()}，永久保留）。</div>
   </div>`;
+
+  /* ★★ V21：这一页原来是**纯展示**（页面扫描：T=0、可点项 0、内容 1100px）。
+     玩家打开看一眼进度条，然后关掉 —— 44 个成就没有一个转化为"下一个目标"。
+     这里补「离你最近 3 个」：用成就的数值进度算出最接近达成的三条，
+     带进度条与缺口。原理与经营页的「差 N 人份」一样：**给缺口，不给结论**。 */
+  const near = ACHIEVEMENTS
+    .filter(a => !s.ach[a.id] && typeof a.prog === 'function')
+    .map(a => {
+      const p = a.prog(s) || [0, 1];
+      const tgt = Math.max(1, num(p[1], 1));
+      const cur = Math.max(0, Math.min(num(p[0], 0), tgt));
+      return { a, cur, tgt, r: cur / tgt };
+    })
+    .filter(x => x.r < 1)
+    .sort((x, y) => y.r - x.r)
+    .slice(0, 3);
+
+  if (near.length) {
+    h += `<div class="card"><div class="card-h">🎯 离你最近
+      <span class="ch-sub">再走一步就能拿</span></div>
+      ${near.map(x => {
+        const p2 = Math.round(x.r * 100);
+        const gap = Math.max(0, x.tgt - x.cur);
+        return `<div class="near">
+          <span class="near-e">${x.a.emoji}</span>
+          <div class="near-b">
+            <div class="near-n">${esc(x.a.name)}
+              <span class="near-rw">+¥${x.a.reward.cash}${x.a.reward.bp ? ' · ★' + x.a.reward.bp : ''}</span></div>
+            <div class="near-bar"><i style="width:${p2}%"></i></div>
+            <div class="near-d">${x.cur} / ${x.tgt} · 还差 <b>${gap}</b></div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
 
   h += achTierHtml(s, 'main', main);
   h += achTierHtml(s, 'side', side);
