@@ -26,7 +26,7 @@
  *   ⇒ 症状：老访客打开时 cache-first 先给旧 JS，要再刷一次才是新版；
  *     且旧缓存不会被 activate 清掉（CACHE 名没变）。
  *   ★ 约定：以后凡是改 ASSETS 里的任何文件，这个数字必须一起改。 */
-const VERSION = 'v21.1';
+const VERSION = 'v22.0';
 /* ★★ 内容指纹（自动生成，不要手改）
  *   由 `node tools/stamp-sw.js` 写入；CI 里的 check-web 会核对它与真实文件哈希一致。
  *   ★ 为什么需要它：只靠人手改 VERSION，"改了 ui.js 忘了改版本号"就会反复发生 ——
@@ -34,7 +34,7 @@ const VERSION = 'v21.1';
  *     把指纹并进 CACHE 名之后，**文件一变缓存键就变**，旧缓存自然失效，
  *     不依赖任何人记得改数字。
  *   ★ 它只取 8 位，不是加密用途，只为区分构建。 */
-const ASSETS_HASH = 'e2030191';
+const ASSETS_HASH = '2e291091';
 const CACHE = 'bubble-tycoon-' + VERSION + '-' + ASSETS_HASH;
 
 /* ★ 要缓存的文件 —— 与 index.html 里引用的一致。
