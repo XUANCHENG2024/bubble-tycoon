@@ -224,7 +224,11 @@ function costOf(s, rid) {
   const req = reqOf(s, rid);
   for (const k in req) c += req[k] * (s.avgCost[k] || ingById(k).base);
   /* 招牌配方（V6）：等级越高，每杯成本越省（熟练度/规模效应） */
-  return Math.max(0.1, c - sigCostCut(s, rid));
+  const afterSig = c - sigCostCut(s, rid);
+  /* ★ V21：员工培训降本（取代原来的"出杯速度 +12%/级"）。
+     熟练的员工浪费少 —— 这条挂在成本上，和 speed 不再抢同一个分母。 */
+  const cut = Math.min(0.4, (num(s.up.training, 0)) * CFG.TRAINING_COST_CUT);
+  return Math.max(0.1, afterSig * (1 - cut));
 }
 function priceOf(s, rid) {
   return Math.max(1, Math.round(recipeById(rid).price * (s.ratios[rid] || 1)) + sigPriceAdd(s, rid));
@@ -544,7 +548,9 @@ function staffMult(s, st) {
     玩家花 ¥3000 买的店长一点用没有，也看不出来。
     有了未夹版本，才能回答"这一级买下去还真的更快吗"。 */
 function serviceRaw(s, worker, sim) {
-  let t = CFG.BASE_SERVICE / (1 + 0.20 * s.up.speed) / (1 + 0.12 * s.up.training);
+  /* ★ V21：training 已不在这里 —— 它改挂"每杯成本"（见 data.js 的 TRAINING_COST_CUT）。
+     两个升级抢同一个分母，等于让玩家买两条会互相贬值的东西。 */
+  let t = CFG.BASE_SERVICE / (1 + 0.20 * s.up.speed);
   if (worker) t /= staffMult(s, worker);
   if (sim && sim.rushUntil > sim.t) t *= 0.55;
   t /= cardMul(s, 'speed');       /* 🃏 策略卡：极速出杯更快、自助点单机更慢 */
@@ -6285,7 +6291,7 @@ function maxCupsFromStock(s) {
  * 多杯订单耗时更久，所以不能拿 dailyCapacity(杯) 直接比 trafficOf(人)。
  */
 function dailyOrderCapacity(s) {
-  const base = CFG.BASE_SERVICE / (1 + 0.20 * s.up.speed) / (1 + 0.12 * s.up.training);
+  const base = CFG.BASE_SERVICE / (1 + 0.20 * s.up.speed);   /* training 见 TRAINING_COST_CUT */
   const ct = 1 + (avgCupsPerOrder(s) - 1) * 0.35;   // 多杯订单的时间系数
   const T = CFG.DAY_DURATION;
   const per = w => Math.max(CFG.MIN_SERVICE, base / (w ? staffMult(s, w) : 1)) * ct;

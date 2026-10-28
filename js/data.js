@@ -57,6 +57,16 @@ const CFG = {
   SALE_TRAFFIC: 1.6,       // 促销期间客流乘子
   SALE_UNIT_SUB: 2,        // 促销期间每杯收入减 ¥2
   BASE_SERVICE: 1.35,      // 单杯基准耗时（秒）
+  /* ★★ V21：员工培训改挂「降本」，不再挂「出杯速度」。
+     ★ 原来 training 与 speed 是**同一个分母**：serviceRaw 里
+       /(1+0.2·speed)/(1+0.12·training) —— 两条并排卖、互相贬值，
+       而它们又都被 MIN_SERVICE(0.4s) 夹死：实测 D30 时 speed 已 9 级、
+       easy 触底板只要 4 级，training 的加速完全被吃掉。
+     ★ 改到「每杯成本」这条轴上，好处是它与 speed 不再争夺同一个分母，
+       而且落在实测有效的轴上（成本 → 毛利，直接进净利）。
+     ★ 4%/级 × 5 级 = −20% 原料成本。原料约占营收 25%，
+       折合净利约 +5%，与 menu（ROI 1.51）同一量级，不至于变成必买项。 */
+  TRAINING_COST_CUT: 0.04,
   MIN_SERVICE: 0.40,
   PACK_COST: 0.6,          // 每杯包装费
   /* ⚠️ V21 未落地的一项（试改后**主动回滚**，不是忘了）：
@@ -852,6 +862,36 @@ const UPGRADES = [
   { id: 'auto', name: '外卖接单', emoji: '🛵', max: 6, base: 450, mult: 1.85,
     desc: '离线收益与自动出杯', detail: l => `当前：离线 ${offlineRate(l)} 元/分钟` },
 ];
+
+/* ★★ V21：升级项的**展示顺序 = 实测价值顺序**，不是数据定义顺序。
+ *
+ *   旧顺序是 speed / decor / menu / storage / training / auto ——
+ *   最没用的排第一（speed 全段边际 ≈0，AI 甚至根本不买），
+ *   唯一 ROI > 2 的排第四（storage 4.84）。
+ *   玩家第一眼看到的就是最该少买的那一个，钱自然花在错的地方。
+ *
+ *   ★ 为什么用常量而不是直接改数组：数组每一项都带着一段解释性注释，
+ *     重排会把注释和对象拆散；而"顺序"本身是**展示决策**，
+ *     以后调它不该动数据。新增项忘了登记也会被兜底追加到末尾（不会消失）。
+ *
+ *   实测依据：storage 4.84 / menu 1.51 / decor 0.90 / speed ≈0 / auto −0.24；
+ *   training 与 speed 同轴（都除出杯时间），同样触底即失效。
+ */
+const UPGRADE_VALUE_ORDER = ['storage', 'menu', 'decor', 'speed', 'training', 'auto'];
+let _UP_BY_VALUE = null;
+function upgradesByValue() {
+  if (_UP_BY_VALUE) return _UP_BY_VALUE;
+  const left = {};
+  for (const u of UPGRADES) left[u.id] = u;
+  const out = [];
+  for (const id of UPGRADE_VALUE_ORDER) {
+    if (left[id]) { out.push(left[id]); delete left[id]; }
+  }
+  /* 兜底：以后新增、但忘了登记顺序的项追加在末尾 —— 宁可排在最后，也不能消失 */
+  for (const u of UPGRADES) if (left[u.id]) out.push(u);
+  _UP_BY_VALUE = out;
+  return out;
+}
 
 function offlineRate(lv) {
   return Math.round(4 * Math.pow(lv, 1.55));

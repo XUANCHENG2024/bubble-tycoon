@@ -972,7 +972,7 @@ UI.renderManage = function () {
       <button class="btn btn-sm btn-ghost" data-act="mktset" data-v="1000">1000</button>
     </div>
     <div id="mktForecast" style="font-size:var(--fs-sm);color:var(--txt3);margin-top:7px;line-height:1.6">
-      预计客流 <b style="color:var(--cyan)">${trafficOf(s)} 人</b> · 出杯位 <b style="color:var(--cyan)">${stationCount(s)} 个</b> · 单杯耗时 ${(CFG.BASE_SERVICE / (1 + .2 * s.up.speed) / (1 + .12 * s.up.training)).toFixed(2)}s
+      预计客流 <b style="color:var(--cyan)">${trafficOf(s)} 人</b> · 出杯位 <b style="color:var(--cyan)">${stationCount(s)} 个</b> · 单杯耗时 ${serviceTimeOf(s, null).toFixed(2)}s
       ${s.lastMarketing > 0
         ? `<br><span style="color:var(--amber)">📢 昨日投入 ${money(s.lastMarketing)} 已用完 —— 营销只当天有效，今天要重新投。</span>`
         : `<br><span style="color:var(--txt3)">营销只在当天生效，打烊后归零。</span>`}
@@ -1333,7 +1333,9 @@ UI.renderUp = function () {
        ③ 决策：消耗 + 买不买得起（买不起时说清差多少）
      ★ 第③层最关键：原来钱不够时按钮只是灰掉，
        玩家不知道还差多少 —— 直接问「差多少」比让他心算更快。 */
-  for (const u of UPGRADES) {
+  /* ★ V21：按**实测价值**排，不按数据定义顺序（见 data.js 的 upgradesByValue）。
+     旧顺序把 speed 排第一、storage 排第四 —— 最该少买的在最上面。 */
+  for (const u of upgradesByValue()) {
     const lv = s.up[u.id];
     const cost = upgradeCost(s, u.id);
     let pips = '';

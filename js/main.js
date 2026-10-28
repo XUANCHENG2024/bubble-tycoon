@@ -1088,7 +1088,7 @@ document.addEventListener('input', e => {
     const card = el.closest('.card');
     card.querySelector('.ch-sub').textContent = `投入 ¥${s.marketing} → 客流 ×${marketingMul(s.marketing).toFixed(2)}`;
     const f = $('mktForecast');
-    if (f) f.innerHTML = `预计客流 <b style="color:var(--cyan)">${trafficOf(s)} 人</b> · 出杯位 <b style="color:var(--cyan)">${stationCount(s)} 个</b> · 单杯耗时 ${(CFG.BASE_SERVICE / (1 + .2 * s.up.speed) / (1 + .12 * s.up.training)).toFixed(2)}s`;
+    if (f) f.innerHTML = `预计客流 <b style="color:var(--cyan)">${trafficOf(s)} 人</b> · 出杯位 <b style="color:var(--cyan)">${stationCount(s)} 个</b> · 单杯耗时 ${serviceTimeOf(s, null).toFixed(2)}s`;
   }
 });
 

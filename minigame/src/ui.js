@@ -1635,8 +1635,11 @@ function panelUp(ctx, x, y, w, s) {
   GFX.card(ctx, x, y, w, 34);
   text(ctx, '⬆️ 店铺升级', x + 10, y + 9, { size: FS.md, weight: 800 });
   y += 44;
-  for (var i = 0; i < UPGRADES.length; i++) {
-    var u = UPGRADES[i];
+  /* ★ V21：按实测价值排（与 H5 共用 data.js 的 upgradesByValue）——
+     两端顺序必须一致，否则同一份数据在两边给出的购买建议是反的。 */
+  var upOrder = upgradesByValue();
+  for (var i = 0; i < upOrder.length; i++) {
+    var u = upOrder[i];
     var lv = num(s.up[u.id], 0);
     var cost = upgradeCost(s, u.id);
     var maxed = cost == null;

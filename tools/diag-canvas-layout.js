@@ -320,7 +320,10 @@ for (const dev of DEVICES) {
       try {
         const treeOp = env.ops.filter(o => o.kind === 'text'
           && String(o.text).indexOf('研发树') >= 0)[0];
-        if (treeOp) {
+        /* ★ 只对竖屏判：横屏（390/414 高）内容区本来就只有两百多像素，
+           任何长页面都必然要滚动 —— 在那里要求"树在首屏"等于要求横屏没有滚动，
+           是判据错了，不是布局错了（这条我先在 844×390 上误报过一次）。 */
+        if (treeOp && dev.h >= 600) {
           const bottom = dev.h - 100;   /* 视口底部留出安全区 */
           console.log('    · 研发树标题 y=' + Math.round(treeOp.y)
             + '（首屏底 ' + bottom + '）' + (treeOp.y <= bottom ? ' ✔ 在首屏' : ' ✘ 被推出首屏'));
