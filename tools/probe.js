@@ -3306,18 +3306,33 @@ console.log('=============== Y. 仓库与采购 ===============');
        否则报的是「现金不足」而不是被测的那个原因，
        断言就变成了在测另一件事（第一版的错判据）。 */
     s.cash = 1e6;
-    const over = E.buyIng(s, ing.id, cap + 10);
-    expect('Y5a', !over.ok && /装不下/.test(over.msg),
-      `超容被拒（${over.msg}）`);
-    /* 现金差 1 分被拒 */
+    /* ★★ V21 语义变更：仓库装不下时改为**部分成交**，不再整单拒绝。
+       "仓库是容器，装满就是装满" —— 不该因为多要了 10 个，连装得下的 cap 个也不给。
+       这条断言原本锁的是"整单拒绝"，必须随语义同步：
+       留着不改，就是让测试替**已经废弃的行为**站岗（绿着的错测试比红着更危险）。 */
+    s.inv[ing.id] = 0;
+    /* ★ 基准必须是**剩余仓位**，不是总容量 —— newGame 自带初始库存，
+       用 cap 当预期值会算出"买少了"，看起来像功能坏了，其实是断言算错了。 */
+    const room = E.storageCap(s) - E.invUsed(s);
+    const over = E.buyIng(s, ing.id, room + 10);
+    expect('Y5a', over.ok && over.capped === true && over.qty === room && s.inv[ing.id] === room,
+      `超容改为部分成交（要 ${room + 10}，买进 ${over.qty}，剩余仓位 ${room}）`);
+    /* 满仓后必须**明确拒绝**，不能静默 ok —— 否则玩家点了没反应、还不知道为什么 */
+    const full = E.buyIng(s, ing.id, 10);
+    expect('Y5b', !full.ok && /已满/.test(full.msg),
+      `满仓时明确拒绝（${full.msg}）`);
+    /* 现金差 1 分被拒。
+       ★ 必须先清空库存：上一步已经把仓库填满了，不清空的话这里
+         测到的是"满仓"而不是"没钱" —— 断言失败却指向错误的原因。 */
+    s.inv[ing.id] = 0;
     s.cash = 99;
     const short = E.buyIng(s, ing.id, 10);
-    expect('Y5b', !short.ok && /现金不足/.test(short.msg),
+    expect('Y5c', !short.ok && /现金不足/.test(short.msg),
       `现金不足被拒（${short.msg}）`);
     /* 恰好够则成功 */
     s.cash = 100;
     const exact = E.buyIng(s, ing.id, 10);
-    expect('Y5c', exact.ok && Math.abs(s.cash) < 0.01,
+    expect('Y5e', exact.ok && Math.abs(s.cash) < 0.01,
       `恰好付得起则成功（剩 ¥${Math.round(s.cash)}）`);
     /* 异常输入不能污染现金 */
     for (const q of [NaN, -5, null, undefined, 'abc']) {

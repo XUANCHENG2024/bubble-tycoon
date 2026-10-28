@@ -110,7 +110,15 @@ function pushHistory(s, row) {
   if (s.history.length > MAX_HISTORY) s.history.splice(0, s.history.length - MAX_HISTORY);
 }
 
-function storageCap(s) { return CFG.BASE_STORAGE + s.up.storage * 180; }
+function storageCap(s) {
+  /* ★ V21：每开一家分店 **+CFG.BRANCH_STORAGE(500) 库容**。
+     分店原来的收益全在需求端（+60% 客流），而瓶颈在供给端（缺料占流失 82~89%），
+     于是"开分店 = 多来客人、没多料可卖" → 实测 −17.3%，扩张是纯亏。
+     ★ 用 shops 而不是 activeBranchCount：仓库容量取决于"有没有这家店"，
+       跟这家店派没派人无关（派人是出杯的事，不是囤货的事）。 */
+  return CFG.BASE_STORAGE + s.up.storage * 180
+    + CFG.BRANCH_STORAGE * Math.max(0, pos(s.shops, 1) - 1);
+}
 function menuSlots(s) { return 2 + s.up.menu; }
 /** 出杯位数量 = 老板 1 个 + 员工数（V11 起员工按分店归属，
  *  不再额外给每家分店白送一个工位 —— 详见 openShop 的 stations 构建）。 */
@@ -272,7 +280,10 @@ function trafficOf(s) {
      现在分店不再白送工位（员工必须真的在那家店），
      客流必须同步：**开了没人 = 空店 = 没有额外客流**。
      这也让店长与招人真正变成"让分店活起来"的必要投入。 */
-  t *= 1 + 0.6 * (activeBranchCount(s) - 1);
+  /* ★ V21：0.6 → CFG.BRANCH_TRAFFIC(0.2)。分店的收益挪到库容（见 storageCap），
+     客流只保留二成 —— 本作瓶颈是备货，单纯堆客流等于"多来客人没料卖"。
+     砍到 0 反而更差（−15.7% vs −3.8%），所以这二成不是装饰，是给扩张的甜头。 */
+  t *= 1 + CFG.BRANCH_TRAFFIC * (activeBranchCount(s) - 1);
   /* 这里曾经有一项 `1 + 0.02 * s.bpBonus`：声望点直接乘在客流上，线性且无上限。
      问题是产能（出杯位 / 服务速度）每局都从零起步，只有需求端在涨 ——
      多来的客人接不住 → 排队超时流失 → 扣口碑 → 口碑又反过来压客流，成负反馈。
@@ -1037,10 +1048,25 @@ function buyIng(s, id, qty, markup) {
   qty = Math.round(num(qty, 0));
   if (!(qty > 0)) return { ok: false, msg: '数量无效' };
   if (!ingById(id)) return { ok: false, msg: '原料不存在' };
+  /* ★★ V21：仓库装不下时**不再整单拒绝**，而是买得下多少算多少。
+     ★ 原来的写法是 `if (invUsed + qty > cap) return {ok:false,'仓库装不下了'}` ——
+       整单失败、一个都不进。于是"手动加料"变成撞墙行为：
+       玩家想买 60 个，只剩 20 个位置，结果**一粒都没买进来**，
+       还得回去数还剩多少仓位再改数字重试。
+     ★ 这也是「手搓口径」比「一键补货」弱一大截的原因之一：
+       一键补货自己按剩余仓位算，从不触发这条；手搓则每次都可能被拒。
+       一个只会惩罚"手动操作"的规则，等于在教玩家"别动脑，点按钮"。
+     ★ 语义上本来也该是部分成交：仓库是容器，装满就是装满，
+       不存在"因为你多要了 30 个，所以连能装的 20 个也不给"。
+     ★ 现金不足仍保持整单拒绝 —— 那个玩家能直观理解（钱不够就是不够），
+       而且部分成交会让"我点了一下怎么没买满"变得难解释。 */
+  const room = Math.max(0, storageCap(s) - invUsed(s));
+  if (room <= 0) return { ok: false, msg: '仓库已满（清仓或升级冷链）' };
+  let capped = false;
+  if (qty > room) { qty = room; capped = true; }
   const unit = num(s.prices[id], 0) * (markup || 1);
   const cost = unit * qty;
   if (cost > s.cash) return { ok: false, msg: '现金不足' };
-  if (invUsed(s) + qty > storageCap(s)) return { ok: false, msg: '仓库装不下了' };
   const old = s.inv[id] || 0;
   s.avgCost[id] = (s.avgCost[id] * old + unit * qty) / (old + qty);
   s.inv[id] = old + qty;
@@ -1052,7 +1078,9 @@ function buyIng(s, id, qty, markup) {
      否则会出现「界面显示绿色但没算抄底」或反之。 */
   if (!markup && unit <= ingById(id).base * CFG.BARGAIN_RATIO) s.flags.bargain = true;
   bumpQuest(s, 'restock', 1);
-  return { ok: true, cost, qty };
+  /* capped=true 表示"只买进了仓库放得下的量"，UI 拿它提示玩家，
+     否则玩家会以为自己的数量被吞了。 */
+  return { ok: true, cost, qty, capped };
 }
 /**
  * 清仓：按当前市价的一部分回收库存原料（V13.9）

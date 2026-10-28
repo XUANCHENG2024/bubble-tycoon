@@ -408,8 +408,14 @@ function doAct(act, el) {
     /* --- 经营 --- */
     case 'buy': {
       const r = buyIng(s, id, +el.dataset.q);
-      if (r.ok) { UI.toast(`买入 ${ingById(id).emoji}${r.qty} · -${money(r.cost)}`, 'ok'); SFX.cash(); TUT.notify('buy'); }
-      else UI.toast(r.msg, 'err');
+      if (r.ok) {
+        /* ★ V21：仓库装不下时改为"买得下多少算多少"（引擎侧不再整单拒绝）。
+           但**必须把截断说出来** —— 否则玩家点了 +50、只进了 12，
+           toast 却写"买入 12"，看起来像数量被吞了。 */
+        if (r.capped) UI.toast(`仓库快满了：只买进 ${ingById(id).emoji}${r.qty} · -${money(r.cost)}`, 'warn');
+        else UI.toast(`买入 ${ingById(id).emoji}${r.qty} · -${money(r.cost)}`, 'ok');
+        SFX.cash(); TUT.notify('buy');
+      } else UI.toast(r.msg, 'err');
       break;
     }
     case 'autofill': {

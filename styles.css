@@ -821,6 +821,11 @@ body::before {
 .toast.ok { border-color: rgba(74, 222, 128, .6); }
 .toast.err { border-color: rgba(255, 95, 109, .6); }
 .toast.gold { border-color: rgba(255, 194, 71, .7); color: var(--amber); }
+/* 提醒类（V21）：与 gold 同色但语义不同 ——
+   gold 用于"好事发生"（成就/转生），warn 用于"操作被部分执行，
+   你应该知道为什么"。目前只有「仓库快满、只买进 N 个」用它。
+   ★ 不借用 gold 是为了以后调色时不至于把两类混在一起改。 */
+.toast.warn { border-color: rgba(255, 194, 71, .6); color: var(--amber); }
 @keyframes toastIn { from { transform: translateY(-16px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------------- 弹窗 ---------------- */
