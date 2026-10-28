@@ -460,6 +460,14 @@ function doAct(act, el) {
       else { UI.toast(`${recipeById(id).name} ${r}`, 'ok'); SFX.deal(); TUT.notify('toggle'); }
       break;
     }
+    /* 菜单卡「➕ 加一款」折叠（V21）：展开/收起未上架配方。
+       不加这个 case 的话，那行按钮点下去会一路落到末尾的默认分支 ——
+       既不展开也不报错，是"死键"（本项目在 mktset 上踩过一次）。 */
+    case 'menuopen': {
+      UI._menuOpen = !UI._menuOpen;
+      SFX.click();
+      break;
+    }
     /* --- 营销快捷键：原来只有 data-act="mktset"，switch 里没有这个 case，
            点下去一路落到末尾的 pump()，既不改值也不报错 —— 四个按钮全是死键。 --- */
     case 'mktset': {

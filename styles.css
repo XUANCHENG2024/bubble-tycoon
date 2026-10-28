@@ -311,6 +311,21 @@ body::before {
   font-size: var(--fs-lg); font-weight: 800; margin-bottom: 9px;
 }
 .card-h .ch-sub { font-size: var(--fs-sm); color: var(--txt3); font-weight: 500; }
+/* 菜单卡「➕ 加一款」折叠头（V21）——
+   替代原来把 57 款全量平铺（全解锁约 9.6 屏）。
+   ★ 用整行可点而不是只点右侧箭头：手机上箭头命中区太小，
+     而这一行的语义本来就是"展开/收起"，整行点才符合直觉。 */
+.menu-more {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; margin-top: 8px; padding: 10px 12px;
+  border: 1px dashed rgba(139, 92, 255, .45); border-radius: var(--r-md);
+  background: rgba(139, 92, 255, .06);
+  color: var(--purple-soft); font-size: var(--fs-md); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.menu-more:active { background: rgba(139, 92, 255, .14); }
+.menu-more .mm-sub { color: var(--txt3); font-size: var(--fs-sm); }
+
 .grid2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 

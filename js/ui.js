@@ -890,12 +890,20 @@ UI.renderManage = function () {
 
   /* 菜单 */
   const slots = menuSlots(s);
-  h += `<div class="card" data-tut="menu"><div class="card-h">📋 今日菜单
-      <span class="ch-sub">${s.menu.length}/${slots} 款上架</span></div>
-    ${cityBarHtml(s)}
-    <div class="grid2">`;
-  for (const rid of s.recipes) {
+  /* ★★ V21：菜单卡改成「在售全量 + 未上架折叠」。
+     ★ 原来是把 s.recipes 全部平铺 —— 全解锁 57 款 ≈ 9.6 屏（每款带定价滑块约 120px），
+       "开门营业"被推到第 10 屏（已用吸底兜住）。但更根本的问题是：
+       这一页叫"今日菜单"，玩家 90% 的时间只关心手上这 8 款卖得怎么样，
+       剩下 49 款的定价/菜系/工坊信息属于"配置"，不是"今天的决策"。
+     ★ 两段渲染但**共用同一个 rcHtml** —— 两份模板必然漂移
+       （本项目已经因为"备货按降本后算、扣料按降本前扣"栽过一次）。
+     ★ 未上架默认收起：要加菜时点一行就展开，比翻 9 屏精确得多。 */
+  const rcHtml = (rid) => {
     const r = recipeById(rid);
+    /* ★ V21：必须容错。改成遍历 s.menu 之后，来源从"配方表"变成了"存档里的菜单"——
+       脏存档/旧版本里可能残留已不存在的配方 id，原来遍历 s.recipes 时不可能出现。
+       一行判断换掉一个整页白屏的风险。 */
+    if (!r) return '';
     /* ★ V10：异地已解锁的配方**保留在列表里**（玩家能看到自己的积累），
        但标记为不可上架并说明原因 —— 直接隐藏会让玩家以为配方丢了。 */
     const away = r && r.city && !recipeAvailableAt(s, rid, true);
@@ -924,7 +932,7 @@ UI.renderManage = function () {
         ? `<div class="rc-tip">🏭 ${esc(wsW.name)} Lv.${wsLv} · 成本 −${Math.round((wsW.costCut[wsLv] || 0) * 100)}% · 权重 +${Math.round((wsW.saleBonus[wsLv] || 0) * 100)}%${r.tier >= 3 && wsLv >= 3 ? ' · 高端款再 +18%' : ''}</div>`
         : `<div class="rc-tip">🏭 未建线 · 建了可得成本 −${Math.round((wsW.costCut[1] || 0) * 100)}% / 研发 −${Math.round((wsW.researchCut || 0) * 100)}%</div>`)
       : '';
-    h += `<div class="rc ${on ? 'on' : ''}${away ? ' away' : ''}" ${away ? '' : `data-act="toggle" data-id="${rid}"`}>
+    return `<div class="rc ${on ? 'on' : ''}${away ? ' away' : ''}" ${away ? '' : `data-act="toggle" data-id="${rid}"`}>
       ${hit ? '<div class="rc-badge">🔥流行</div>' : ''}
       ${sgBadge}
       ${away ? `<div class="rc-badge away">🗺️ ${esc((cityById(r.city) || {}).name || '异地')}</div>` : ''}
@@ -936,10 +944,22 @@ UI.renderManage = function () {
         <input type="range" min="50" max="200" value="${Math.round(ratio * 100)}" data-act="ratio" data-id="${rid}" ${away ? 'disabled' : ''}>
         <span class="pv">×${ratio.toFixed(2)}</span></div>
     </div>`;
+  };
+
+  const pending = s.recipes.filter(rid => !s.menu.includes(rid));
+  const menuOpen = !!UI._menuOpen;
+  h += `<div class="card" data-tut="menu"><div class="card-h">📋 今日菜单
+      <span class="ch-sub">${s.menu.length}/${slots} 款上架</span></div>
+    ${cityBarHtml(s)}
+    ${s.menu.length === 0 ? '<div style="color:var(--red);font-size:var(--fs-md);margin:2px 0 10px">⚠️ 至少上架 1 款才能开门</div>' : ''}
+    <div class="grid2">${s.menu.map(rcHtml).join('')}</div>`;
+  if (pending.length) {
+    h += `<div class="menu-more" data-act="menuopen">
+      <span>➕ 加一款</span>
+      <span class="mm-sub">${pending.length} 款未上架　${menuOpen ? '▴ 收起' : '▾ 展开'}</span></div>`;
+    if (menuOpen) h += `<div class="grid2">${pending.map(rcHtml).join('')}</div>`;
   }
-  h += `</div>
-    ${s.menu.length === 0 ? '<div style="color:var(--red);font-size:var(--fs-md);margin-top:8px">⚠️ 至少上架 1 款才能开门</div>' : ''}
-    </div>`;
+  h += `</div>`;
 
   /* 营销 + 开门 */
   const mm = marketingMul(s.marketing);
