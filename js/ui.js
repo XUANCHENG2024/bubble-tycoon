@@ -980,7 +980,16 @@ for (const g of buyable) {
         🚀 产能 <b style="color:${bad(capN, trfN)}">${capN}</b> 单${capN < trfN ? `（手速全开约 ${capClick} 单）` : ''} · 出杯位 <b>${stationCount(s)}</b> 个
       </div></div>`;
 
-  h += `<button class="btn btn-primary btn-big" data-act="open" data-tut="open" style="width:100%">🔔 开门营业</button>`;
+  /* ★★ V21：开门按钮改为**吸底**。
+     原来它排在这一屏的最后，而菜单卡按 `s.recipes` 逐款平铺（全解锁 57 款
+     ≈ 9.6 屏），于是「开门营业」被推到第 10 屏 ——
+     首屏看到的是目标（合同/关卡/任务），按钮在第 10 屏，中间隔着 57 行菜单。
+     玩家每天被迫做一次"读完目标 → 滚十屏 → 忘了目标 → 开门"的记忆测试。
+     ★ Canvas 端早就修过同一个问题（ui.js 的 pinH 注释原文：主操作留在滚动区最底下，
+       玩家得先滑到底才能开门），H5 一直没回灌 —— 两版体验不对等的典型。
+     ★ 用 sticky 而不是 fixed：fixed 会脱离 .panels 的滚动上下文，
+       分屏/横屏时容易压住 tab 栏；sticky 天然跟随滚动容器停靠。 */
+  h += `<div class="open-dock"><button class="btn btn-primary btn-big" data-act="open" data-tut="open" style="width:100%">🔔 开门营业</button></div>`;
 
   /* 店长日志 */
   h += `<div class="card"><div class="card-h">📜 店长日志 <span class="ch-sub">共 ${s.log.length} 条</span></div>`;

@@ -286,6 +286,19 @@ body::before {
 .panels::-webkit-scrollbar-thumb { background: var(--line2); border-radius: 9px; }
 .panel { display: none; }
 .panel.active { display: block; animation: fadeUp .28s ease; }
+
+/* 主操作吸底（V21）：备货页的「开门营业」必须一直可见。
+   ★ 为什么是 sticky 而不是 fixed：
+     fixed 脱离 .panels 的滚动上下文，分屏/横屏时会浮在 tab 栏上；
+     sticky 跟滚动容器走，语义就是"停在可视区底部"。
+   ★ 背景用渐变而不是实色：卡片从下面滑过时不会被一条硬边切断，
+     看起来像"内容从按钮后面过"，而不是"按钮盖住了一截"。 */
+.open-dock {
+  position: sticky; bottom: 0; z-index: 6;
+  margin: 7px 0 0;
+  padding: 8px 0 6px;
+  background: linear-gradient(180deg, rgba(14, 6, 28, 0) 0%, rgba(14, 6, 28, .92) 38%, rgba(14, 6, 28, .98) 100%);
+}
 @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 
 .card {

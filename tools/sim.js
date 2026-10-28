@@ -44,7 +44,16 @@ function argVal(name, dflt) {
 function playAI(diff, seedLabel, bp, sig) {
   /* AI 逻辑在 tools/ai-shared.js（与 diag-balance.js 共用同一份）——
      两处各写一份必然漂移，平衡结论会失真。 */
-  return playSharedAI(E, diff, bp, sig, { rng: Math.random, clickRate: 2.5, cards: CARDS });
+  return playSharedAI(E, diff, bp, sig, {
+    rng: Math.random, clickRate: 2.5, cards: CARDS,
+    /* ★ V21：`--days=N` 让「截到第 N 天」成为一等能力。
+      用途：复核「末段空转」时不能只看 30 天的终值 —— 要把一局砍到第 20 天，
+      看那一刻手里握着多少现金、有没有东西可买。原来只能改代码或用 -v 目测，
+      而 -v 打的是流水、不是"第 20 天的持仓结构"。
+      ai-shared 早就支持 o.day 这个参数（它同时用于 DAYS_LEFT 的合同缩放），
+      只是 sim.js 一直没把它接出来。 */
+    day: STOP_DAY || undefined,
+  });
 }
 
 const RUNS = Number(process.argv[2] || 3);
@@ -55,6 +64,17 @@ const CARDS = (argVal('cards', 'none') || 'none').toLowerCase();
 /* --nosig：连玩曲线里关掉 V6 招牌配方的跨局继承，做 A/B 对照。
    招牌是唯一的跨局成长线，必须能单独测出它对留存曲线的影响。 */
 const NOSIG = process.argv.includes('--nosig');
+/* --days=N：把这局截到第 N 天（默认跑满 30 天）。配合 --dump 用来复核"末段空转"：
+   看第 20 天手里握着多少现金、还有没有可买的出口，而不是只看 30 天的终值。 */
+const STOP_DAY = Number(argVal('days', 0)) || 0;
+/* --dump：跑完打印最后一局的**第 N 天快照**（持仓结构，不是流水）。
+   ★★ 快照必须取在 endDay 之后（本文件读的是 playSharedAI 返回后的 s，
+      此时最后一次循环已走完 endDay，phase 已是 'report'）。
+      若改成在循环中途打，会拿到 phase==='open' 的营业中状态 ——
+      能跑通、JSON 也正常、渲染也不报错，但看到的备货页和玩家看到的不是一个
+      （drawPanelArea 的 pinH 只在 phase==='prep' 时生效）。这种"能跑但画面不对"
+      比崩溃更难发现，所以这里绝不插入循环内部。 */
+const DUMP = process.argv.includes('--dump');
 
 if (chain > 0) {
   /* 连玩曲线：第 N 局的声望 = 前面每局 prestigeGain 的累积。
@@ -118,13 +138,14 @@ if (chain > 0) {
 for (const d of ['easy', 'normal', 'hard']) {
   const scores = [], bustRuns = [], stuckRuns = [], fullScores = [];
   let last = null;
-  /* ★ V21：分店覆盖率 —— 这是标定模型最大的一个盲区，必须打在脸上。
-     实测：脚本 AI 会开店（平均 1.1~1.5 家），但**从不给分店派人**，
-     于是分店营收恒为 0。也就是说「三档目标」全部是在"只有主店产出"的世界里标定的，
-     而真实玩家开分会派店长托管 —— 两者的经济结构并不一样。
-     ★ 一旦这个数字长期是 0%，任何分店相关改动都无法被这套模拟验证
-       （分店定价口径、店长加成、托管 AI 都测不到）。
-     ★ 不打印出来的后果是：看数字的人会默认"模拟覆盖了全部玩法"。 */
+  /* ★ V21：分店**托管**覆盖率。
+     ⚠️ 这里最初写的是「分店营收恒为 0 ⇒ 模拟只覆盖主店」，那个判断是错的：
+        自营分店的员工就是同一场 sim 里、带 branchIdx 的出杯位，
+        收益记进**主店日报**，分店自身账本字段保持 0 是正常的。
+        我按分店账本读，于是把"字段没写"误读成"没有产出"。
+     ★ 正确的盲区只有一处：**托管店**（auto + managerId）走独立的
+       managedStoreDaily 结算，与实时 sim 无关；而 AI 从不雇店长，
+       所以托管这条路径确实测不到。文案只声称这一点，不再外推。 */
   let branchRuns = 0, branchRevSum = 0, storeSum = 0;
   for (let k = 0; k < RUNS; k++) {
     const { log, s } = playAI(d, undefined, BP);
@@ -192,7 +213,33 @@ for (const d of ['easy', 'normal', 'hard']) {
       + (bustRuns.length && stuckRuns.length ? ' · ' : '')
       + (stuckRuns.length ? `无法开门 ${stuckRuns.join(',')}` : ''));
   }
+  /* ★ V21：自检 —— 完整局 + 未跑完的局 必须等于总局数。
+     这条断言是因为**真的出过一次自相矛盾**：同一行输出里
+     「达标 11/11 局（100%）」与「破产 10」并存，而只跑了 12 局。
+     数字对不上时最危险的不是崩溃，而是它看起来仍然像个结论。
+     宁可吵，也不要让一个不可能的组合被当成数据引用。 */
+  {
+    const seen = new Set([...bustRuns, ...stuckRuns]);
+    const accounted = fullScores.length + seen.size;
+    if (accounted !== RUNS) {
+      console.log(`  ⚠️ 口径自检失败：完整 ${fullScores.length} 局 + 未跑完 ${seen.size} 局`
+        + ` ≠ 总 ${RUNS} 局 —— 本次的破产/达标数字**不可引用**，先修统计`);
+    }
+  }
   const avgStores = (storeSum / RUNS).toFixed(2);
+  /* --dump：最后一局的持仓快照。只打事实，不下结论 —— 结论由看的人下。 */
+  if (DUMP && last && last.s) {
+    const s = last.s;
+    const invVal = E.invValue(s);
+    const upTxt = Object.keys(s.up || {}).map(k => k + ':' + s.up[k]).join(' ');
+    console.log('  ── 快照（Day ' + s.day + ' · phase=' + s.phase + '）──');
+    console.log('     现金 ¥' + Math.round(s.cash) + ' · 库存估值 ¥' + Math.round(invVal)
+      + ' · 投资 ¥' + Math.round(s.invested || 0) + ' · 净资产 ¥' + Math.round(E.netWorth(s)));
+    console.log('     升级 ' + upTxt);
+    console.log('     员工 ' + (s.staff || []).length + ' 人 · 店 ' + (s.stores || []).length + ' 家'
+      + ' · 已解锁配方 ' + (s.recipes || []).length + ' 款 · 在售 ' + (s.menu || []).length + ' 款');
+    console.log('     期间现金峰值（本局快照不可得，仅当前）——需逐日流水请用 -v');
+  }
   /* ★ 样本量提示：n<20 时过关率的 95% 区间宽达 ±20pp。
      本轮真实踩过：同一份代码 normal 在不同批次里 50% 与 73% 都出现过，
      差点据此把一个本来正确的目标改坏。
@@ -207,10 +254,10 @@ for (const d of ['easy', 'normal', 'hard']) {
       + ' —— 别用它微调目标（判阈值请看「完成度」）');
   }
   if (branchRuns === 0) {
-    console.log(`  ⚠️ 分店覆盖 0/${RUNS} 局（平均 ${avgStores} 家店）—— `
-      + '本次数字**只反映主店产出**，分店/托管/店长相关改动无法用此结果验证');
+    console.log(`  ⚠️ 托管店覆盖 0/${RUNS} 局（平均 ${avgStores} 家店）—— `
+      + '本次数字**不含托管结算路径**（AI 从不雇店长）；自营分店的产出已计入主店营收');
   } else {
-    console.log(`  · 分店有产出的局 ${branchRuns}/${RUNS}（平均 ${avgStores} 家店）`
-      + ` · 分店累计营收 ¥${Math.round(branchRevSum)}`);
+    console.log(`  · 托管店有产出的局 ${branchRuns}/${RUNS}（平均 ${avgStores} 家店）`
+      + ` · 托管营收 ¥${Math.round(branchRevSum)}`);
   }
 }
