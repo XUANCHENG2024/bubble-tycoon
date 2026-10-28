@@ -705,14 +705,27 @@ const sfx = makeEnv(390, 844, null, sfxTT);
 sfx.frames(2);
 check(sfx.MG.audio && sfx.MG.audio.available === true,
   '宿主提供 createInnerAudioContext 时音效可用（不再是永久静音）');
-check(sfxCalls.filter(c => c.indexOf('create:audio/') === 0).length === 3,
-  '加载了 3 个音效文件：' + sfxCalls.filter(c => c.indexOf('create:') === 0).map(c => c.slice(7)).join(' / '));
-sfx.MG.audio.play('up', 880, 0.07);     /* 连点出杯：高频 → tap */
-sfx.MG.audio.play('up', 660, 0.12);     /* 升级：中频 → up */
-sfx.MG.audio.play('down', 140, 0.16);   /* 负反馈：低频 → down */
+check(sfxCalls.filter(c => c.indexOf('create:audio/') === 0).length === 5,
+  '加载了 5 个音效文件：' + sfxCalls.filter(c => c.indexOf('create:') === 0).map(c => c.slice(7)).join(' / '));
+/* ★ V21：分流规则改成「语义优先、频率次之」。
+   原来的断言写死了旧行为（play('up',880) 应当播 tap）——
+   而"880Hz 的'升级成功'听起来是点击声"恰恰就是要修的 bug
+   （见 platform.js 里那段长注释：>=850 一律 tap 让所有达成类反馈退化成"嗒"）。
+   新断言按"玩家能听出的语义"组织，而不是按频率档位。 */
+sfx.MG.audio.play('tap');               /* 普通点击 */
+sfx.MG.audio.play('up', 660, 0.12);     /* 升级：低频 up */
+sfx.MG.audio.play('up', 1020, 0.10);    /* 更强的成功：中高 → up2 */
+sfx.MG.audio.play('ach');               /* 成就 / 里程碑：显式 ach */
+sfx.MG.audio.play('down', 140, 0.16);   /* 负反馈 → down */
 const played = sfxCalls.filter(c => c.indexOf('play:') === 0).map(c => c.slice(5));
-check(played.join(',') === 'audio/tap.wav,audio/up.wav,audio/down.wav',
-  '按频率挑对了音效文件：' + played.join(' / '));
+check(played.join(',') === 'audio/tap.wav,audio/up.wav,audio/up2.wav,audio/ach.wav,audio/down.wav',
+  '按语义挑对了音效文件：' + played.join(' / '));
+/* 频率兜底：调用方只给频率、不给语义时仍能落到合理档位
+   （1405Hz 是旧代码里里程碑的第三个音，现在应当落到 ach 而不是 tap） */
+sfxCalls.length = 0;
+sfx.MG.audio.play('up', 1405, 0.16);
+check(sfxCalls.some(c => c === 'play:audio/ach.wav'),
+  '1405Hz 的达成音落到 ach（不再退化成点击声）');
 /* 没有音频 API 的宿主：静默降级，不报错 */
 const mute = makeEnv(390, 844);
 mute.frames(2);

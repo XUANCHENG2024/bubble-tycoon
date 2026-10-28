@@ -116,12 +116,26 @@ if (chain > 0) {
 }
 
 for (const d of ['easy', 'normal', 'hard']) {
-  const scores = [], failedRuns = [];
+  const scores = [], bustRuns = [], stuckRuns = [], fullScores = [];
   let last = null;
   for (let k = 0; k < RUNS; k++) {
     const { log, s } = playAI(d, undefined, BP);
-    scores.push(Math.round(E.netWorth(s)));
-    if (log.some(x => typeof x === 'string')) failedRuns.push(k + 1);
+    const w = Math.round(E.netWorth(s));
+    scores.push(w);
+    /* ★ V21：把"这一局是怎么结束的"分清楚，原来全塞进一个 failedRuns。
+       实测后果：某档打出「达标 6/6 局（100%）」的同时报「⚠️ 破产局次 3」——
+       两条结论互相打脸，因为那个 3 其实大多是「无法开门」而不是破产。
+       ★ 而且**提前中断的局不该参与达标统计**：
+         它在 Day N 就停了，净资产是"半局成绩"，
+         拿它去和 30 天的目标比，既高估达标率也污染平均值。
+         所以额外维护一份"完整局"的分数（fullScores），达标率按它算。 */
+    let broke = false;
+    for (const x of log) {
+      if (typeof x !== 'string') continue;
+      if (x.indexOf('破产') >= 0) { bustRuns.push(k + 1); broke = true; }
+      else if (x.indexOf('无法开门') >= 0) { stuckRuns.push(k + 1); broke = true; }
+    }
+    if (!broke) fullScores.push(w);
     last = { log, s };
   }
   const goal = E.DIFFICULTY[d].goal;
@@ -143,7 +157,23 @@ for (const d of ['easy', 'normal', 'hard']) {
   const avg = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
   let wsTot = 0, recTot = 0, n = 0;
   for (const r of last.log) { if (r && r.ws) { n++; for (const k in r.ws) if (r.ws[k] > 0) wsTot++; recTot += r.recipes || 0; } }
-  console.log(`净资产：${scores.join(' / ')}  平均 ${avg}  达标率 ${(avg / goal * 100).toFixed(0)}%`
-    + (n ? `  | 末局平均产线 ${(wsTot / n).toFixed(1)} 条 · 解锁配方 ${(recTot / n).toFixed(1)} 款` : '')
-    + (failedRuns.length ? `  ⚠️ 破产局次 ${failedRuns.join(',')}` : ''));
+  /* ★ V21：两个数值必须分开报，不能再合并成一句「达标率」。
+     原实现只有 `avg / goal`，标签却叫「达标率」——
+     那不是达标**概率**，是**平均完成度**。
+     实测教训：easy 报「达标率 90%」，但 18 局里一局都没到 58000
+     （中位 44725）—— 完成度 77%、真实达标率 0%。
+     两个数字混为一谈会让「这档到底能不能通」永远看不出来。 */
+  const passN = fullScores.filter(x => x >= goal).length;
+  const fullAvg = fullScores.length
+    ? Math.round(fullScores.reduce((a, b) => a + b, 0) / fullScores.length) : 0;
+  console.log(`净资产：${scores.join(' / ')}  平均 ${avg}`);
+  console.log(`  达标 ${passN}/${fullScores.length || 0} 局（${fullScores.length ? (passN / fullScores.length * 100).toFixed(0) : '-'}%）`
+    + ` · 完整局平均 ${fullAvg} · 完成度 ${fullScores.length ? (fullAvg / goal * 100).toFixed(0) : '-'}%`
+    + (n ? `  | 末局平均产线 ${(wsTot / n).toFixed(1)} 条 · 解锁配方 ${(recTot / n).toFixed(1)} 款` : ''));
+  if (bustRuns.length || stuckRuns.length) {
+    console.log('  ⚠️ 未跑完的局：'
+      + (bustRuns.length ? `破产 ${bustRuns.join(',')}` : '')
+      + (bustRuns.length && stuckRuns.length ? ' · ' : '')
+      + (stuckRuns.length ? `无法开门 ${stuckRuns.join(',')}` : ''));
+  }
 }

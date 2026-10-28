@@ -1324,13 +1324,15 @@ function onDayEnd() {
   if (s.endlessLevelUp) toast('🏆 里程碑达成！新目标 ' + money(goalOf(s)));
   /* ★ V14.3：中期锚点达成 —— 与 H5 端对等。
      原来只有 pushLog（要翻日志才看得到），没有任何即时反馈。
-     ★ 三音上行 beep（980 → 1175 → 1405）是本作最高音档，
+     ★ 三音上行（980 → 1175 → 1405）是本作最高音档，
        刻意区别于普通成功的 760Hz —— 这是 30 天里少数几个
-       "我确实做到了"的时刻，听觉上就该不一样。 */
+       "我确实做到了"的时刻，听觉上就该不一样。
+     ★★ V21：改成单次 beep('ach')。原来那三个高频 beep 在真机上
+       **全部被频率档位归成 tap（点击声）**，听起来就是个"嗒"。
+       现在由 ach.wav 一次播完四音上行 —— 既恢复了"最高音档"的语义，
+       也避免三个音轨同时播放互相盖住。 */
   if (s.milestoneHit) {
-    beep('up', 980, 0.1);
-    beep('up', 1175, 0.1);
-    beep('up', 1405, 0.16);
+    beep('ach');
     toast('🏁 中期目标达成！声望 +1');
     confetti(40);
   }
@@ -1362,6 +1364,9 @@ function emitAchievements(s) {
     toast('🏅 ' + got[i].emoji + ' ' + got[i].name + '  +' + money(got[i].reward.cash || 0)
       + (isFirst ? ' ' + got[i].reward.bp + '★' : ''));
   }
+  /* ★ V21：成就原来**完全没有音效**（只 confetti）。
+     30 天里最该有仪式感的一刻是静音的 —— 补一声 ach.wav（四音上行）。 */
+  beep('ach');
   confetti(24);
 }
 

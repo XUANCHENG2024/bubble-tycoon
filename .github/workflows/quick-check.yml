@@ -121,6 +121,12 @@ jobs:
       - name: 两端口径一致（阶段目标金额 / 锚点判定）
         run: node tools/check-parity-goal.js
 
+      - name: 每日合同可达成性（防「永远不可能完成」的死规则）
+        run: node tools/check-contract.js
+
+      - name: 音效资源完整性（文件 / 格式 / 语义分流）
+        run: node tools/check-audio.js
+
       - name: 发布产物启动自检（脚本顺序 / 模块挂载 / 各面板渲染）
         run: node tools/build-dist.js && node tools/check-dist-boot.js
 

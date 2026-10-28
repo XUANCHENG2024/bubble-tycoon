@@ -2083,7 +2083,19 @@ UI.showReport = function () {
   /* 营销是当日一次性投入，打烊后归零。不说明的话玩家会以为那笔钱白花了。 */
   if (r.marketing > 0) note += `📢 营销投入 ${money(r.marketing)} 当天有效，明日需重新设置。<br>`;
   if (s.endless && r.pressure > 1) note += `⚡ 无尽第 ${s.milestone} 阶：工资与租金 ×${r.pressure.toFixed(2)}。<br>`;
-  if (r.lost > 0) note += `😥 今天流失了 <b>${r.lost}</b> 位顾客` + (r.stockout ? `（缺料 ${r.stockout} 位）` : '') + (r.priceLost ? `、嫌贵 ${r.priceLost} 位` : '') + '。<br>';
+  /* ★ V21：流失改成"按主因拆分"。
+     原来只写「流失 12 位」+ 偶尔补一句缺料/嫌贵 ——
+     玩家知道丢了 12 个人，但**不知道该改什么**：
+     加人手？降价？还是扩座位？三者修法完全不同。
+     现在按数量降序列出主因，第一项就是他明天最该动的地方。 */
+  if (r.lost > 0) {
+    const lb = lostBreakdown(r);
+    const detail = lb.length
+      ? '（' + lb.map(x => `${x.k} ${x.v}`).join(' · ') + ' 位）'
+      : '';
+    note += `😥 今天流失了 <b>${r.lost}</b> 位顾客${detail}。<br>`;
+    if (lb.length) note += `🔍 主因是「${lb[0].k}」—— ${lb[0].tip}。<br>`;
+  }
   if (r.stockout > 0) note += `📦 缺料会直接赶走客人，明天记得提前备货。<br>`;
   if (r.priceLost > r.lost * 0.4 && r.priceLost > 3) note += `💸 有不少人被价格劝退了，试试把倍率调回 1.0 附近，或上架更便宜的款。<br>`;
   if (r.sat >= 0.95) note += `🎯 满意率 ${(r.sat * 100).toFixed(0)}%，服务堪称完美！<br>`;

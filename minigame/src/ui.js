@@ -1309,6 +1309,12 @@ function panelLab(ctx, x, y, w, s) {
 
   var unlocked = (s.recipes || []).map(recipeById).filter(Boolean);
   for (var i = 0; i < unlocked.length; i++) {
+    /* ★ V21 视口剔除：整行在裁剪区外就不画。
+       研发页配方有 60+ 款，全量绘制时每帧要发几百次 fillText，
+       其中八成落在视口外被 clip 直接丢掉 —— 纯浪费。
+       ★ y += 52 必须在 continue 之前：这个循环的 y 是**绝对行高累加**，
+         跳绘制不能跳布局，否则后面所有行都会往上挤。 */
+    if (!GFX.visibleY(y, 52)) { y += 52; continue; }
     var r = unlocked[i];
     var on = (s.menu || []).indexOf(r.id) >= 0;
     /* V6 招牌配方徽章：招牌加成（售价/成本）已算进「基础」后面的数字里，
@@ -1423,6 +1429,10 @@ function panelLab(ctx, x, y, w, s) {
       }
       for (var ni = 0; ni < nodes.length; ni++) {
         var nd = nodes[ni];
+        /* ★ V21 视口剔除：研发树 57 个节点，玩家一屏只看得见 ~9 个，
+           其余 48 个每帧照样走完整绘制（fillRR + 3 次 fillText + button）。
+           y += 58 必须在 continue 之前 —— 行高是绝对累加，跳绘制不能跳布局。 */
+        if (!GFX.visibleY(y, 58)) { y += 58; continue; }
         var nr = recipeById(nd.recipe);
         if (!nr) continue;
         var canR = (nd.status === 'open') ? { ok: true } : { ok: false, msg: '' };
@@ -2777,6 +2787,17 @@ MODALS.report = function (ctx, b, m) {
     text(ctx, items[i].v, ix + 8, iy + 19, { size: FS.md, weight: 800, color: items[i].c, maxW: cw - 16 });
   }
   y += Math.ceil(items.length / cols) * 44 + 8;
+
+  /* ★ V21：流失归因（与 H5 同一份 lostBreakdown）。
+     只画一行、只画非零项、按数量降序 ——
+     「流失 12 人」本身不指导任何动作，主因才指导。
+     行高 16px 且带 maxW，溢出由 diag-fit-audit 兜底。 */
+  var lb = lostBreakdown(r);
+  if (lb.length) {
+    text(ctx, '🔍 主因：' + lb.slice(0, 3).map(function (x) { return x.k + ' ' + x.v; }).join(' · '),
+      x, y, { size: FS.xs, color: T.red, maxW: w });
+    y += 16;
+  }
 
   /* 环比：只给绝对数字，玩家看不出今天是变好还是变差 */
   var pr = s.prevReport;

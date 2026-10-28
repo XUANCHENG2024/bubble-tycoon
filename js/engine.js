@@ -751,6 +751,31 @@ function goalOf(s) {
 }
 
 /**
+ * 流失归因（V21）
+ *
+ * ★ 为什么放在引擎层：两版 UI 都要显示，各写一份必然漂移
+ *   （历史上口径漂移已经坑过几次，比如「达标率」与「完成度」混用）。
+ *
+ * ★ 只返回**非零**项并按数量降序：
+ *   结算页是一屏信息，玩家不会逐条读。
+ *   把「流失 12（等太久 8 · 太贵 3 · 没座 1）」按主因排前面，
+ *   他才知道明天该先修哪一个 —— 这是"少想一步"的全部意义。
+ *
+ * @returns {{k:string, v:number, tip:string}[]}  已排序、已过滤零值
+ */
+function lostBreakdown(r) {
+  if (!r) return [];
+  const rows = [
+    { k: '等太久', v: num(r.waitLost, 0), tip: '加出杯位 / 升级效率 / 招人' },
+    { k: '嫌太贵', v: num(r.priceLost, 0), tip: '调低价格倍率或上架便宜款' },
+    { k: '没座位', v: num(r.fullLost, 0), tip: '升级装修扩队列' },
+    { k: '缺料', v: num(r.stockout, 0), tip: '备货补足常用料' },
+    { k: '没排到', v: num(r.closedLost, 0), tip: '打烊清场时还在排队（产能不足）' },
+  ];
+  return rows.filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+}
+
+/**
  * 下一步经营建议（V20）
  *
  * ★ 为什么需要它：
@@ -2301,18 +2326,37 @@ function managedStoreOneDay(s, store, mgr) {
   const mb = managerBonus(s, store.branch);
   traffic = Math.round(traffic * mb.ops);
 
-  /* --- 出杯：员工效率 × 客流 --- */
-  /* ★ 熟练团队（该店专用）：员工效率加成
-     托管店同样吃 —— 升级投在谁身上对谁生效，与谁经营无关。 */
+  /* --- 出杯效率：员工熟练度 × 该店「熟练团队」升级 --- */
+  /* ★ 熟练团队（该店专用）：托管店同样吃 ——
+     升级投在谁身上就对谁生效，与谁经营无关。 */
   const avgSkill = staff.reduce((a, st) => a + staffMult(s, st), 0) / staff.length
     * storeStaffBonus(s, store);
-  const cups = Math.max(0, Math.round(traffic * 0.72 * avgSkill * mb.speed));
 
   /* --- 营收：客单价取该店能卖的平均价 --- */
+  /* ★★ V21 修复：客单价必须走 priceOf()（玩家实际定价），不能取配方基准价。
+     原来写 recipeById(rid).price —— 那是**出厂价**：
+       玩家把自己店里的招牌加价 20%、或整体调到 1.3 倍，
+       托管分店的收入一分钱都不涨，自营店却实打实多赚。
+     结果是「托管 = 你对这家店的定价完全不生效」，
+     而托管恰恰是玩家不亲自盯的那家店，最应该吃定价策略的红利。
+     ★ 但不能只换价格：那样「把所有倍率拉满」就成了无风险套利
+       （分店客流不受价格影响）。所以同时引入 priceDrag 扣量 ——
+       与自营店「嫌贵就走」同一方向，只是用平滑近似
+       （托管店不做逐客判定，逐客要靠 26 秒实时模拟，托管没有那个循环）。
+     ★ ratio = 1.0 时 priceDrag = 1，**行为与旧版逐字节一致** ——
+       这是刻意保留的安全边界：不动定价的玩家不会感到任何数值变化。 */
   const menu = s.menu || [];
   const avgPrice = menu.length
-    ? menu.reduce((a, rid) => a + (recipeById(rid) ? recipeById(rid).price : 20), 0) / menu.length
+    ? menu.reduce((a, rid) => a + (recipeById(rid) ? priceOf(s, rid) : 20), 0) / menu.length
     : 20;
+  const avgRatio = menu.length
+    ? menu.reduce((a, rid) => a + num(s.ratios[rid], 1), 0) / menu.length
+    : 1;
+  const priceDrag = clamp(1 - (avgRatio - 1) * 0.35, 0.55, 1.10);
+
+  /* --- 出杯：员工效率 × 客流 × 定价对量的影响 --- */
+  const cups = Math.max(0, Math.round(traffic * 0.72 * avgSkill * mb.speed * priceDrag));
+
   const revenue = Math.round(cups * avgPrice * 0.92);   /* 0.92：折价与未满座的损耗 */
 
   /* --- 成本：原料 + 工资 + 固定开支 --- */
@@ -2554,7 +2598,17 @@ function openShop(s) {
     t: 0, duration: dur, closing: false,
     traffic, rate: traffic / (dur * 1.19), arrivalAcc: 0, spawned: 0,
     queue: [], stations, paused: false,
+    /* ★ V21：流失必须**分桶**记录，只留总数等于不给信息。
+       原来只有一个 lost 总数，结算只写「流失 12 位」——
+       玩家知道丢了 12 个人，但不知道是"我不够快"还是"我太贵"还是"我没座"，
+       下一天的动作只能靠猜。四类流失对应的修法完全不同：
+         等太久 → 加出杯位 / 升效率 / 招人
+         嫌太贵 → 调价倍率 / 换便宜款
+         没座   → 升装修（扩队列）/ 限流
+         缺料   → 备货
+       分桶之后「流失 12（等 8 · 贵 3 · 没座 1）」是可以直接指导决策的。 */
     orders: 0, cups: 0, lost: 0, priceLost: 0, stockout: 0,
+    waitLost: 0, fullLost: 0, closedLost: 0,
     revenue: 0, cogs: 0, tips: 0,
     typeServed: {}, typeLost: {}, byRecipe: {},
     repGain: 0, trendCups: 0, clicks: 0, combo: 0, comboBest: 0, lastClick: 0, lastClickWall: 0,
@@ -2753,7 +2807,8 @@ function regularView(s) {
   const pull = regularPullMul(s, reg);
   /* 等位座满了 → 直接走人 */
   if (sim.queue.length >= queueCap(s)) {
-    sim.lost++; sim.repGain += CFG.LOST_REP;
+    sim.lost++; sim.fullLost++;
+    sim.repGain += CFG.LOST_REP;
     sim.typeLost[t.id] = (sim.typeLost[t.id] || 0) + 1;
     bumpQuest(s, 'lost', 1);
     return;
@@ -3012,7 +3067,7 @@ function tick(s, dt) {
     c.wait += dt;
     if (c.wait > c.patience) {
       sim.queue.splice(i, 1);
-      sim.lost++;
+      sim.lost++; sim.waitLost++;
       sim.repGain += CFG.LOST_REP;
       sim.typeLost[c.type] = (sim.typeLost[c.type] || 0) + 1;
       bumpQuest(s, 'lost', 1);
@@ -3047,7 +3102,7 @@ function tick(s, dt) {
   const hardStop = sim.t > sim.duration + CFG.LAST_CALL;
   if (done || hardStop) {
     for (const c of sim.queue) {
-      sim.lost++;
+      sim.lost++; sim.closedLost++;
       sim.repGain += CFG.LOST_REP * 0.5;
       sim.typeLost[c.type] = (sim.typeLost[c.type] || 0) + 1;
       bumpQuest(s, 'lost', 1);
@@ -3127,6 +3182,10 @@ function endDay(s) {
   s.report = {
     day: s.day, served: sim.cups || 0, orders: sim.orders || 0, lost: sim.lost,
     priceLost: sim.priceLost || 0, stockout: sim.stockout,
+    /* V21：流失四类（加上 stockout 共五类），供结算页做归因展示。
+       五者之和 == lost（另有极少数边界情况可能不入桶，UI 只显示非零项）。 */
+    waitLost: sim.waitLost || 0, fullLost: sim.fullLost || 0,
+    closedLost: sim.closedLost || 0,
     revenue: sim.revenue, cogs: sim.cogs, wages, rent,
     marketing: s.dayMarketing || 0, net,
     sat, repBefore: before, repAfter: s.rep, repDelta: s.rep - before,
@@ -3582,6 +3641,14 @@ function contractMetrics(s) {
   const sim = s.sim || s.report || {};
   const orders = num(sim.orders, 0);
   const revenue = num(sim.revenue, 0);
+  /* ★ V21：三条阈值必须从**当前合同**取，不能只写在 check 里。
+     原来 c_cheap / c_premium / c_nolost 的 check 读 m.avgCap / m.avgFloor / m.lostCap，
+     而这里从没提供过这三个字段 —— `m.avgPrice <= undefined` 恒为 false，
+     三条合同**永远不可能达成**，玩家每天白扣 3~4 点口碑（10 条里占 3 条 = 28.9% 的日子）。
+     ★ 缺省值是 ±Infinity 而不是 0：
+       没设阈值的合同不能被「默认 0」误判失败（lost <= Infinity 恒真）。
+       用 ±Infinity 而不是 undefined，判据逻辑本身不需要任何特判。 */
+  const c = (s.contract && contractById(s.contract.id)) || {};
   return {
     cups: num(sim.cups, 0),
     orders,
@@ -3594,6 +3661,10 @@ function contractMetrics(s) {
     comboBest: num(sim.comboBest, 0),
     trendCups: num(sim.trendCups, 0),
     typeServed: Object.assign({}, sim.typeServed || {}),
+    /* 合同自带的阈值（缺省不设限） */
+    avgCap: c.avgCap == null ? Infinity : num(c.avgCap, Infinity),
+    avgFloor: c.avgFloor == null ? -Infinity : num(c.avgFloor, -Infinity),
+    lostCap: c.lostCap == null ? Infinity : num(c.lostCap, Infinity),
     /* ★ V13.5 地域维度指标（供「地域挑战」关卡用）。
        全部**只统计当天**（与其它关卡指标同一口径），
        这样「今天在成都卖了多少杯」才是玩家能当场看到、能努力达成的事。

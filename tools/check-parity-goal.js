@@ -99,6 +99,18 @@ console.log('\n--- ③ 阶段刻度用同一套锚点 ---');
   check(ratioLen === stageLen && stageLen === easyLen,
     '刻度表长度 = 阶段数 = 各档锚点数（'
     + ratioLen + '/' + stageLen + '/' + easyLen + '）');
+
+  /* ★★ V21：长度一致**不够**，刻度位置本身也必须与判定点吻合。
+     原来只守长度，于是比例固定写死 [0.09…] 而锚点早已改成绝对值，
+     第 5 个刻度错位 22pp —— 玩家看到刻度过了，实际判定还没到。
+     这里允许 1.5pp 的取整误差（比例保留三位小数）。 */
+  const ratio = JSON.parse(window.eval('JSON.stringify(MILESTONE_RATIO)'));
+  const gNormal = JSON.parse(window.eval('JSON.stringify(STAGE_GOALS.normal)'));
+  const last = gNormal[gNormal.length - 1];
+  const drift = ratio.map((r, i) => Math.abs(r - gNormal[i] / last));
+  check(drift.every(d => d <= 0.015),
+    '刻度位置与 normal 锚点占比吻合（最大偏差 '
+    + (Math.max.apply(null, drift) * 100).toFixed(1) + 'pp ≤ 1.5pp）');
 }
 
 console.log('');

@@ -495,10 +495,50 @@ var PLAT = (function () {
   /* ---------- 音频 ----------
      浏览器：WebAudio 实时合成，零资源文件。
      小游戏：没有 AudioContext，只能走 tt.createInnerAudioContext() + 真实音频文件。
-     音频文件由 tools/gen-sfx.js 离线合成（3 个极短 WAV，合计约 17KB）——
+     音频文件由 tools/gen-sfx.js 离线合成（5 个极短 WAV，合计约 62KB）——
      本作核心手感是「连点出杯位」，点下去没声音，手感就只剩振动一半。
-     文件缺失或宿主不支持时整体降级为静音，绝不影响玩法。 */
-  var SFX_FILES = { tap: 'audio/tap.wav', up: 'audio/up.wav', down: 'audio/down.wav' };
+     文件缺失或宿主不支持时整体降级为静音，绝不影响玩法。
+
+     ★★ V21 修复：分流规则改成「语义优先、频率次之」。
+     原来的规则纯按频率硬切：
+         freq >= 850 → tap    freq < 300 → down    其余 → up
+     而代码里 48 处 beep() 中，达成类反馈大量使用 880 / 980 / 1175 / 1405Hz
+     （中期目标三连音、成就、老板亲自上阵）——
+     它们**全部落进 >=850 这一档，播的是 tap（0.06 秒的点击声）**。
+     结果：玩家第一次达成中期目标，听到的声音和随手点一下 Tab 完全一样。
+     注释里写着"三音上行是本作最高音档，刻意区别于普通成功的 760Hz"，
+     而真机上那三个音都是"嗒"。
+
+     新规则：kind 说明意图，频率只在"同一意图内"再分强度 ——
+        tap   → tap
+        down  → down
+        up    → >=1200 ach · >=900 up2 · 其余 up
+     且调用方可以显式传 'ach' / 'up2' 覆盖（里程碑三连音已改为单次 'ach'）。 */
+  var SFX_FILES = {
+    tap: 'audio/tap.wav',
+    up: 'audio/up.wav',
+    up2: 'audio/up2.wav',
+    ach: 'audio/ach.wav',
+    down: 'audio/down.wav',
+  };
+  /** 语义 + 强度 → 文件名。抽成纯函数，方便两版共用与测试。 */
+  function sfxKeyOf(kind, freq) {
+    var f = Number(freq) || 0;
+    if (kind === 'tap') return 'tap';
+    if (kind === 'down') return 'down';
+    if (kind === 'ach' || kind === 'up2' || kind === 'up') {
+      if (kind === 'ach') return 'ach';
+      if (kind === 'up2') return 'up2';
+      if (f >= 1200) return 'ach';
+      if (f >= 900) return 'up2';
+      return 'up';
+    }
+    /* 未知 kind：退回按频率推断（保持对旧调用点的兼容） */
+    if (f >= 1200) return 'ach';
+    if (f >= 900) return 'up2';
+    if (f < 300) return 'down';
+    return 'up';
+  }
   function createAudio() {
     if (isTT) {
       var pool = {};
@@ -514,10 +554,9 @@ var PLAT = (function () {
       return {
         available: has,
         resume: function () { },
+        keyOf: sfxKeyOf,
         play: function (kind, freq, dur) {
-          /* 按频率挑文件：调用方仍然只说「响一下」，不用为每个事件新增常量。
-             高频 = 连点出杯（要短促），低频 = 负反馈，其余 = 正向反馈。 */
-          var key = freq >= 850 ? 'tap' : (freq < 300 ? 'down' : 'up');
+          var key = sfxKeyOf(kind, freq);
           var a = pool[key] || pool.up;
           if (!a) return;
           try { a.stop(); a.seek(0); a.play(); } catch (e) { /* 音效永远不该影响玩 */ }

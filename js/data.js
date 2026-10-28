@@ -1825,12 +1825,21 @@ const CONTRACTS = [
     check: (m, g) => m.revenue >= g },
   { id: 'c_cheap', emoji: '🏷️', name: '薄利多销', cash: 127, failRep: -3,
     desc: '卖出 12 杯且平均单价 ≤ ¥28', goal: 12, unit: '杯', metric: 'cups', dir: 'up',
+    /* ★ V21：阈值必须**显式登记在合同上**，不能只写在 check 里。
+       原来 check 读 m.avgCap，而 contractMetrics() 从来不给这个字段 ——
+       `m.avgPrice <= undefined` 恒为 false，这条合同**永远不可能达成**，
+       玩家每天白扣 3 点口碑。avgCap/avgFloor/lostCap 三条都是这个毛病。
+       现在由 contractMetrics 从本合同的字段里取，缺省为 ±Infinity
+       （没有设阈值的合同不会因此被误判失败）。 */
+    avgCap: 28,
     check: (m, g) => m.cups >= g && m.avgPrice <= m.avgCap },
   { id: 'c_premium', emoji: '💎', name: '高端形象', cash: 138, failRep: -4,
     desc: '卖出 8 杯且平均单价 ≥ ¥26', goal: 8, unit: '杯', metric: 'cups', dir: 'up',
+    avgFloor: 26,
     check: (m, g) => m.cups >= g && m.avgPrice >= m.avgFloor },
   { id: 'c_nolost', emoji: '🎯', name: '零流失', cash: 110, failRep: -4,
     desc: '完成 8 单且流失 ≤ 2 人', goal: 8, unit: '单', metric: 'orders', dir: 'up',
+    lostCap: 2,
     check: (m, g) => m.orders >= g && m.lost <= m.lostCap },
   { id: 'c_combo', emoji: '⚡', name: '手速达人', cash: 99, failRep: -3,
     desc: '连点出杯位 20 次', goal: 20, unit: '次', metric: 'clicks', dir: 'up',
@@ -2099,13 +2108,19 @@ const QUEST_COUNT = 3;
  *   简单难度上失败干脆不扣（那里本来就该躺赢）。
  */
 const DIFFICULTY = {
-  easy:   { key: 'easy',   name: '佛系躺赢', emoji: '🌱', cash: 1100, goal: 58000, traffic: 1.15, costMult: 0.88, rentMult: 0.8,
+  /* ★★ V21：goal 与 STAGE_GOALS 的最后一项必须一致（有回归锁守着）。
+     三档的目标**递增**、达标率**递减**，依据见 STAGE_GOALS 上方的实测记录：
+     easy 40000 / normal 44000 / hard 48000。
+     旧值 58000/47000/54000 的问题是「easy 比 hard 还难通」——
+     因为三档的实测产出几乎相同（42699/42034/39445），
+     却给 easy 配了一个高 30% 的目标。 */
+  easy:   { key: 'easy',   name: '佛系躺赢', emoji: '🌱', cash: 1100, goal: 40000, traffic: 1.15, costMult: 0.88, rentMult: 0.8,
             contractGoal: 0.80, contractPenalty: 0, stageGoal: 0.85,
             desc: '现金流宽松，适合先熟悉玩法' },
-  normal: { key: 'normal', name: '标准创业', emoji: '🔥', cash: 700, goal: 47000, traffic: 1.0, costMult: 1.0, rentMult: 1.0,
+  normal: { key: 'normal', name: '标准创业', emoji: '🔥', cash: 700, goal: 44000, traffic: 1.0, costMult: 1.0, rentMult: 1.0,
             contractGoal: 1.0, contractPenalty: 0.6, stageGoal: 1.0,
             desc: '推荐首次挑战，需要认真经营' },
-  hard:   { key: 'hard',   name: '地狱卷王', emoji: '💀', cash: 520, goal: 54000, traffic: 0.90, costMult: 1.15, rentMult: 1.22,
+  hard:   { key: 'hard',   name: '地狱卷王', emoji: '💀', cash: 520, goal: 48000, traffic: 0.90, costMult: 1.15, rentMult: 1.22,
             contractGoal: 1.22, contractPenalty: 0.35, stageGoal: 1.30,
             desc: '成本高、客流少，建议攒够声望再挑战' },
 };
@@ -2204,18 +2219,56 @@ const MILESTONE_EVERY = 5;
  * ★ 数值来源：tools/probe-curve.js 实测逐日净资产后，
  *   按锚点日的 1.20 倍反推（够得着但要努力）。
  *   真实玩家会用策略卡与菜系加成（模拟器不用），所以再上浮 10~15%。
+ *
+ * ★★ V21 重标定（2026-10-28）：上面这套「1.20 倍」只在 normal 档成立。
+ *   实测 18 局 × 3 档（bp=0 / 随机策略卡）暴露了两个硬事实：
+ *
+ *   ① **三档的产出几乎没有差别**，难度参数只改了过程，没改终点：
+ *        easy   平均 42699  中位 44725  p75 48820
+ *        normal 平均 42034  中位 43662  p75 47596
+ *        hard   平均 39445  中位 38451  p75 45886
+ *      既然终点差不多，「用 goal 拉开难度」就只剩「把某一档设成不可能」。
+ *
+ *   ② **旧值把 easy 和 hard 都设成了不可能**：
+ *        easy   目标 58000 → 实测 0/18 达标（中位只有 44725，锚点要 1.28 倍）
+ *        normal 目标 47000 → 5/18 达标
+ *        hard   目标 54000 → 实测 0/18 达标（锚点要 1.38 倍）
+ *      也就是三档里**只有 normal 是认真标定过的**，另两档是旧的、
+ *      且 easy 的锚点比 hard 还高 —— 「简单模式比地狱模式更难通」。
+ *
+ *   ★ 新口径（三档同一套「拉伸系数」，各自贴自己的曲线）：
+ *      goal 按「实测中位数 ±」定，使**达标率随难度单调下降**：
+ *        easy   40000  约 73% 达标（完成度 107%）
+ *        normal 44000  约 48% 达标（完成度  95%）
+ *        hard   48000  约 13% 达标（完成度  82%）
+ *      → 目标金额递增、达标率递减，两条轴同时单调，语义才对得上。
+ *      ⚠️ 不能反过来给 hard 设更低的目标来「保证能通」——
+ *         那会让玩家看到「地狱模式目标比简单模式还低」，比现在更荒谬。
+ *
+ *   ★ 锚点 = 该档**自己**的实测逐日曲线 × (新 goal / 实测终值)。
+ *     不共用同一套比例：三档增长形状不同（easy 前快后慢、hard 全程平缓），
+ *     共用比例必然在某档上过松或过紧 —— 这正是旧值出错的方式。
+ *     ⚠️ 因此跨难度的同一天锚点**不保证递增**（如 Day 5：easy 5300 > hard 4700）。
+ *        这是刻意的取舍：玩家一局只看得见自己那档的锚点，
+ *        而「本档内锚点够得着」比「跨难度数字好看」重要得多。
  */
 const STAGE_GOALS = {
-  easy:   [8600, 13800, 27100, 44700, 53500, 58000],
-  normal: [5200, 7400, 11500, 22000, 30000, 47000],
-  hard:   [5800, 9700, 15500, 29600, 40000, 54000],
+  easy:   [5300, 10200, 19000, 26700, 33900, 40000],
+  normal: [4600, 8900, 14700, 23700, 35200, 44000],
+  hard:   [4700, 8500, 13300, 22300, 34700, 48000],
 };
 
 /* 兼容旧引用（UI 层用 MILESTONE_RATIO 画刻度）——
    ★ 保留是为了让刻度条仍能显示；实际判定已改走 STAGE_GOALS。
    ★ 注意刻度用的是**比例**，而判定用绝对值 —— 两者不再等价，
-     UI 显示的是「相对位置」，判定用的是「真金额」。 */
-const MILESTONE_RATIO = [0.09, 0.17, 0.28, 0.42, 0.58, 1.0];
+     UI 显示的是「相对位置」，判定用的是「真金额」。
+   ★★ V21：这组比例必须跟着 STAGE_GOALS.normal 一起改。
+     原来固定写死 [0.09,0.17,0.28,0.42,0.58,1.0]，而 normal 的真实锚点
+     占比是 [0.105,0.202,0.334,0.539,0.80,1.0] ——
+     于是进度条上的刻度**和真实的判定点错位**：
+     玩家看到刻度已过，实际还没达标（第 5 个刻度错位最大，差 22pp）。
+     现在直接取 normal 的真实占比，两者恒等；check-parity-goal 里有锁。 */
+const MILESTONE_RATIO = [0.105, 0.202, 0.334, 0.539, 0.80, 1.0];
 
 /* 锚点个数（= MILESTONE_EVERY 窗口数）。
    ★ 单独导出而不是到处写 MILESTONE_RATIO.length ——

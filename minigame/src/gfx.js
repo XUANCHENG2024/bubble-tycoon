@@ -327,6 +327,23 @@ function clipPop(ctx) {
   HIT.stack.pop();
 }
 
+/** 这一段纵向范围是否与当前裁剪区相交？（没有裁剪区时一律视为可见）
+ *
+ *  ★ V21：长列表页（研发 57 节点、配方 60+ 款）是**全量绘制**的 ——
+ *    滚动到哪都画全部行，实测研发页每帧 979 次绘制调用，
+ *    其中 81% 的 fillText 落在裁剪区之外（画完被 clip 丢掉）。
+ *    低端机上这就是白烧的 CPU/电量。
+ *  ★ 判据故意宽松（相交即算可见，留一像素余量）：
+ *    宁可多画一行，也不能让滚动边缘出现"半行被吃掉"。
+ *  ★ 命中区不用单独处理：addHit 本来就会把命中区裁到 clip 内，
+ *    整行在视口外时它登记出来的矩形会被裁没，跳过绘制不改变任何可点区域。
+ */
+function visibleY(y, h) {
+  if (!HIT.stack.length) return true;
+  var c = HIT.stack[HIT.stack.length - 1];
+  return (y + (h || 0) >= c.y - 1) && (y <= c.y + c.h + 1);
+}
+
 function addHit(x, y, w, h, act, id, extra) {
   y += HIT.offY;   /* 弹窗滚动时命中区跟着内容一起走（见 setHitOffset） */
   /* ★★ V20.9：记录「原始尺寸」与「是否被裁剪」 ★★
@@ -525,7 +542,7 @@ if (typeof globalThis !== 'undefined') {
     /* ★ V20.8：全局字号缩放（见 FS 的注释）*/
     setTextScale: setTextScale, getTextScale: getTextScale,
     hitReset: hitReset, hitAt: hitAt, addHit: addHit, setHitOffset: setHitOffset,
-    clipPush: clipPush, clipPop: clipPop,
+    clipPush: clipPush, clipPop: clipPop, visibleY: visibleY,
     get hits() { return HIT.list; },
   };
 }
