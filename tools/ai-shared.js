@@ -212,10 +212,14 @@ function playSharedAI(E, diff, bp, sig, opt) {
     log.push({
       ws: Object.assign({}, s.workshops),
       recipes: s.recipes.length,
-      day: rep.day, served: rep.cups, orders: rep.orders,
+      day: rep.day, served: rep.served, orders: rep.orders,
       rev: Math.round(rep.revenue), net: Math.round(rep.net),
       rep: Math.round(rep.repAfter), cash: Math.round(s.cash),
       worth: Math.round(E.netWorth(s)), staff: s.staff.length, shops: s.shops,
+      /* ★ V21：sim -v 的逐日表要打「客流 / 流失」两列，而这里原来没记 ——
+         表头有列、数字是 undefined，看的人会以为"这一局没人流失"。
+         补上 report 里已有的字段即可（served 用 cups 已有，这里只补两个）。 */
+      lost: rep.lost || 0, traffic: rep.traffic != null ? rep.traffic : (rep.orders || 0) + (rep.lost || 0),
     });
     /* 打烊三选一：三种口径对照，验证「卡牌只改收益结构、不改收益总量」 */
     if (o.cards && o.cards !== 'none' && Array.isArray(s.cardOffer) && s.cardOffer.length) {

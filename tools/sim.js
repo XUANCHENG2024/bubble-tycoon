@@ -118,6 +118,14 @@ if (chain > 0) {
 for (const d of ['easy', 'normal', 'hard']) {
   const scores = [], bustRuns = [], stuckRuns = [], fullScores = [];
   let last = null;
+  /* ★ V21：分店覆盖率 —— 这是标定模型最大的一个盲区，必须打在脸上。
+     实测：脚本 AI 会开店（平均 1.1~1.5 家），但**从不给分店派人**，
+     于是分店营收恒为 0。也就是说「三档目标」全部是在"只有主店产出"的世界里标定的，
+     而真实玩家开分会派店长托管 —— 两者的经济结构并不一样。
+     ★ 一旦这个数字长期是 0%，任何分店相关改动都无法被这套模拟验证
+       （分店定价口径、店长加成、托管 AI 都测不到）。
+     ★ 不打印出来的后果是：看数字的人会默认"模拟覆盖了全部玩法"。 */
+  let branchRuns = 0, branchRevSum = 0, storeSum = 0;
   for (let k = 0; k < RUNS; k++) {
     const { log, s } = playAI(d, undefined, BP);
     const w = Math.round(E.netWorth(s));
@@ -136,6 +144,14 @@ for (const d of ['easy', 'normal', 'hard']) {
       else if (x.indexOf('无法开门') >= 0) { stuckRuns.push(k + 1); broke = true; }
     }
     if (!broke) fullScores.push(w);
+    /* 分店统计：只数"非主店且累计营收 > 0"的，才是真的在贡献经济 */
+    const stores = s.stores || [];
+    storeSum += stores.length;
+    for (const st of stores) {
+      if (!st || st.main) continue;
+      const rev = E.num(st.revTotal != null ? st.revTotal : st.revenue, 0);
+      if (rev > 0) { branchRuns++; branchRevSum += rev; break; }
+    }
     last = { log, s };
   }
   const goal = E.DIFFICULTY[d].goal;
@@ -175,5 +191,26 @@ for (const d of ['easy', 'normal', 'hard']) {
       + (bustRuns.length ? `破产 ${bustRuns.join(',')}` : '')
       + (bustRuns.length && stuckRuns.length ? ' · ' : '')
       + (stuckRuns.length ? `无法开门 ${stuckRuns.join(',')}` : ''));
+  }
+  const avgStores = (storeSum / RUNS).toFixed(2);
+  /* ★ 样本量提示：n<20 时过关率的 95% 区间宽达 ±20pp。
+     本轮真实踩过：同一份代码 normal 在不同批次里 50% 与 73% 都出现过，
+     差点据此把一个本来正确的目标改坏。
+     CI 判阈值用「完成度」（方差极小），人做设计判断看「过关率」（必须 n≥100）。 */
+  if (RUNS < 20) {
+    const p = fullScores.length ? passN / fullScores.length : 0;
+    /* ★ p 恰好等于 0 或 1 时标准误公式给 0 —— 那不是"精度极高"，
+       而是"全部落在同一侧"，真实区间反而最宽。别再打印 ±0pp 误导人。 */
+    const se = (p > 0 && p < 1 && fullScores.length) ? Math.sqrt(p * (1 - p) / fullScores.length) : NaN;
+    const band = isNaN(se) ? '无法估计（全对或全错）' : '约 ±' + (1.96 * se * 100).toFixed(0) + 'pp';
+    console.log(`  · 样本提示：n=${fullScores.length}，过关率 95% 区间 ${band}`
+      + ' —— 别用它微调目标（判阈值请看「完成度」）');
+  }
+  if (branchRuns === 0) {
+    console.log(`  ⚠️ 分店覆盖 0/${RUNS} 局（平均 ${avgStores} 家店）—— `
+      + '本次数字**只反映主店产出**，分店/托管/店长相关改动无法用此结果验证');
+  } else {
+    console.log(`  · 分店有产出的局 ${branchRuns}/${RUNS}（平均 ${avgStores} 家店）`
+      + ` · 分店累计营收 ¥${Math.round(branchRevSum)}`);
   }
 }
