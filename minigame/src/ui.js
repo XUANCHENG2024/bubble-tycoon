@@ -17,6 +17,12 @@ var VIEW = {
   tab: 'manage',
   modal: null,              /* 弹窗类型 + 附带数据 */
   scroll: { manage: 0, lab: 0, up: 0, staff: 0, rival: 0, ach: 0 },
+  /* ★ V21：研发页「待加菜」列表默认折叠。
+     它原来是把已解锁配方全量平铺（每款 52px），而这一块又排在研发树**之前** ——
+     实测解锁到第 4 款（D3~D4）时，研发树的第一个按钮就被顶出首屏；
+     到 D30 首屏是 12 个「上架」按钮、0 个「研发」按钮。
+     一个叫"研发"的页面，首屏看不到研发 —— 这是页面身份失效，不是排布问题。 */
+  labRecipesOpen: false,
   toasts: [],
   confetti: [],
   floaters: [],
@@ -1301,13 +1307,24 @@ function panelLab(ctx, x, y, w, s) {
   }
   y += 6;
 
+  /* ★★ V21：这里只列「还没上架」的，并默认折叠。
+     ★ 为什么只列未上架：已上架的配方在经营页「菜单与定价」里就能下架，
+       在这里再列一遍等于把同一张清单维护两份，还把研发树越推越远。
+     ★ 为什么折叠：即使只列未上架的，解锁到 20 款、上架 8 款时也有 12 行 = 620px，
+       照样能把研发树顶出首屏。折叠后这一块恒定 42px，研发树稳定在首屏。
+     ★ 点整行展开（不是小箭头）—— 触屏上 12px 的箭头命中区太难按。 */
+  var pending = (s.recipes || []).map(recipeById).filter(Boolean)
+    .filter(function (r) { return (s.menu || []).indexOf(r.id) < 0; });
+  var lrOpen = !!VIEW.labRecipesOpen;
   GFX.card(ctx, x, y, w, 34);
-  text(ctx, '🧪 已解锁配方', x + 10, y + 9, { size: FS.md, weight: 800 });
-  text(ctx, '菜单位 ' + (s.menu || []).length + '/' + menuSlots(s), x + w - 10, y + 10,
-    { size: FS.sm, align: 'right', color: T.txt3 });
-  y += 44;
+  text(ctx, '🧪 待加菜 ' + pending.length + ' 款', x + 10, y + 9, { size: FS.md, weight: 800 });
+  text(ctx, '菜单位 ' + (s.menu || []).length + '/' + menuSlots(s)
+    + (pending.length ? (lrOpen ? '　▴ 收起' : '　▾ 展开') : ''),
+    x + w - 10, y + 10, { size: FS.sm, align: 'right', color: pending.length ? T.cyan : T.txt3 });
+  if (pending.length) GFX.addHit(x, y, w, 34, 'labrecipes', null, null);
+  y += 42;
 
-  var unlocked = (s.recipes || []).map(recipeById).filter(Boolean);
+  var unlocked = lrOpen ? pending : [];
   for (var i = 0; i < unlocked.length; i++) {
     /* ★ V21 视口剔除：整行在裁剪区外就不画。
        研发页配方有 60+ 款，全量绘制时每帧要发几百次 fillText，

@@ -270,6 +270,81 @@ for (const dev of DEVICES) {
 
   /* 逐个面板渲染 */
   for (const tab of PANELS) {
+    /* ★★ V21：研发页「首屏有没有研发按钮」专属诊断。
+       ★ 为什么单独量：绘制次数只能说明"省了多少"，说明不了
+         "该看到的有没有看到"。实测过的真实症状是 ——
+         解锁到第 4 款配方后，研发页首屏 100% 是「上架」按钮、研发按钮 0 个，
+         而这一页叫"研发"。这种失效不会崩、不会报错，只会让人觉得游戏没内容。
+       ★ 用真实 draw() + 拦截 addHit，量的是玩家能点到的位置，不是算出来的。 */
+    if (tab === 'lab') {
+      /* ★ 必须自己清一次：这段诊断跑在下面的 env.ops.length = 0 之前，
+         不清空就会读到**上一个面板**（manage）的绘制，量出来的全是别页内容。 */
+      env.ops.length = 0;
+      let rows = [];
+      try {
+        rows = run(`(function(){
+          var out = [];
+          var _ah = GFX.addHit;
+          GFX.addHit = function(x, y, w, h, act, id, ex) {
+            out.push({ act: act, y: y, h: h });
+            return _ah.call(GFX, x, y, w, h, act, id, ex);
+          };
+          VIEW.screen = 'game'; VIEW.tab = 'lab'; VIEW.modal = null;
+          VIEW.scroll.lab = 0;
+          VIEW.labRecipesOpen = false;   /* 显式复位：折叠态才是默认态，否则上一次测试的状态会带进来 */
+          /* ★ 必须造「已经解锁若干款」的局面再量：
+             空局里没有可研节点，量出来永远是"全页 0 个研发按钮"，
+             那不是缺陷、是没内容 —— 用它验收会得到一个假阳性。 */
+          var S2 = __MINIGAME.S, oldR = S2.recipes, oldM = S2.menu;
+          S2.recipes = RECIPES.slice(0, 8).map(function (r) { return r.id; });
+          S2.menu = S2.recipes.slice(0, 5);
+          __MINIGAME.draw(ctx, ${dev.w}, ${dev.h}, 0);
+          S2.recipes = oldR; S2.menu = oldM;
+          GFX.addHit = _ah;
+          return out;
+        })()`);
+      } catch (e) { rows = []; }
+      /* ★ 再看一眼"折叠卡之后是什么"：把 lab 面板前 8 条文本的 y 打出来。
+         research 按钮在有些局面下本来就不存在（没有可研节点），
+         那种情况下"首屏有没有研发按钮"测不出东西 ——
+         但"研发树排在第几屏"永远可测，它是这页的结构问题。 */
+      try {
+        /* 只看面板区（跳过 HUD）—— HUD 的 DAY/现金 也在 ops 里 */
+        const labTexts = env.ops.filter(o => o.kind === 'text' && o.y > 195).slice(0, 9)
+          .map(o => String(o.text).slice(0, 10) + '@' + Math.round(o.y));
+        console.log('      lab 前 8 条文本：' + labTexts.join(' | '));
+      } catch (e) { /* 忽略 */ }
+      /* ★ 真正的验收判据：**研发树标题是否落在首屏内**。
+         它比"首屏有几个研发按钮"稳 —— 后者在当前局面没有可研节点时恒为 0，
+         会把"没内容"误报成"结构坏了"。 */
+      try {
+        const treeOp = env.ops.filter(o => o.kind === 'text'
+          && String(o.text).indexOf('研发树') >= 0)[0];
+        if (treeOp) {
+          const bottom = dev.h - 100;   /* 视口底部留出安全区 */
+          console.log('    · 研发树标题 y=' + Math.round(treeOp.y)
+            + '（首屏底 ' + bottom + '）' + (treeOp.y <= bottom ? ' ✔ 在首屏' : ' ✘ 被推出首屏'));
+          if (treeOp.y > bottom) {
+            report(dev, '研发树被推出首屏',
+              '标题在 y=' + Math.round(treeOp.y) + '，首屏底 ' + bottom);
+          }
+        }
+      } catch (e) { /* 忽略 */ }
+      const list = Array.prototype.slice.call(rows || []);
+      const visible = list.filter(r => r.y >= 0 && r.y <= dev.h);
+      const resAll = list.filter(r => r.act === 'research');
+      const resVis = visible.filter(r => r.act === 'research');
+      const firstRes = resAll[0];
+      console.log('    · 研发页首屏：可点 ' + visible.length + ' 项，其中研发 ' + resVis.length + ' 个'
+        + (firstRes ? '（首个研发 y=' + Math.round(firstRes.y) + '，全页 ' + resAll.length + ' 个）'
+          : '（该局面没有可研节点）'));
+      /* 只有"全页有研发按钮、但首屏一个都没有"才是缺陷；
+         全页为 0 属于"当前没有可研节点"，是正常的游戏状态。 */
+      if (resAll.length && !resVis.length) {
+        report(dev, '研发页首屏无研发按钮',
+          '首个研发按钮在 y=' + Math.round(firstRes.y) + '，视口高 ' + dev.h);
+      }
+    }
     env.ops.length = 0;
     try {
       run(`(function(){

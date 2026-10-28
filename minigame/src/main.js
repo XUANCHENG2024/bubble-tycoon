@@ -720,6 +720,9 @@ function doAct(act, id, extra) {
     return;
   }
   if (act === 'mkt') { s.marketing = num(id, 0); return; }
+  /* 研发页「待加菜」折叠头（V21）：整行可点，展开/收起列表。
+     展开后才画那 N 行 52px 的配方卡 —— 折叠状态下研发树稳定在首屏。 */
+  if (act === 'labrecipes') { VIEW.labRecipesOpen = !VIEW.labRecipesOpen; return; }
   if (act === 'toggle') {
     var ix = (s.menu || []).indexOf(id);
     if (ix >= 0) { s.menu.splice(ix, 1); tutNotify('toggle'); }
