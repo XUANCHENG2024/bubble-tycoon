@@ -2479,6 +2479,92 @@ UI.downloadCard = function () {
   } catch (e) { UI.toast('保存失败，可长按图片另存', 'err'); }
 };
 
+/* ---------------- 分享战绩（V21） ----------------
+ * ★ 为什么只对线上版有意义：App 里没有可分享的地址，「传播」只能靠应用商店；
+ *   而网页版的整条增长路径就是「把链接发给朋友」。之前游戏里**没有任何分享入口** ——
+ *   补了 og 分享卡也没人用得上，玩家只能去地址栏复制（手机上极难操作）。
+ *
+ * ★ 三级降级，覆盖真实的中国移动端环境：
+ *   ① 微信内置浏览器：Web Share API 被屏蔽 → 引导用户点右上角「···」。
+ *      这条路径吃的正是 index.html 里的 og 卡，所以两件事必须一起做。
+ *   ② 支持 navigator.share 的浏览器（Safari / Chrome Android）：优先分享**图片**，
+ *      社交平台里图的点击率远高于纯链接；不支持传文件时退回分享链接。
+ *   ③ 桌面浏览器：复制「成绩 + 链接」到剪贴板。
+ *
+ * ★ App（Capacitor）里 location 是 capacitor:// 协议，分享出去打不开，
+ *   所以那里只分享图片、不带 url。
+ */
+UI.shareResult = function (s) {
+  if (!s) return;
+
+  const isApp = !!(window.Capacitor && window.Capacitor.isNativePlatform
+    && window.Capacitor.isNativePlatform());
+  const nw = Math.round(netWorth(s));
+  const title = '奶茶星球 · 我的 30 天战绩';
+  const text = `我在「奶茶星球」30 天做到净资产 ${money(nw)}（${diffOf(s).name}），来挑战我！`;
+  const url = String(location.href).split('#')[0].split('?')[0];
+
+  /* ① 微信内置浏览器 */
+  if (/MicroMessenger/i.test(navigator.userAgent || '')) {
+    UI.modal(`<button class="close-x" onclick="UI.closeModal()">×</button>
+      <div class="m-title">📤 分享给朋友</div>
+      <div class="m-sub">点右上角 <b>···</b> → 「发送给朋友」或「分享到朋友圈」</div>
+      <div class="m-sec" style="font-size:var(--fs-md);color:var(--txt2);line-height:1.7">
+        战绩：净资产 <b style="color:var(--amber)">${money(nw)}</b> · ${esc(diffOf(s).name)}
+      </div>
+      <div class="m-btns"><button class="btn btn-ghost" onclick="UI.closeModal()">知道了</button></div>`);
+    return;
+  }
+
+  const cv = $('shareCanvas');
+
+  /* ②-a 分享图片（最优先） */
+  if (cv && cv.toBlob && navigator.canShare && typeof File === 'function') {
+    cv.toBlob(function (blob) {
+      if (!blob) { shareLink(); return; }
+      let file;
+      try { file = new File([blob], 'bubble-tycoon.png', { type: 'image/png' }); }
+      catch (e) { shareLink(); return; }
+      if (!navigator.canShare({ files: [file] })) { shareLink(); return; }
+      const payload = isApp ? { files: [file], title: title, text: text }
+        : { files: [file], title: title, text: text, url: url };
+      navigator.share(payload)
+        .then(function () { UI.toast('已分享', 'ok'); })
+        .catch(function () { /* 用户取消，不提示 */ });
+    }, 'image/png');
+    return;
+  }
+  shareLink();
+
+  /* ②-b 分享链接 / ③ 复制到剪贴板 */
+  function shareLink() {
+    if (isApp) { UI.toast('App 内暂不支持分享链接，可先保存战绩图', 'err'); return; }
+    if (navigator.share) {
+      navigator.share({ title: title, text: text, url: url })
+        .then(function () { UI.toast('已分享', 'ok'); })
+        .catch(function () { });
+      return;
+    }
+    const payload = text + ' ' + url;
+    const done = function () { UI.toast('文案已复制，粘贴给朋友即可', 'ok'); };
+    const fallback = function () {
+      const ta = document.createElement('textarea');
+      ta.value = payload;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      let ok = false;
+      try { ok = document.execCommand('copy'); } catch (e) { ok = false; }
+      ta.remove();
+      if (ok) done(); else UI.toast('复制失败，请手动复制地址栏链接', 'err');
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(payload).then(done).catch(fallback);
+    } else fallback();
+  }
+};
+
 /* ---------------- 存档槽选择 ---------------- */
 UI.renderSlots = function () {
   const box = $('slotPick');
@@ -2531,6 +2617,10 @@ UI.showEnd = function (result, daily) {
   const st = s.stats;
   /* V8 结局四维称号：同一个 S 级有多种拿法 —— 走口碑流和走利润流
      是两种不同的经营叙事，给玩家"下一局换个打法"的动力。 */
+  /* 分享按钮只在网页版出现 —— App 里 location 是 capacitor:// 协议，
+     分享出去对方打不开，留着只会变成"点了没反应"。 */
+  const CAN_SHARE = !(window.Capacitor && window.Capacitor.isNativePlatform
+    && window.Capacitor.isNativePlatform());
   const et = endingTitle(s);
   const axesHtml = et.axes.map(a => `<div class="ax ${a.tier > 0 ? 'on' : ''}">
       <div class="ax-e">${a.emoji}</div>
@@ -2593,7 +2683,10 @@ UI.showEnd = function (result, daily) {
     <div class="card" style="text-align:left">
       <div class="card-h">🖼️ 战绩卡片</div>
       <div id="shareBox" class="share-box"></div>
-      <div class="m-btns"><button class="btn btn-primary" data-act="dlcard">⬇️ 保存战绩图</button></div>
+      <div class="m-btns">
+        <button class="btn btn-primary" data-act="dlcard">⬇️ 保存战绩图</button>
+        ${CAN_SHARE ? '<button class="btn btn-ghost" data-act="share">📤 分享</button>' : ''}
+      </div>
     </div>` : ''}
     <div class="m-btns">
       <button class="btn btn-primary" data-act="again">🔄 再来一局</button>

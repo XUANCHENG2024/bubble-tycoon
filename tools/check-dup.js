@@ -63,9 +63,13 @@ const INTENTIONAL = [
   /* 可复现随机源的双实例 */
   { file: 'js/engine.js', firstLine: 8 },
   /* 教程文案：每条内容不同，只是字段结构相似（归一化后看着一样）。
-     ★ 范围用「key: 'xxx'」的行来定位而不是写死行号 ——
-       往 TUTORIAL 里加条目会让写死的行号失效（V13.9 就踩到了）。 */
-  { file: 'js/data.js', minLine: 2200, maxLine: 2260 },
+     ★★ 用「锚点」而不是写死行号（V21 修）。
+        原来写的是 minLine:2200 / maxLine:2260 —— 我往 data.js 前面补了库容阈值表、
+        触底等级表等注释后，TUTORIAL 整段下移到 2350 附近，白名单直接没命中，
+        于是 9 处**数据**被当成重复代码报出来，CI 直接红。
+        这类坑在注释里写着"V13.9 就踩到了"，结果还是第三次踩 ——
+        根因是"注释说要用 key 定位，实现却是行号"。现在实现与注释一致了。 */
+  { file: 'js/data.js', anchor: 'const TUTORIAL = [' },
 ];
 
 const root = path.join(__dirname, '..');
@@ -104,6 +108,17 @@ for (const f of FILES) {
     /* ★ 跳过「有意重复」—— RNG 双实例是刻意的（独立种子的可复现随机源） */
     const intentional = INTENTIONAL.some(w => {
       if (w.file !== f) return false;
+      /* ★ 锚点优先：按内容定位，不随文件增删行而失效 */
+      if (w.anchor) {
+        const all = src.split('\n');
+        const start = all.findIndex(l => l.indexOf(w.anchor) >= 0);
+        if (start < 0) return false;          /* 锚点没了 → 不豁免（宁可报出来） */
+        let end = all.length - 1;
+        for (let i = start + 1; i < all.length; i++) {
+          if (/^\];/.test(all[i])) { end = i; break; }
+        }
+        return lineNo >= start + 1 && lineNo <= end + 1;
+      }
       if (w.firstLine != null) return Math.abs(lineNo - w.firstLine) < 40;
       return lineNo >= w.minLine && lineNo <= w.maxLine;
     });

@@ -127,6 +127,9 @@ jobs:
       - name: 音效资源完整性（文件 / 格式 / 语义分流）
         run: node tools/check-audio.js
 
+      - name: 线上版一致性（SW 版本号 / 分享卡 / manifest 事实 / 离线缓存覆盖）
+        run: node tools/check-web.js
+
       - name: 发布产物启动自检（脚本顺序 / 模块挂载 / 各面板渲染）
         run: node tools/build-dist.js && node tools/check-dist-boot.js
 

@@ -375,6 +375,10 @@ function doAct(act, el) {
       return;
     }
     case 'dlcard': UI.downloadCard(); return;
+    /* 分享战绩（V21）：只在网页版有意义 —— App 里没有可分享的地址。
+       降级链在 UI.shareResult 里：微信内置浏览器 → 引导右上角 ···；
+       支持 Web Share 的 → 分享战绩图；桌面 → 复制文案。 */
+    case 'share': UI.shareResult(s); return;
     case 'doimport': {
       const ta = $('importCode');
       const r = importSave(ta ? ta.value : '');
