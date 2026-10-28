@@ -1159,23 +1159,36 @@ function sellIng(s, id, qty) {
  *   不传 = 按一天的预估销量算；传 0 = 只补到菜单需求的 1杯（省着买）
  * @returns {{spent:number, bought:number, kinds:number}}
  */
-function autoFill(s, opt) {
-  const cid = currentCityId(s);
-  const cap = storageCap(s);
-  const priceOfIng = (id) => Math.max(0.1, num(s.prices[id], 1));
-
-  /* ---------- ① 目标备货量：按菜单真实需求 ---------- */
-  /*★ 用 maxCupsFromStock 的同款口径（reqOf，已含工坊降本）——
-     否则会出现"备货按降后算、扣料按降前扣"的老问题。 */
+/** 今日备货需求 —— **单一真相**，autoFill 与界面上的"还差多少"共用这一份。
+ *
+ *  ★ V21：这段原来只活在 autoFill 里。UI 想显示"这款今天还差多少"时，
+ *    只能另写一套估算 —— 两套算法必然漂移（本项目已经因为
+ *    "备货按降本后算、扣料按降本前扣"栽过一次）。
+ *  ★ 用 reqOf（已含工坊降本），与 maxCupsFromStock 同口径。
+ *
+ *  返回 { wantCups, need:{ingId:qty}, gap:{ingId:qty} }
+ */
+function stockNeedOf(s, opt) {
   const wantCups = opt && opt.cups != null
     ? num(opt.cups, 0)
     : Math.max(1, Math.round(trafficOf(s) * avgCupsPerOrder(s) * 1.15));
-  /** 每种料的需求（wantCups 杯的量） */
   const need = {};
   for (const rid of (s.menu || [])) {
     const req = reqOf(s, rid);
     for (const k in req) need[k] = (need[k] || 0) + req[k] * wantCups / Math.max(1, s.menu.length);
   }
+  const gap = {};
+  for (const k in need) gap[k] = Math.max(0, Math.ceil(need[k] - num(s.inv[k], 0)));
+  return { wantCups, need, gap };
+}
+
+function autoFill(s, opt) {
+  const cid = currentCityId(s);
+  const cap = storageCap(s);
+  const priceOfIng = (id) => Math.max(0.1, num(s.prices[id], 1));
+
+  /* ---------- ① 目标备货量：按菜单真实需求（见 stockNeedOf） ---------- */
+  const { need, gap: gapOf } = stockNeedOf(s, opt);
 
   /* ---------- ② 按「缺口比例」排优先级 ---------- */
   /* ★ 排的是**缺口占比**而不是绝对缺口：
@@ -1183,8 +1196,7 @@ function autoFill(s, opt) {
      前者更紧急 —— 按绝对值排会把香草排前面。 */
   const plan = [];
   for (const k in need) {
-    const cur = num(s.inv[k], 0);
-    const gap = need[k] - cur;
+    const gap = gapOf[k] || 0;
     if (gap <= 0) continue;
     const g = ingById(k);
     if (!g) continue;

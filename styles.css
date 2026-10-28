@@ -340,7 +340,11 @@ body::before {
 .mkt-p { width: 62px; font-weight: 800; font-size: var(--fs-lg); }
 .mkt-p.up { color: var(--red); }
 .mkt-p.down { color: var(--green); }
-.mkt-c { width: 52px; font-size: var(--fs-sm); color: var(--txt3); }
+.mkt-c { width: 60px; font-size: var(--fs-sm); color: var(--txt3); line-height: 1.3; }
+/* 今日缺口（V21）：显示成独立的第二行，而不是跟"存 N"挤在一行 ——
+   52px 放不下"存 42 差 18"，挤压后会截断成"存 4…"，比不显示更糟。
+   只在真的缺料时出现，所以大多数行还是单行高。 */
+.mkt-gap { display: block; color: var(--amber); font-size: var(--fs-xs); }
 .mkt-bar { flex: 1; height: 5px; background: rgba(255, 255, 255, .1); border-radius: 9px; overflow: hidden; min-width: 40px; }
 .mkt-bar i { display: block; height: 100%; border-radius: 9px; background: linear-gradient(90deg, var(--cyan), var(--purple)); }
 .mkt-btns { display: flex; gap: 4px; }

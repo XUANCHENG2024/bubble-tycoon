@@ -803,7 +803,11 @@ UI.renderManage = function () {
     h += `<div style="font-size:var(--fs-sm);color:var(--txt3);margin-bottom:8px">
       🗺️ 本地特产：${esc(ingsOfCity(mktCity).map(g => g.emoji + g.name).join('、'))}</div>`;
   }
-for (const g of buyable) {
+  /* ★ V21：今日需求只算一次（stockNeedOf 是单一真相，详见 engine 里那段注释）。
+     原来界面上只有「存 N」——玩家得自己估今天要买多少，
+     或者干脆跳过计算直接点「一键补货」。后者不算错，但那就没有决策了。 */
+  const needInfo = stockNeedOf(s);
+  for (const g of buyable) {
     const p = s.prices[g.id], pv = s.prevPrices[g.id] || p;
     const dir = p > pv + .001 ? 'up' : (p < pv - .001 ? 'down' : '');
     const arrow = dir === 'up' ? '▲' : (dir === 'down' ? '▼' : '—');
@@ -826,10 +830,14 @@ for (const g of buyable) {
       <div class="mkt-p ${dir}">¥${p.toFixed(2)} ${arrow}
         <span class="mkt-vs">${pctTxt > 0 ? '+' : ''}${pctTxt}%</span></div>
       <div class="mkt-bar"><i style="width:${ratio * 100}%"></i></div>
-      <div class="mkt-c">存 ${Math.round(s.inv[g.id] || 0)}</div>
+      <div class="mkt-c">存 ${Math.round(s.inv[g.id] || 0)}${(needInfo.gap[g.id] || 0) > 0
+        ? `<span class="mkt-gap" title="今日预计需要 ${Math.ceil(needInfo.need[g.id] || 0)}，还差 ${needInfo.gap[g.id]}">差 ${needInfo.gap[g.id]}</span>`
+        : ''}</div>
       <div class="mkt-btns">
         <button class="btn btn-ghost" data-act="buy" data-id="${g.id}" data-q="10">+10</button>
-        <button class="btn btn-ghost" data-act="buy" data-id="${g.id}" data-q="30">+30</button>
+        <button class="btn btn-ghost${(needInfo.gap[g.id] || 0) > 0 ? ' btn-cyan' : ''}"
+          data-act="buy" data-id="${g.id}" data-q="${Math.max(10, needInfo.gap[g.id] || 0)}"
+          title="补足今天的用量（预计需要 ${Math.ceil(needInfo.need[g.id] || 0)}）">${(needInfo.gap[g.id] || 0) > 0 ? '补足' : '+30'}</button>
         <button class="btn btn-ghost mkt-sell" data-act="sell" data-id="${g.id}"
           title="按当前价${Math.round(CFG.LIQUID_RATE * 100)}% 回购（清仓腾仓位）"
           ${(s.inv[g.id] || 0) > 0 ? '' : 'disabled'}>清仓</button>
