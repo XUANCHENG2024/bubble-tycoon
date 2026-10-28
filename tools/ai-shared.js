@@ -118,19 +118,40 @@ function playSharedAI(E, diff, bp, sig, opt) {
     /* --- 营销 --- */
     s.marketing = s.cash > 2500 ? Math.min(1600, Math.floor(s.cash * 0.1)) : 0;
 
-    /* --- 采购：按预测客流备货（多杯订单按 1.6 倍折算），留 200 备用金 --- */
-    const need = E.trafficOf(s) * 1.25 * 1.6;
-    const per = Math.max(1, Math.round(need / Math.max(1, s.menu.length)));
-    for (const g of E.ING) {
-      let want = 0;
-      for (const rid of s.menu) want += (E.recipeById(rid).req[g.id] || 0) * per;
-      want = Math.ceil(want - (s.inv[g.id] || 0));
-      if (want > 0) {
-        E.buyIng(s, g.id, Math.min(want, Math.max(0, Math.floor((s.cash - 200) / s.prices[g.id]))));
+    /* --- 采购 ---
+       ★★ V21：默认改走**引擎的「一键补货」（E.autoFill）**，不再手搓配额。
+       为什么：手搓的这版按「客流 ×1.25 ×1.6 ÷ 菜数」平均分摊每款菜的用量，
+       而真实玩家每天按的是界面上的「🛒 一键补货」按钮 —— 两者不是同一个算法。
+       实测差距：同一档、同一批种子，用 autoFill 的净资产高 **约 32%**
+       （normal 完成度 102% → 134%）。也就是说此前所有标定都建立在
+       "一个比真人笨三成的 bot" 上，目标自然被定低了。
+       ★ 这是**测量口径**修正，不是给 AI 放水：autoFill 是产品里现成的、
+         教程明确教玩家用的入口，模拟它才等于模拟玩家。
+       ★ 保留 `o.buy === 'manual'` 分支做 A/B（`--buy=manual`），
+         否则以后没人能复现"旧基线"。 */
+    if (o.buy === 'manual') {
+      const need = E.trafficOf(s) * 1.25 * 1.6;
+      const per = Math.max(1, Math.round(need / Math.max(1, s.menu.length)));
+      for (const g of E.ING) {
+        let want = 0;
+        for (const rid of s.menu) want += (E.recipeById(rid).req[g.id] || 0) * per;
+        want = Math.ceil(want - (s.inv[g.id] || 0));
+        if (want > 0) {
+          E.buyIng(s, g.id, Math.min(want, Math.max(0, Math.floor((s.cash - 200) / s.prices[g.id]))));
+        }
       }
+    } else {
+      E.autoFill(s);
     }
 
     /* --- 投资：产能不足先补产能，富余再扩张 --- */
+    /* ★ V21：这里试过把判据从 `lost` 换成 `waitLost`（等太久的人数），
+       **实测直接否掉了这个改动**：n=6 每档，easy 100%→33%、normal 95%→17%、hard 83%→0%，
+       净资产掉两成，所以保留 `lost >= 3`。
+       ⚠️ 但**不要**把这个结果解释成"缺料说明产能不足" —— 我第一版就是这么写的，
+       而实测 waitLost / fullLost 都是 **0.0%**（流失 100% 来自缺料 + 清场）。
+       机制**没查清**，只确认了"把 lost 换成 waitLost 会让 AI 变差"。
+       在机制查清之前，这条只当"能跑的经验判据"，不当因果。 */
     const lost = s.lastReport ? s.lastReport.lost : 0;
     const shortCapacity = lost >= 3;
     let guard = 0;

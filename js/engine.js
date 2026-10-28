@@ -524,12 +524,23 @@ function staffMult(s, st) {
   else if (st.stamina < 60) m *= 0.85;
   return m;
 }
-function serviceTimeOf(s, worker, sim) {
+/** 出杯耗时（**未夹下限**）。
+ *  ★ V21 拆出来是为了能判断"是否已触底"：
+    `serviceTimeOf` 会把结果夹到 MIN_SERVICE(0.4s)，而 `stationTime` 在除完店长加成后
+    **又夹了一次** —— 于是只要原始值 ≤0.4，任何后续加成（店长速度、极速出杯卡）
+    都会被第二次夹回去，效果恒等于 1。
+    症状是"后天加成全部死掉"，而界面上"速度 +18%"还挂着 ——
+    玩家花 ¥3000 买的店长一点用没有，也看不出来。
+    有了未夹版本，才能回答"这一级买下去还真的更快吗"。 */
+function serviceRaw(s, worker, sim) {
   let t = CFG.BASE_SERVICE / (1 + 0.20 * s.up.speed) / (1 + 0.12 * s.up.training);
   if (worker) t /= staffMult(s, worker);
   if (sim && sim.rushUntil > sim.t) t *= 0.55;
   t /= cardMul(s, 'speed');       /* 🃏 策略卡：极速出杯更快、自助点单机更慢 */
-  return Math.max(CFG.MIN_SERVICE, t);
+  return t;
+}
+function serviceTimeOf(s, worker, sim) {
+  return Math.max(CFG.MIN_SERVICE, serviceRaw(s, worker, sim));
 }
 
 /** 工位上的服务耗时（含店长运营加成）。
@@ -539,7 +550,10 @@ function serviceTimeOf(s, worker, sim) {
  *    很难查。工位是明确的、有 branchIdx 的对象，在这里取最稳。 */
 function stationTime(s, st, sim) {
   const base = serviceTimeOf(s, st.worker, sim);
-  if (!st || !(st.branchIdx >= 2)) return base;      /* 总店不受店长影响 */
+  /* ★★ V21：`branchIdx >= 2` → `>= 1`（总店店长也生效），理由见 completeOrder 里那段长注释。
+     一句话：名额从 V12 起就把总店算进去了，加成却不给总店，
+     等于玩家花 ¥3000+ 日薪买了一个"什么都不做"的店长。 */
+  if (!st || !(st.branchIdx >= 1)) return base;
   const mb = managerBonus(s, st.branchIdx);
   /* ★ mb.speed 必须先夹到 >0 再做除法 ——
      原来的写法是 `Math.max(MIN_SERVICE, base / mb.speed)`，
@@ -1535,6 +1549,28 @@ function doResearch(s, rid) {
 }
 
 /* ---------------- 升级 / 分店 ---------------- */
+/** 某项升级是否**已经买不出效果**（当前只用于 speed 的出杯下限）。
+ *
+ *  ★ V21：为什么需要这个判据而不是改 `max`：
+ *    `MIN_SERVICE`(0.4s) 是一道硬下限，而触底等级**会随团队成长移动** ——
+ *    逐日试算：D1 约 L12 触底（无员工、training 0）、D10 约 L7（招了人、training 上来）、
+ *    D30 约 L8~L9。把 max 固定成任何值都会在某一头出错：
+ *      固定 14 → D1 时过早封顶（还差 2 级有效）
+ *      固定 8  → D10 之后仍卖死货
+ *    所以判据必须是**算出来的**，不是常量。
+ *  ★ 只做"提示"不做"禁售"：禁售会改变玩家（与模拟 AI）的花钱路径，
+ *    而那会让刚标定完的三档目标再次失准。提示不改任何数值。
+ */
+function upgradeSaturated(s, id) {
+  if (!s || id !== 'speed') return false;
+  const lv = pos(s.up && s.up.speed, 0);
+  /* 用"下一个等级"判断：当前已触底就不再有效果。无员工口径即可 ——
+     员工熟练度只会让耗时更小，不影响"是否已经 <= 下限"的判断方向。 */
+  const probe = Object.create(s);
+  probe.up = Object.assign({}, s.up, { speed: lv + 1 });
+  return serviceRaw(probe, null, null) <= CFG.MIN_SERVICE + 1e-9;
+}
+
 function upgradeCost(s, id) {
   const u = upgradeById(id);
   /* 非法 id / 未初始化等级：以前前者会读 u.max 抛异常，
@@ -2915,10 +2951,21 @@ function completeOrder(s, st) {
   sim.cups += cups;
   /* ★ V13.6：满意服务 → 好感累积（成常客的那天会推一条日志） */
   if (o.regId) regularServe(s, o.regId);
-  /* V11：分店工位额外享受店长的口碑/满意度加成。
-     总店（branchIdx = 1）不受影响 —— 加成必须限定在店长管的店里，
-     否则「招店长」就变成全局加成，玩家无脑堆一家店即可。 */
-  const stMb = (st && st.branchIdx >= 2) ? managerBonus(s, st.branchIdx) : null;
+  /* ★★ V21 修复：总店（branchIdx = 1）**也**享受店长加成。
+     ★ 原来这里写 `branchIdx >= 2`，注释给的理由是"加成必须限定在店长管的店，
+       否则招店长变成全局加成、玩家无脑堆一家店"。
+       但那个理由不成立：`hireManager()` 已经限制了
+         ① 每家店至多 1 名店长（按 store.branch 判重）
+         ② 名额 = 店数 − 已招数
+       所以"把 5 个店长堆进同一家店"在代码里**根本不可能发生** ——
+       这个 >=2 防的是一个不存在的场景。
+     ★ 它真实造成的后果是"承诺了没兑现"：
+       `managerSlotsLeft` 从 V12 起就把总店算进名额（注释明写「含主店」），
+       玩家可以在总店招店长、每天照付工资，而速度/口碑加成全部不生效 ——
+       付了钱、零收益，且界面上看不出来。
+     ★ 保留的约束：加成只作用于**有店长的那家店**（这点没变），
+       不涉及全局。 */
+  const stMb = (st && st.branchIdx >= 1) ? managerBonus(s, st.branchIdx) : null;
   sim.repGain += CFG.SERVE_REP * (type ? type.repMul : 1) * cups * (stMb ? stMb.rep : 1);
   /* V6 招牌配方：累计卖出杯数（跨局继承的成长线） */
   addSigCups(s, o.rid, cups);

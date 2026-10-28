@@ -53,6 +53,12 @@ function playAI(diff, seedLabel, bp, sig) {
       ai-shared 早就支持 o.day 这个参数（它同时用于 DAYS_LEFT 的合同缩放），
       只是 sim.js 一直没把它接出来。 */
     day: STOP_DAY || undefined,
+    /* ★ V21：采购口径（`--buy=autoFill|manual`）。
+       默认 autoFill = 产品里「🛒 一键补货」按钮的算法（教程明确教玩家用），
+       是本标定的**上界**；manual = 手搓配额，是**下界**（比真人笨三成）。
+       目标应当定在两者之间：让自动补货的玩家过得舒服、手动精算的玩家仍有挑战。
+       之前所有标定都只跑了 manual，等于拿一个偏弱的 bot 当基准，目标被系统性低估。 */
+    buy: BUY_MODE,
   });
 }
 
@@ -67,6 +73,8 @@ const NOSIG = process.argv.includes('--nosig');
 /* --days=N：把这局截到第 N 天（默认跑满 30 天）。配合 --dump 用来复核"末段空转"：
    看第 20 天手里握着多少现金、还有没有可买的出口，而不是只看 30 天的终值。 */
 const STOP_DAY = Number(argVal('days', 0)) || 0;
+/* 采购口径：autoFill（默认，= 产品里的一键补货）｜manual（手搓，下界） */
+const BUY_MODE = (argVal('buy', 'autoFill') || 'autoFill').toLowerCase() === 'manual' ? 'manual' : 'autoFill';
 /* --dump：跑完打印最后一局的**第 N 天快照**（持仓结构，不是流水）。
    ★★ 快照必须取在 endDay 之后（本文件读的是 playSharedAI 返回后的 s，
       此时最后一次循环已走完 endDay，phase 已是 'report'）。

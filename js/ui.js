@@ -989,7 +989,24 @@ for (const g of buyable) {
        玩家得先滑到底才能开门），H5 一直没回灌 —— 两版体验不对等的典型。
      ★ 用 sticky 而不是 fixed：fixed 会脱离 .panels 的滚动上下文，
        分屏/横屏时容易压住 tab 栏；sticky 天然跟随滚动容器停靠。 */
-  h += `<div class="open-dock"><button class="btn btn-primary btn-big" data-act="open" data-tut="open" style="width:100%">🔔 开门营业</button></div>`;
+  /* ★★ V21：吸底区里补一行「明日客流 + 库存够不够」。
+     ★ 为什么这行比体检卡重要：`s.eventTrafficMul` 由**昨天的随机事件**写入
+       （"网红探店 → 次日客流 ×1.5"这类），但它在界面上**从来没有显示过**。
+       实测后果：easy 档 52% 的破产都是同一条链 ——
+       事件把客流 ×2 → 玩家按老习惯备货 → 缺料 → 口碑崩 → 营收塌。
+       玩家不是算错，是**根本不知道明天会来多少人**。
+     ★ 放在吸底区而不是体检卡里：体检卡在长菜单的第 3.5 屏，而这行要天天看。 */
+  const evMul = Number(s.eventTrafficMul) || 1;
+  const evTag = evMul > 1.02 || evMul < 0.98
+    ? ` <span style="color:var(--amber)">· 事件客流 ×${evMul.toFixed(1)}</span>` : '';
+  const shortN = Math.max(0, Math.round(trfN * 0.75) - stockN);
+  const stockTag = shortN > 0
+    ? `<b style="color:var(--red)">缺 ${shortN} 人份</b>`
+    : `<b style="color:var(--green)">够卖</b>`;
+  h += `<div class="open-dock">
+      <div class="open-hint">👥 明日预计 <b style="color:var(--cyan)">${trfN}</b> 人${evTag} · 库存 ${stockTag}</div>
+      <button class="btn btn-primary btn-big" data-act="open" data-tut="open" style="width:100%">🔔 开门营业</button>
+    </div>`;
 
   /* 店长日志 */
   h += `<div class="card"><div class="card-h">📜 店长日志 <span class="ch-sub">共 ${s.log.length} 条</span></div>`;

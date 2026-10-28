@@ -1626,10 +1626,30 @@ function panelUp(ctx, x, y, w, s) {
     GFX.card(ctx, x, y, w, 50);
     text(ctx, u.emoji + ' ' + u.name, x + 10, y + 8, { size: FS.md, weight: 700 });
     text(ctx, u.desc, x + 10, y + 26, { size: FS.xs, color: T.txt3, maxW: w - 120 });
-    /* 等级点：数量按各自 max 画。写死 6 的话 speed/decor（max 8）满级也只亮 6 个。 */
-    for (var d = 0; d < num(u.max, 6); d++) {
-      ctx.fillStyle = d < lv ? T.cyan : 'rgba(255,255,255,.13)';
-      ctx.beginPath(); ctx.arc(x + w - 100 + d * 11, y + 15, 3.5, 0, Math.PI * 2); ctx.fill();
+    /* 等级点：数量按各自 max 画。写死 6 的话 speed/decor（max 8）满级也只亮 6 个。
+       ★★ V21：但 max > 9 时**不许画点**。speed 的 max 是 100，
+       原来每帧给它画 100 个 arc —— 其中 99 个落在卡片右侧外面，
+       画完就被裁掉，纯浪费（实测升级页每帧 853 次绘制里有 400 次是这些点）。
+       而且玩家也看不出"快满了"：第 7 个点和第 90 个点在屏上长得一样。
+       超过 9 级一律改显示数字。 */
+    var mx = num(u.max, 6);
+    if (mx <= 9) {
+      for (var d = 0; d < mx; d++) {
+        ctx.fillStyle = d < lv ? T.cyan : 'rgba(255,255,255,.13)';
+        ctx.beginPath(); ctx.arc(x + w - 100 + d * 11, y + 15, 3.5, 0, Math.PI * 2); ctx.fill();
+      }
+    } else {
+      text(ctx, 'Lv.' + lv + '/' + mx, x + w - 100, y + 11,
+        { size: FS.xs, color: T.txt2, maxW: 92 });
+    }
+    /* ★ V21：已买不出效果时**必须说明原因**，不能只是"还能点"。
+       "无效却不告诉玩家"是最伤体验的一类设计债 —— 玩家花了钱、
+       界面什么都没变，他只会归因成"这游戏坏了"。
+       这里只做提示、不禁售：禁售会改变所有人的花钱路径（含模拟 AI），
+       那会让刚标定完的关卡目标再次失准。 */
+    if (upgradeSaturated(s, u.id)) {
+      text(ctx, '⚠️ 已到出杯下限，再升级不更快', x + 10, y + 38,
+        { size: FS.xs, color: T.amber, maxW: w - 96 });
     }
     GFX.button(ctx, x + w - 76, y + 22, 66, 22, maxed ? '已满级' : money(cost), {
       kind: maxed ? 'ghost' : 'primary', act: 'upgrade', id: u.id,
