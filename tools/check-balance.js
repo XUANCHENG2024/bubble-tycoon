@@ -377,6 +377,18 @@ console.log('\n--- ⑥ 槽位摘要缓存 ---');
   check(Number(progParts[0]) >= 15,
     '带数值进度的成就 ' + progParts[0] + ' 个（成就页「离你最近」依赖它）');
   check(!progParts[1], '进度函数返回值合法' + (progParts[1] ? '：' + progParts[1] : ''));
+
+  /* ★ V22：闪光客人的参数必须在合理区间。
+     ★ 这条防的是"参数被删/被改到离谱"：倍率 <=1 等于 VIP 没有收益，
+       概率 >20% 会让它从"偶发惊喜"变成"常态"，收入结构被改写。
+     ★ 机制是否真的生效，靠 sim 的产出变化佐证（+2~4%）——
+       这里只锁参数，不假装能测完整链路。 */
+  const vip = window.eval('(function(){return CFG.VIP_CHANCE + "|" + CFG.VIP_INCOME;})()');
+  const vipParts = String(vip).split('|').map(Number);
+  check(vipParts[0] > 0 && vipParts[0] <= 0.2,
+    `闪光客人概率在 0~20%（${(vipParts[0] * 100).toFixed(1)}%）`);
+  check(vipParts[1] > 1 && vipParts[1] <= 2,
+    `闪光客人收入倍率在 1~2（×${vipParts[1]}）`);
 }
 
 console.log('');

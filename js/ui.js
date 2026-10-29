@@ -2332,13 +2332,19 @@ UI.stageSync = function () {
       o.textContent = n > 1 ? r.emoji + '×' + n : r.emoji;
       bar.style.width = pct(st.order.progress * 100) + '%';
       const trendHit = r.tags.includes(s.trend);
-      tx.textContent = '¥' + (st.order.price * n) + (trendHit ? ' 🔥' : '');
+      /* ★ V22：闪光客人要在**价格上**就显出差别 ——
+         只加个光效玩家不会知道"这单更值钱"，也就不会为它调整服务顺序。 */
+      const vip = !!st.order.vip;
+      const showPrice = Math.round(st.order.price * n * (vip ? CFG.VIP_INCOME : 1));
+      tx.textContent = '¥' + showPrice + (vip ? ' ✨' : '') + (trendHit ? ' 🔥' : '');
       el.classList.add('busy');
+      el.classList.toggle('vip', vip);
     } else {
       o.textContent = '—';
       bar.style.width = '0%';
       tx.textContent = (st.worker && st.worker.stamina <= 0) ? '😴 累瘫' : '';
       el.classList.remove('busy');
+      el.classList.remove('vip');
     }
     el.classList.toggle('rush', sim.rushUntil > sim.t);
   });

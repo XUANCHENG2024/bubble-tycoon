@@ -2172,3 +2172,17 @@ body, #app {
   .shopwin { max-height: 104px; }
   .shopwin svg { width: 100%; height: 104px; }
 }
+
+/* 闪光客人（V22）——出杯位金色呼吸描边
+   ★ 用 box-shadow 而不是 border：border 会改变盒子尺寸，连点时的
+     「重放动画」会让工位轻微跳动，而 box-shadow 不占布局。
+   ★ 呼吸而不是常亮：常亮的金色会和"爆单"高亮抢注意力，
+     呼吸频率 1.6s 低于爆单的 1.2s，层级更低。 */
+.stn.vip {
+  box-shadow: 0 0 0 1px rgba(255, 209, 102, .55), 0 0 16px rgba(255, 209, 102, .3);
+  animation: vipGlow 1.6s ease-in-out infinite;
+}
+@keyframes vipGlow {
+  0%, 100% { box-shadow: 0 0 0 1px rgba(255, 209, 102, .45), 0 0 12px rgba(255, 209, 102, .26); }
+  50%      { box-shadow: 0 0 0 1px rgba(255, 209, 102, .82), 0 0 22px rgba(255, 209, 102, .48); }
+}

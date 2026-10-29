@@ -3004,8 +3004,11 @@ function assignOrder(s, st, c) {
   }
   const n = c.cups || 1;
   for (let i = 0; i < n; i++) sim.cogs += consumeStock(s, c.rid, st.worker) * cardMul(s, 'cogs');
+  /* ★ V22：闪光客人。标记打在订单上，渲染层据此加光效，
+     结算层据此乘收入倍率 —— 两处读同一个字段，不会出现"看着像 VIP、结账不给钱"。 */
+  const isVip = rnd(0, 1) < CFG.VIP_CHANCE;
   st.order = {
-    c, progress: 0, price: priceOf(s, c.rid), rid: c.rid, cups: n, type: c.type,
+    c, progress: 0, price: priceOf(s, c.rid), rid: c.rid, cups: n, type: c.type, vip: isVip,
     /* ★ V13.6：常客加成随订单带下来（顾客进店时就算好，
        避免结算时再查一次档案 —— 期间好感可能已被别的订单改过）。 */
     regId: c.regId || null, budgetMul: num(c.budgetMul, 1), tipMul: num(c.tipMul, 1),
@@ -3028,12 +3031,18 @@ function completeOrder(s, st) {
   /* ★ V13.6：常客的**消费预算加成**（开罗的「常客度↑ → 顾客预算↑」）。
      乘在收入上（不是加固定额）—— 越贵的单子，常客多花的越多。 */
   const bMul = Math.max(1, num(o.budgetMul, 1));
+  /* ★ V22：闪光客人收入倍率（唯一的作用点 —— 小费不加，
+     因为小费是"点得快"的奖励，不该和"这单值钱"混在一起）。 */
+  const vMul = o.vip ? CFG.VIP_INCOME : 1;
   const income = Math.max(1,
-    (o.price * bMul - sub) * cups - (saleNow ? CFG.SALE_UNIT_SUB * cups : 0));
+    ((o.price * bMul - sub) * cups - (saleNow ? CFG.SALE_UNIT_SUB * cups : 0)) * vMul);
 
   s.cash += income;
   sim.revenue += income;
   sim.orders++;
+  /* ★ V22：闪光客人的高光记在**订单完成时**（rushStation 里没有订单对象 o，
+     我第一版插在那儿，直接 ReferenceError）。 */
+  if (o.vip) pushHighlight(sim, 'vip', `✨ 第 ${sim.orders} 单是闪光客人（+${Math.round((vMul - 1) * 100)}% 收入）`);
   sim.cups += cups;
   /* ★ V13.6：满意服务 → 好感累积（成常客的那天会推一条日志） */
   if (o.regId) regularServe(s, o.regId);

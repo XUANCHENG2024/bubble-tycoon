@@ -2215,11 +2215,27 @@ function drawStationIso(ctx, cx, cy, st, w, h, pulse, compact, T2) {
       { size: compact ? FS.md : FS.lg, align: 'center' });
   }
 
+  /* ★ V22：闪光客人 —— 顶面金色描边 + 进度条转金。
+     ★ Canvas 端没有"价格文字"可改（出杯位只画 emoji 和进度），
+       所以这里用描边承担"这单值钱"的识别，与 H5 的 ✨+金色边框对应。
+     ★ 描边画在顶面菱形上而不是整个立方体：整个描边会让工位看起来像"被选中"，
+       和爆单高亮撞语义。 */
+  if (st.order && st.order.vip) {
+    ctx.save();
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, topY - b); ctx.lineTo(cx + p, topY);
+    ctx.lineTo(cx, topY + b); ctx.lineTo(cx - p, topY);
+    ctx.closePath(); ctx.stroke();
+    ctx.restore();
+  }
+
   /* ⑤ 进度条贴在正面偏下，像台面上的出杯进度 */
   if (st.order) {
     var pw = a * 1.5, ph = 4;
     GFX.bar(ctx, cx - pw / 2, cy - boxH * lift * 0.32, pw, ph,
-      num(st.order.progress), { color: T2.cyan });
+      num(st.order.progress), { color: st.order.vip ? '#ffd166' : T2.cyan });
   }
 
   /* ⑥ 员工名（紧凑模式省略——挤不下）*/
