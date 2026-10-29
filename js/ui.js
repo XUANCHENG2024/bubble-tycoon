@@ -636,6 +636,21 @@ UI.renderAll = function () { UI.renderHUD(); UI.renderPanel(UI.tab); };
    ★ 先拿容器再记账：没有容器时不该把 seen 写进去，
      否则卡片永远不出现，而且看不出原因（静默失效）。
    ============================================================ */
+/* 章节配色：把当前章写进 body 的 data-chapter，由 CSS 换 --cyan / --purple。
+ * ★ 与 maybeShowChapter 分开：过场只播一次，配色要每次都设（读档、换章都要生效）。
+ * ★ 只换两个强调色，不换语义色（pink/amber/red/green）——
+ *   那四个跟着章节漂移会让"奖励/警示/成功"的语义失效。 */
+UI.applyChapterTheme = function (s) {
+  try {
+    if (!s || typeof chapterOf !== 'function') return;
+    const idx = chapterOf(s);
+    if (!idx) return;
+    if (document.body && document.body.dataset) {
+      document.body.dataset.chapter = String(idx);
+    }
+  } catch (e) { /* 配色失败不影响玩法 */ }
+};
+
 UI.maybeShowChapter = function () {
   const s = window.S;
   if (!s || !s.day) return;
@@ -676,6 +691,7 @@ UI.maybeShowChapter = function () {
 
 UI.renderManage = function () {
   const s = window.S; if (!s) return;
+  UI.applyChapterTheme(s);    /* 章节配色（幂等，每次都设） */
   UI.maybeShowChapter();      /* 换章时播过场（已看过则不触发） */
   const tag = TAGS[s.trend];
   const nextTag = TAGS[s.nextTrend];
