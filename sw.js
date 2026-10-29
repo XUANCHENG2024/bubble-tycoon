@@ -34,7 +34,7 @@ const VERSION = 'v22.0';
  *     把指纹并进 CACHE 名之后，**文件一变缓存键就变**，旧缓存自然失效，
  *     不依赖任何人记得改数字。
  *   ★ 它只取 8 位，不是加密用途，只为区分构建。 */
-const ASSETS_HASH = 'b15af6dd';
+const ASSETS_HASH = '63713235';
 const CACHE = 'bubble-tycoon-' + VERSION + '-' + ASSETS_HASH;
 
 /* ★ 要缓存的文件 —— 与 index.html 里引用的一致。

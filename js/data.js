@@ -1988,6 +1988,15 @@ const CHAPTERS = [
 ];
 
 /* ---------- 每日合同（V1）----------
+ * ★★ V22：每条合同都标了 `fit`（适配哪几章）。
+ *   不是为了平衡，是为了**让章节机制被"教到"**：
+ *   夜市（薄利多销）该多出「薄利多销 / 潮流」，车站（耐心低）该多出「零流失」，
+ *   商圈/旗舰街（客单价高）该多出「高端形象 / 利润」。
+ *   玩家如果只靠一句过场文案，很难把"这章该换打法"落实到操作上；
+ *   每天压在头上的合同，是最便宜的教法。
+ *   加权方式见 rollContract：适配章权重 ×2，不适配 ×1。
+ */
+/* ---------- 每日合同（V1）----------
  * 和每日任务（QUESTS）的关键区别是**决策窗口**：
  *   任务 = 打烊后判定，玩家事前不知道 → 只能事后看；
  *   合同 = 开门前就摆在备货页，玩家可以围绕它调整采购、菜单、定价。
@@ -2003,13 +2012,13 @@ const CHAPTERS = [
  * 但不至于让一局崩掉。
  */
 const CONTRACTS = [
-  { id: 'c_cups', emoji: '🥤', name: '走量担当', cash: 110, failRep: -3,
+  { id: 'c_cups', fit: [1,2,4], emoji: '🥤', name: '走量担当', cash: 110, failRep: -3,
     desc: '今日卖出 12 杯', goal: 12, unit: '杯', metric: 'cups', dir: 'up',
     check: (m, g) => m.cups >= g },
-  { id: 'c_revenue', emoji: '💸', name: '营收担当', cash: 127, failRep: -4,
+  { id: 'c_revenue', fit: [3,6], emoji: '💸', name: '营收担当', cash: 127, failRep: -4,
     desc: '今日营收达到 ¥420', goal: 420, unit: '', metric: 'revenue', dir: 'up', prefix: '¥',
     check: (m, g) => m.revenue >= g },
-  { id: 'c_cheap', emoji: '🏷️', name: '薄利多销', cash: 127, failRep: -3,
+  { id: 'c_cheap', fit: [2,4], emoji: '🏷️', name: '薄利多销', cash: 127, failRep: -3,
     desc: '卖出 12 杯且平均单价 ≤ ¥28', goal: 12, unit: '杯', metric: 'cups', dir: 'up',
     /* ★ V21：阈值必须**显式登记在合同上**，不能只写在 check 里。
        原来 check 读 m.avgCap，而 contractMetrics() 从来不给这个字段 ——
@@ -2019,27 +2028,27 @@ const CONTRACTS = [
        （没有设阈值的合同不会因此被误判失败）。 */
     avgCap: 28,
     check: (m, g) => m.cups >= g && m.avgPrice <= m.avgCap },
-  { id: 'c_premium', emoji: '💎', name: '高端形象', cash: 138, failRep: -4,
+  { id: 'c_premium', fit: [3,6], emoji: '💎', name: '高端形象', cash: 138, failRep: -4,
     desc: '卖出 8 杯且平均单价 ≥ ¥26', goal: 8, unit: '杯', metric: 'cups', dir: 'up',
     avgFloor: 26,
     check: (m, g) => m.cups >= g && m.avgPrice >= m.avgFloor },
-  { id: 'c_nolost', emoji: '🎯', name: '零流失', cash: 110, failRep: -4,
+  { id: 'c_nolost', fit: [3,5], emoji: '🎯', name: '零流失', cash: 110, failRep: -4,
     desc: '完成 8 单且流失 ≤ 2 人', goal: 8, unit: '单', metric: 'orders', dir: 'up',
     lostCap: 2,
     check: (m, g) => m.orders >= g && m.lost <= m.lostCap },
-  { id: 'c_combo', emoji: '⚡', name: '手速达人', cash: 99, failRep: -3,
+  { id: 'c_combo', fit: [1,5], emoji: '⚡', name: '手速达人', cash: 99, failRep: -3,
     desc: '连点出杯位 20 次', goal: 20, unit: '次', metric: 'clicks', dir: 'up',
     check: (m, g) => m.clicks >= g },
-  { id: 'c_trend', emoji: '🌟', name: '潮流捕手', cash: 110, failRep: -3,
+  { id: 'c_trend', fit: [2], emoji: '🌟', name: '潮流捕手', cash: 110, failRep: -3,
     desc: '命中今日流行 5 杯', goal: 5, unit: '杯', metric: 'trend', dir: 'up',
     check: (m, g) => m.trendCups >= g },
-  { id: 'c_sat', emoji: '😊', name: '口碑经营', cash: 105, failRep: -4,
+  { id: 'c_sat', fit: [1,4], emoji: '😊', name: '口碑经营', cash: 105, failRep: -4,
     desc: '今日满意率 ≥ 92%', goal: 0.92, unit: '', metric: 'sat', dir: 'up',
     check: (m, g) => m.sat >= g },
-  { id: 'c_infl', emoji: '📸', name: '网红专场', cash: 143, failRep: -4,
+  { id: 'c_infl', fit: [3,6], emoji: '📸', name: '网红专场', cash: 143, failRep: -4,
     desc: '向网红顾客卖出 4 杯', goal: 4, unit: '杯', metric: 'infl', dir: 'up',
     check: (m, g) => (m.typeServed.influencer || 0) >= g },
-  { id: 'c_profit', emoji: '📈', name: '利润担当', cash: 143, failRep: -4,
+  { id: 'c_profit', fit: [3,6], emoji: '📈', name: '利润担当', cash: 143, failRep: -4,
     desc: '今日净利达到 ¥200', goal: 200, unit: '', metric: 'net', dir: 'up', prefix: '¥',
     check: (m, g) => m.net >= g },
 ];
@@ -2302,7 +2311,7 @@ const DIFFICULTY = {
        用 random 当基线会把目标定得偏低（同一份代码，normal 过关率 33% vs 73%）。
      ★ 验收看**过关率**（过线局数/总局数），不看"平均净资产/目标"——
        后者是完成度，两者会给出相反的结论（旧 easy 完成度 81%、过关率却 0%）。
-     ★★ V22 定稿：目标**重新变成递增**（easy 68k / normal 58k / hard 54k）。
+     ★★ V22 定稿：目标**重新变成递增**（easy 65k / normal 56k / hard 51k）。
        上一版被迫统一成 55000，是因为三档产出极差只有 5.6%，递增目标会让过关率倒挂。
        这一版把库容起点做成难度（easy 570 / normal 420 / hard 300）之后，
        产出极差拉到 **50%**（77.8k / 64.5k / 51.9k），递增目标才重新成立。
@@ -2321,11 +2330,11 @@ const DIFFICULTY = {
          manual  （手搓配额，比真人笨）：                          53% / 21% / 25%
        只要 autoFill 落在 85~95%、manual 不低于 20%，就认为目标可用。
        —— 上一版只按 manual 标定，等于拿一个偏弱的 bot 当基准，目标被系统性低估。 */
-  easy:   { key: 'easy',   name: '佛系躺赢', emoji: '🌱', cash: 1100, goal: 68000, traffic: 1.15, costMult: 0.88, rentMult: 0.8,
+  easy:   { key: 'easy',   name: '佛系躺赢', emoji: '🌱', cash: 1100, goal: 65000, traffic: 1.15, costMult: 0.88, rentMult: 0.8,
             storageBase: 570,
             contractGoal: 0.80, contractPenalty: 0, stageGoal: 0.85,
             desc: '现金流宽松，适合先熟悉玩法' },
-  normal: { key: 'normal', name: '标准创业', emoji: '🔥', cash: 700, goal: 58000, traffic: 1.0, costMult: 1.0, rentMult: 1.0,
+  normal: { key: 'normal', name: '标准创业', emoji: '🔥', cash: 700, goal: 56000, traffic: 1.0, costMult: 1.0, rentMult: 1.0,
             storageBase: 420,
             contractGoal: 1.0, contractPenalty: 0.6, stageGoal: 1.0,
             desc: '推荐首次挑战，需要认真经营' },
@@ -2335,9 +2344,15 @@ const DIFFICULTY = {
      玩家会看到「地狱模式目标比简单模式还低」。
      ⇒ 想让 hard 达到 30~40%，应当**提高 hard 的产出**（起始资金 / 成本乘数 / 客流），
        而不是继续下调目标。这是下一轮的设计选择，已记入报告。 */
-  hard:   { key: 'hard',   name: '地狱卷王', emoji: '💀', cash: 520, goal: 54000, traffic: 0.90, costMult: 1.15, rentMult: 1.22,
+  /* ★ V22：contractGoal 1.22 → 1.10。
+     合同按章加权之后，hard 抽到"它自己难以达成"的合同的比例上升了，
+     而 hard 的失败惩罚链最强（扣口碑 → 客流降 → 更完不成 → 再扣）。
+     实测 n=40：过关率 48% → 35%，掉 13pp。
+     ⇒ 这里该调的是**合同门槛**（1.22 太苛刻），不是把目标从 54000 压到 52000 ——
+       压目标只会掩盖问题，而合同失败的死循环还在。 */
+  hard:   { key: 'hard',   name: '地狱卷王', emoji: '💀', cash: 520, goal: 51000, traffic: 0.90, costMult: 1.15, rentMult: 1.22,
             storageBase: 300,
-            contractGoal: 1.22, contractPenalty: 0.35, stageGoal: 1.30,
+            contractGoal: 1.10, contractPenalty: 0.35, stageGoal: 1.30,
             desc: '成本高、客流少，建议攒够声望再挑战' },
 };
 
@@ -2469,9 +2484,9 @@ const MILESTONE_EVERY = 5;
  *        而「本档内锚点够得着」比「跨难度数字好看」重要得多。
  */
 const STAGE_GOALS = {
-  easy:   [5500, 10800, 20300, 32100, 52200, 68000],
-  normal: [4600, 9200, 17300, 27500, 44500, 58000],
-  hard:   [4200, 8600, 16100, 25500, 41500, 54000],
+  easy:   [5300, 10300, 19400, 30700, 49900, 65000],
+  normal: [4400, 8900, 16700, 26600, 43000, 56000],
+  hard:   [4000, 8100, 15200, 24100, 39200, 51000],
 };
 
 /* 兼容旧引用（UI 层用 MILESTONE_RATIO 画刻度）——

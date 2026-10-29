@@ -3837,7 +3837,21 @@ function rollContract(s) {
   const recent = arr(s.contractLog).slice(-4).map(String);
   const pool = CONTRACTS.filter(c => recent.indexOf(c.id) < 0);
   const from = (pool.length ? pool : CONTRACTS);
-  const c = from[Math.floor(rnd(0, from.length))] || from[0];
+  /* ★★ V22：按章加权 —— 适配当前章的合同出现概率 ×2。
+     ★ 目的不是平衡，是**让章节机制被"教到"**：
+       夜市出「薄利多销」、车站出「零流失」、商圈出「高端形象」。
+       只靠一句过场文案，玩家很难把"这章该换打法"落到操作上；
+       每天压在头上的合同是最便宜的教法。
+     ★ 权重用"入池两次"实现而不是浮点权重：
+       浮点权重要额外算累积和，一个 off-by-one 就会让某条合同永远抽不到。 */
+  const chNow = chapterOf(s);
+  const bag = [];
+  for (const c of from) {
+    bag.push(c);
+    const fit = Array.isArray(c.fit) ? c.fit : null;
+    if (!fit || fit.indexOf(chNow) >= 0) bag.push(c);   /* 适配（或未标注）→ 权重 2 */
+  }
+  const c = bag[Math.floor(rnd(0, bag.length))] || from[0];
   s.contract = { id: c.id, done: false };
   s.contractLog = arr(s.contractLog).concat(c.id);
   if (s.contractLog.length > 8) s.contractLog = s.contractLog.slice(-8);
