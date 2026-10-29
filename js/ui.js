@@ -627,8 +627,56 @@ UI.renderAll = function () { UI.renderHUD(); UI.renderPanel(UI.tab); };
 
 
 /* ---------------- 经营面板 ---------------- */
+/* ============================================================
+   章节过场（V22 · B1）
+   ------------------------------------------------------------
+   ★ 触发条件用「这一章没看过」而不是「day 变了」：
+     读档、重进、切页面都不该重播，而 chapterSeen 存在存档里，
+     跟着存档走 —— 玩家自己的进度，不会因为换设备而重复看。
+   ★ 先拿容器再记账：没有容器时不该把 seen 写进去，
+     否则卡片永远不出现，而且看不出原因（静默失效）。
+   ============================================================ */
+UI.maybeShowChapter = function () {
+  const s = window.S;
+  if (!s || !s.day) return;
+  if (typeof chapterOf !== 'function' || typeof CHAPTERS === 'undefined') return;
+  if (!Array.isArray(s.chapterSeen)) s.chapterSeen = [];
+  const idx = chapterOf(s);
+  if (s.chapterSeen.indexOf(idx) >= 0) return;
+
+  const host = document.getElementById('chapterCard');
+  if (!host) return;                      /* 没有容器就不记账，避免静默失效 */
+
+  const c = CHAPTERS[idx - 1];
+  if (!c) return;
+  s.chapterSeen.push(idx);
+
+  host.innerHTML = `
+    <div class="cc-bg" style="--cc:${c.bg}"></div>
+    <div class="cc-in">
+      <div class="cc-no">第 ${c.i} 章</div>
+      <div class="cc-name">${c.emoji} ${esc(c.name)}</div>
+      <div class="cc-tip">${esc(c.tip)}</div>
+      <div class="cc-skip">点击继续</div>
+    </div>`;
+  host.classList.add('show');
+
+  let done = false;
+  const close = () => {
+    if (done) return;
+    done = true;
+    host.classList.remove('show');
+    host.innerHTML = '';
+    document.removeEventListener('pointerdown', close);
+  };
+  /* 2.4s 而不是 1.2s：文案有两行要读，1.2s 只够看标题 */
+  setTimeout(close, 2400);
+  document.addEventListener('pointerdown', close);
+};
+
 UI.renderManage = function () {
   const s = window.S; if (!s) return;
+  UI.maybeShowChapter();      /* 换章时播过场（已看过则不触发） */
   const tag = TAGS[s.trend];
   const nextTag = TAGS[s.nextTrend];
   let h = '';

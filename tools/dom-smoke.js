@@ -66,7 +66,12 @@ const ctx = {
   document: {
     getElementById(id) { return els[id] || (els[id] = makeEl(id)); },
     querySelectorAll() { return []; }, querySelector() { return makeEl('q'); },
-    createElement() { return makeEl('new'); }, addEventListener() { }, hidden: false,
+    createElement() { return makeEl('new'); }, addEventListener() { },
+    /* ★ V22：文档级监听要能解绑。章节过场用 document 上的 pointerdown 做"点击跳过"，
+       并在关闭时 removeEventListener —— 桩里缺这个方法会让整个冒烟崩掉
+       （且报的是产品代码的栈，很容易误判成产品 bug）。 */
+    removeEventListener() { },
+    hidden: false,
   },
 };
 ctx.addEventListener = () => { };

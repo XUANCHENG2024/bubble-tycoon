@@ -405,7 +405,15 @@ console.log('\n=============== E. 结算数字自洽 ===============');
   const rep = s.report || {};
   /* 日报口径：net = revenue - cogs - 工资 - 租金 - 当日营销
      （report.marketing 就是 s.dayMarketing，别重复扣） */
-  const wages = 0, rent = Math.round(E.CFG.RENT_PER_SHOP * s.shops + E.CFG.SHOP_UPKEEP * (s.shops - 1));
+  /* ★★ V22：**用日报里引擎自己的数字，不要在这里重算**。
+     原来这两行是 `wages = 0, rent = 四舍五入(RENT_PER_SHOP×店数 +  upkeep×…)` ——
+     等于把租金公式抄了一份进测试。而租金实际要乘：
+       难度 rentMult × costMult、章节 chapterMul、策略卡 cardMul、无尽压力 ep
+     于是任何一项乘子变化，这条对账都会误报（本轮加了章节租金乘子，就差 12 块），
+     看上去像产品算错了账，实际是测试抄了口径。
+     ★ 这是本项目第 N 次栽在"同一公式抄两遍"，判据应该是：**
+       只要能拿到引擎算好的值，就不要重算。 */
+  const wages = rep.wages || 0, rent = rep.rent || 0;
   const expectNet = (rep.revenue || 0) - (rep.cogs || 0) - wages - rent - (rep.marketing || 0);
   expect('E1', Math.abs((rep.net || 0) - expectNet) <= 1 && (rep.marketing || 0) > 0,
     `日报净利与「营收-成本-工资-租金-营销」对得上（${Math.round(rep.net)} vs ${Math.round(expectNet)}，当日营销 ¥${rep.marketing}）`);

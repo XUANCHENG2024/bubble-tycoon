@@ -162,6 +162,21 @@ function cardThemeBonus(s, key) {
   }
   return n >= 3 ? 1.25 : (n === 2 ? 1.10 : 1);
 }
+/** 章节机制的乘子（没定义的键返回 1，调用处不用特判）。
+ *
+ *  ★★ 注意：**不要**在这里另写一个 chapterOf。
+ *     引擎里本来就有 `chapterOf(s)`（返回 1~6 的章节序号，供关卡系统用），
+ *     同作用域下后定义的函数会**静默覆盖**前面的 —— 我第一版就这么写了，
+ *     结果 `chapterOf` 返回数字而不是章节对象，`c[key]` 全是 undefined，
+ *     六个章节的乘子全部失效，而没有任何报错。
+ *     现在直接复用那个序号：CHAPTERS 与 STAGE_DAYS / STAGE_CHAPTERS 同周期（5 天 × 6 章）。 */
+function chapterMul(s, key) {
+  const idx = num(chapterOf(s), 1) - 1;
+  const c = CHAPTERS[idx];
+  const v = c && c[key];
+  return typeof v === 'number' ? v : 1;
+}
+
 function cardMul(s, key) {
   let m = 1;
   if (!Array.isArray(s.cards)) return m;
@@ -238,7 +253,13 @@ function costOf(s, rid) {
   return Math.max(0.1, afterSig * (1 - cut) * cardMul(s, 'cogs'));
 }
 function priceOf(s, rid) {
-  return Math.max(1, Math.round(recipeById(rid).price * (s.ratios[rid] || 1)) + sigPriceAdd(s, rid));
+  /* ★ V22：章节客单价乘子。
+     ★ 只需改这一处 —— 托管店估算、结算均价（revenue/orders）、
+       菜单展示、adviceOf 全都调 priceOf，会自动跟着走。
+       （前一轮规格里担心"牵动四处"，核完代码确认是多虑了：
+        合同用的 avgPrice 是从**实际营收**算的，不是从菜单价算的。） */
+  const raw = recipeById(rid).price * (s.ratios[rid] || 1) * chapterMul(s, 'price');
+  return Math.max(1, Math.round(raw) + sigPriceAdd(s, rid));
 }
 function invUsed(s) {
   let n = 0;
@@ -304,6 +325,7 @@ function trafficOf(s) {
      钱怎么变成产能（雇人 / 提速 / 开店）由玩家自己决定，不会单向推高需求。 */
   t *= 1 + 0.01 * s.up.auto;
   t *= cardMul(s, 'traffic');     /* 🃏 策略卡：薄利多销 / 达人探店这类 */
+  t *= chapterMul(s, 'traffic');  /* 🗺️ 章节：夜市人多、清晨街区人少 */
   for (const st of s.staff) if (st.trait === 'star') t *= 1.07;
   t *= d.traffic;
   t *= (s.eventTrafficMul || 1);
@@ -2942,7 +2964,7 @@ function regularView(s) {
     cups: rndInt(t.cups[0], t.cups[1]),
     wait: 0,
     /* 🃏 策略卡：会员体系延长耐心、员工入股缩短耐心 */
-    patience: patienceOf(s) * t.patienceMul * cardMul(s, 'patience') * rnd(0.85, 1.2),
+    patience: patienceOf(s) * t.patienceMul * cardMul(s, 'patience') * chapterMul(s, 'patience') * rnd(0.85, 1.2),
   });
 }
 
@@ -3241,7 +3263,7 @@ function endDay(s) {
   /* ★★ V22：costMult 现在**也作用于日租**。
      原来它只乘在一次性支出（开店/升级）上，对 30 天总成本的影响 <3% ——
      等于"地狱模式"只在头两天贵一点。挂到日租之后，扩张才变成持续压力。 */
-  let rentRaw = (CFG.RENT_PER_SHOP * s.shops + CFG.SHOP_UPKEEP * (s.shops - 1)) * d.rentMult * d.costMult * ep * cardMul(s, 'rent');
+  let rentRaw = (CFG.RENT_PER_SHOP * s.shops + CFG.SHOP_UPKEEP * (s.shops - 1)) * d.rentMult * d.costMult * ep * cardMul(s, 'rent') * chapterMul(s, 'rent');
   for (const st of s.staff) if (st.trait === 'wise') rentRaw *= 0.92;
   /* 店长 lean 特性（精打细算）→ 该店租金 -12%，按店长数逐个施加 */
   for (const m of (s.managers || [])) if (managerTrait(m).id === 'lean') rentRaw *= 0.88;
@@ -3259,7 +3281,7 @@ function endDay(s) {
   }
   let repDelta = (sat - 0.68) * 10 + (1.0 - avgRatio) * 1.5 + s.up.decor * 0.15;
   for (const st of s.staff) if (st.trait === 'nice') repDelta += 0.6;
-  repDelta += sim.repGain * 0.25 * cardMul(s, 'repGain');
+  repDelta += sim.repGain * 0.25 * cardMul(s, 'repGain') * chapterMul(s, 'rep');
   const before = s.rep;
   s.rep = clamp(s.rep + repDelta, 0, 100);
 

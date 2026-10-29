@@ -2076,3 +2076,48 @@ body, #app {
   background: linear-gradient(90deg, var(--cyan), var(--purple)); }
 .near-d { font-size: var(--fs-xs); color: var(--txt3); margin-top: 4px; }
 .near-d b { color: var(--txt2); }
+
+/* ============================================================
+   章节过场（V22 · B1）
+   ------------------------------------------------------------
+   ★ 只在换章时出现 2.4s，可点击跳过；不常驻、不占布局。
+   ★ 章节色用 --cc 传进来，只染背景光晕 —— 不动全局主题色，
+     否则会和菜单/升级页里那套青紫配色打架。
+   ============================================================ */
+#chapterCard { position: fixed; inset: 0; z-index: 300; display: none; }
+#chapterCard.show { display: block; }
+
+.cc-bg {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--cc) 42%, transparent), transparent 62%),
+    linear-gradient(180deg, rgba(10,4,20,.86), rgba(10,4,20,.96));
+  animation: ccFade .38s ease-out;
+}
+.cc-in {
+  position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%);
+  width: min(86vw, 380px); text-align: center;
+  animation: ccText .5s cubic-bezier(.34,1.56,.64,1) .14s both;
+}
+.cc-no {
+  font-size: var(--fs-sm); letter-spacing: .35em; text-indent: .35em;
+  color: rgba(255,255,255,.55); margin-bottom: 6px;
+}
+.cc-name {
+  font-size: 26px; font-weight: 900; letter-spacing: .04em;
+  color: #fff; text-shadow: 0 4px 24px rgba(0,0,0,.6);
+}
+.cc-tip {
+  margin-top: 12px; font-size: var(--fs-md); line-height: 1.7;
+  color: rgba(255,255,255,.82);
+}
+.cc-skip {
+  margin-top: 22px; font-size: var(--fs-xs); color: rgba(255,255,255,.4);
+  animation: ccBlink 1.6s ease-in-out infinite;
+}
+@keyframes ccFade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes ccText {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 14px)) scale(.96) }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1) }
+}
+@keyframes ccBlink { 0%,100% { opacity: .35 } 50% { opacity: .8 } }
