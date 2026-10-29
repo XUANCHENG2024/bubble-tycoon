@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>奶茶星球 · 店铺模型 v2（章节 × 改造）</title>
+<style>
+/* ============================================================
+   设计令牌 —— 与游戏 styles.css 同名同值，原型能直接搬回去
+   ============================================================ */
+:root{
+  --bg:#0f0719; --panel:#1b1030; --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.16);
+  --cyan:#35e5f0; --pink:#ff4d9d; --amber:#ffc247; --purple:#8b5cff; --green:#4ade80;
+  --txt:#f4eeff; --txt2:#b3a6c9; --txt3:#7d7194;
+  --fs-xs:10px; --fs-sm:11px; --fs-md:12px; --fs-lg:14px; --fs-xl:17px;
+  --r-md:12px; --r-lg:18px; --r-pill:99px;
+  --sh:0 10px 30px rgba(0,0,0,.45);
+
+  /* 章节环境令牌（默认第 1 章，由 JS 覆盖） */
+  --sky-a:#1b2a44; --sky-b:#3d5a80; --far:#22304a; --ground:#1a2438;
+  --warm:#cddbe8; --accent:#7aa7d6;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  margin:0;background:var(--bg);color:var(--txt);
+  font:400 14px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  overflow:hidden;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+.app{height:100%;max-width:560px;margin:0 auto;display:flex;flex-direction:column;
+  background:linear-gradient(180deg,#150a26,#0d0616 60%);position:relative}
+
+/* ---------- 顶栏 ---------- */
+.top{flex:0 0 auto;display:flex;align-items:center;gap:8px;
+  padding:calc(9px + env(safe-area-inset-top)) 14px 7px}
+.top h1{font-size:var(--fs-lg);margin:0;font-weight:800}
+.top .cn{font-size:var(--fs-sm);color:var(--accent);margin-left:2px}
+.top .spacer{flex:1}
+.score{display:flex;align-items:center;gap:5px;padding:5px 11px;border-radius:var(--r-pill);
+  background:rgba(139,92,255,.16);border:1px solid rgba(139,92,255,.5);
+  font-size:var(--fs-sm);color:var(--purple)}
+.score b{font-size:var(--fs-lg);color:var(--txt);font-variant-numeric:tabular-nums}
+
+/* ---------- 章节条（六章可点，切换即换环境） ---------- */
+.chapters{flex:0 0 auto;display:flex;gap:5px;padding:0 12px 9px;overflow-x:auto}
+.chapters::-webkit-scrollbar{display:none}
+.ch{flex:0 0 auto;display:flex;align-items:center;gap:4px;
+  padding:5px 10px;border-radius:var(--r-pill);
+  background:rgba(255,255,255,.05);border:1px solid transparent;
+  font-size:var(--fs-xs);color:var(--txt3);white-space:nowrap;
+  transition:all .18s}
+.ch.on{background:rgba(255,255,255,.11);border-color:var(--accent);color:var(--txt)}
+.ch .dot{width:5px;height:5px;border-radius:50%;background:currentColor;opacity:.6}
+.ch.on .dot{opacity:1;box-shadow:0 0 8px currentColor}
+
+/* ---------- 舞台 ---------- */
+.stage{position:relative;flex:0 0 auto;margin:0 12px;border-radius:var(--r-lg);
+  overflow:hidden;border:1px solid var(--line);box-shadow:var(--sh);
+  aspect-ratio:16/10;background:#0d0718}
+.stage .layer{position:absolute;inset:0}
+.stage .layer svg{display:block;width:100%;height:100%}
+
+/* 环境层与店铺层分开叠放：换章只重绘环境层，店铺层不动
+   —— 玩家花钱改造的店不会因为换地方而"重置" */
+#envLayer{z-index:1}
+#shopLayer{z-index:2}
+#beforeLayer{z-index:3;clip-path:inset(0 calc(100% - var(--split,50%)) 0 0)}
+
+.split{position:absolute;top:0;bottom:0;left:var(--split,50%);width:2px;z-index:6;
+  background:linear-gradient(180deg,transparent,rgba(255,255,255,.85),transparent);
+  opacity:0;transition:opacity .2s;pointer-events:none}
+.split::after{content:'';position:absolute;top:50%;left:50%;translate:-50% -50%;
+  width:28px;height:28px;border-radius:50%;background:rgba(15,7,25,.92);
+  border:1.5px solid rgba(255,255,255,.7);box-shadow:0 0 14px rgba(53,229,240,.55)}
+.stage.compare .split{opacity:1}
+.stage.compare .hit{position:absolute;inset:0;z-index:7;cursor:ew-resize;touch-action:none}
+
+/* 对比模式的三个标签 */
+.cmp-tag{position:absolute;top:8px;z-index:8;padding:2px 8px;border-radius:var(--r-pill);
+  font-size:var(--fs-xs);font-weight:800;pointer-events:none;backdrop-filter:blur(4px)}
+.cmp-tag.l{left:8px;background:rgba(255,77,157,.85);color:#2a0512}
+.cmp-tag.r{right:8px;background:rgba(53,229,240,.85);color:#06222a}
+
+/* ---------- 改造项 ---------- */
+.slots{flex:1 1 auto;overflow-y:auto;padding:11px 12px;display:grid;
+  grid-template-columns:repeat(3,1fr);gap:7px;align-content:start}
+.slot{position:relative;text-align:left;padding:8px 9px;border-radius:var(--r-md);
+  background:var(--panel);border:1px solid var(--line);
+  transition:border-color .18s,background .18s,transform .15s}
+.slot:active{transform:scale(.97)}
+.slot.on{border-color:var(--accent);background:rgba(53,229,240,.07)}
+.slot.maxed{opacity:.5}
+.slot-h{font-size:var(--fs-xs);font-weight:700;display:flex;gap:3px;align-items:center}
+.slot-h .pr{margin-left:auto;color:var(--txt3);font-weight:400}
+.pips{display:flex;gap:2px;margin-top:5px}
+.pip{flex:1;height:3px;border-radius:2px;background:rgba(255,255,255,.12)}
+.pip.f{background:linear-gradient(90deg,var(--accent),var(--purple))}
+.slot-b{margin-top:5px;font-size:var(--fs-xs);color:var(--txt2);line-height:1.35;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.slot-b b{color:var(--amber)}
+
+/* ---------- 底栏 ---------- */
+.bar{flex:0 0 auto;padding:9px 14px calc(11px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--line);background:rgba(20,11,36,.94);backdrop-filter:blur(8px)}
+.bar .row{display:flex;align-items:center;gap:9px}
+.bar .info{flex:1;min-width:0}
+.bar .info .t{font-size:var(--fs-sm);color:var(--txt2);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.bar .info .t b{color:var(--txt)}
+.btn{padding:10px 18px;border-radius:var(--r-md);font-weight:800;font-size:var(--fs-md);
+  background:linear-gradient(135deg,var(--accent),var(--purple));color:#0a0514;
+  box-shadow:0 6px 18px rgba(53,229,240,.25);transition:transform .12s;white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn[disabled]{background:rgba(255,255,255,.08);color:var(--txt3);box-shadow:none}
+.btn-ghost{background:rgba(255,255,255,.07);color:var(--txt2);box-shadow:none}
+.cmpbar{display:flex;gap:6px;margin-bottom:8px}
+.cmpbar button{flex:1;padding:6px 4px;border-radius:9px;font-size:var(--fs-xs);
+  background:rgba(255,255,255,.06);color:var(--txt3);border:1px solid transparent}
+.cmpbar button.on{background:rgba(53,229,240,.14);border-color:rgba(53,229,240,.5);color:var(--cyan)}
+
+/* ---------- 反馈 ---------- */
+.float{position:absolute;z-index:9;pointer-events:none;font-weight:800;font-size:var(--fs-lg);
+  text-shadow:0 2px 10px rgba(0,0,0,.7);animation:floatUp 1.1s ease-out forwards}
+@keyframes floatUp{0%{opacity:0;transform:translate(-50%,6px) scale(.9)}
+  18%{opacity:1;transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,-40px)}}
+.spark{position:absolute;z-index:8;width:6px;height:6px;border-radius:50%;pointer-events:none;
+  background:var(--amber);box-shadow:0 0 10px currentColor;animation:spark .95s ease-out forwards}
+@keyframes spark{0%{opacity:0;transform:translate(0,0) scale(.4)}20%{opacity:1}
+  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.2)}}
+.flash{position:absolute;inset:0;z-index:5;pointer-events:none;
+  background:radial-gradient(circle at 50% 62%,rgba(255,226,138,.5),transparent 62%);
+  animation:flash .5s ease-out forwards}
+@keyframes flash{0%{opacity:0}25%{opacity:1}100%{opacity:0}}
+
+/* 换章时环境层交叉溶解 */
+#envLayer{animation:envIn .55s ease-out}
+@keyframes envIn{from{opacity:0;filter:brightness(1.5)}to{opacity:1;filter:none}}
+
+/* 店铺部件：只切 class，靠 transition 过渡（不重建 DOM） */
+.part{transition:opacity .46s ease,transform .52s cubic-bezier(.34,1.56,.64,1);
+  transform-box:fill-box;transform-origin:50% 100%}
+.part.off{opacity:0;transform:scale(.82) translateY(6px)}
+
+/* 环境里的呼吸感 */
+@keyframes breathe{0%,100%{opacity:.55}50%{opacity:1}}
+.lit{animation:breathe 3.2s ease-in-out infinite}
+@keyframes twinkle{0%,100%{opacity:.2}50%{opacity:.85}}
+.star{animation:twinkle 4s ease-in-out infinite}
+/* 粒子（雾/蒸汽/落花/尘埃） */
+@keyframes drift{0%{transform:translate(0,0);opacity:0}
+  20%{opacity:.7}100%{transform:translate(var(--dx),-60px);opacity:0}}
+.pt{animation:drift var(--dur,7s) linear infinite}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <div class="top">
+    <h1>🏪 店铺</h1>
+    <span class="cn" id="chName">清晨街区</span>
+    <span class="spacer"></span>
+    <div class="score">评分 <b id="score">0</b></div>
+  </div>
+
+  <!-- 六章：点一下换环境（同一家店，换个地方） -->
+  <div class="chapters" id="chapters"></div>
+
+  <div class="stage" id="stage">
+    <div class="layer" id="envLayer"></div>
+    <div class="layer" id="shopLayer"></div>
+    <div class="layer" id="beforeLayer"></div>
+    <div class="split"></div>
+    <div class="hit" id="hit"></div>
+  </div>
+
+  <div class="slots" id="slots"></div>
+
+  <div class="bar">
+    <div class="cmpbar" id="cmpbar">
+      <button data-cmp="none" class="on">不对比</button>
+      <button data-cmp="shop">对比改造前</button>
+      <button data-cmp="env">对比上一章</button>
+    </div>
+    <div class="row">
+      <div class="info"><div class="t" id="barTitle">选一个改造项</div></div>
+      <button class="btn" id="goBtn" disabled>改造</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   1. 章节环境（六套参数，零位图）
+   ------------------------------------------------------------
+   每章只换：天空渐变 2 色 + 远景 1 色 + 地面 1 色 + 暖光 1 色
+            + 3 个标识物 + 1 种粒子
+   ★ 这正是《B1 规格》里的交付口径：4 个色 token + 3 个剪影。
+     六章合计 ≈ 代码 20KB，一张图都不用。
+   ============================================================ */
+const CH = [
+  { i:1, name:'清晨街区', emoji:'🌅',
+    sky:['#1b2a44','#3d5a80'], far:'#22304a', ground:'#1a2438', warm:'#cddbe8', acc:'#7aa7d6',
+    marks:['bike','lamp','tree'], dust:'fog' },
+  { i:2, name:'夜市', emoji:'🏮',
+    sky:['#2a1630','#6b3a2a'], far:'#3a2030', ground:'#241226', warm:'#ffd98a', acc:'#ffc247',
+    marks:['lantern','stall','steam'], dust:'steam' },
+  { i:3, name:'商圈', emoji:'🏙️',
+    sky:['#1a1030','#3b2260'], far:'#241640', ground:'#150c26', warm:'#e0d4ff', acc:'#b18cff',
+    marks:['glass','screen','escalator'], dust:'none' },
+  { i:4, name:'校园', emoji:'🎒',
+    sky:['#12303a','#2f6f7a'], far:'#1b4048', ground:'#0f2730', warm:'#d8fbff', acc:'#7defff',
+    marks:['tree','board','bike'], dust:'petal' },
+  { i:5, name:'车站', emoji:'🚉',
+    sky:['#232833','#4a5464'], far:'#2b323f', ground:'#1a1f28', warm:'#c4ccd8', acc:'#c4ccd8',
+    marks:['bench','luggage','clock'], dust:'dust' },
+  { i:6, name:'旗舰街', emoji:'🏆',
+    sky:['#2a1e10','#6a4a1a'], far:'#3a2a12', ground:'#241a0c', warm:'#fff3d0', acc:'#ffe08a',
+    marks:['bigscreen','redcarpet','queue'], dust:'none' },
+];
+
+/* ============================================================
+   2. 环境层 SVG
+   ============================================================ */
+function envSvg(ch){
+  const marks = buildMarks(ch);
+  return `
+<svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${ch.sky[0]}"/><stop offset=".68" stop-color="${ch.sky[1]}"/>
+      <stop offset="1" stop-color="${ch.sky[1]}"/>
+    </linearGradient>
+    <radialGradient id="warmglow" cx=".5" cy=".62" r=".55">
+      <stop offset="0" stop-color="${ch.warm}" stop-opacity=".42"/>
+      <stop offset="1" stop-color="${ch.warm}" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="grd" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${ch.ground}"/><stop offset="1" stop-color="#0c0714"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="500" fill="url(#sky)"/>
+
+  <!-- 星点（白天章少一些，用透明度模拟光污染） -->
+  <g fill="#fff">
+    <circle class="star" cx="90"  cy="46"  r="1.5" style="animation-delay:.2s"/>
+    <circle class="star" cx="210" cy="28"  r="1.1" style="animation-delay:1.1s"/>
+    <circle class="star" cx="360" cy="58"  r="1.3" style="animation-delay:.6s"/>
+    <circle class="star" cx="520" cy="34"  r="1.4" style="animation-delay:1.7s"/>
+    <circle class="star" cx="660" cy="62"  r="1.2" style="animation-delay:.9s"/>
+    <circle class="star" cx="740" cy="26"  r="1.3" style="animation-delay:2.2s"/>
+  </g>
+
+  <!-- 远景楼群：高度由固定伪随机决定，六章共享同一套轮廓（只是颜色不同）
+       —— 同一座城市的不同角落，而不是六个不同的城市 -->
+  <g fill="${ch.far}">
+    ${[[20,190,130],[150,150,90],[240,175,110],[355,140,120],[480,165,100],
+       [590,145,105],[700,180,80]].map(function(b){
+      return `<rect x="${b[0]}" y="${b[1]}" width="${b[2]}" height="${420-b[1]}"/>`;
+    }).join('')}
+    <!-- 窗光 -->
+    <g fill="${ch.warm}" opacity=".45">
+      <rect x="44"  y="215" width="11" height="9"/><rect x="78" y="245" width="11" height="9"/>
+      <rect x="264" y="200" width="11" height="9"/><rect x="300" y="232" width="11" height="9"/>
+      <rect x="500" y="196" width="11" height="9"/><rect x="534" y="228" width="11" height="9"/>
+      <rect x="718" y="210" width="11" height="9"/>
+    </g>
+  </g>
+
+  <!-- 地面 -->
+  <rect y="400" width="800" height="100" fill="url(#grd)"/>
+  <ellipse cx="400" cy="404" rx="260" ry="14" fill="${ch.warm}" opacity=".10"/>
+
+  <!-- 章节标识物（3 个，左右各一，中间留白给店铺） -->
+  ${marks}
+
+  <!-- 暖光晕（压在店铺下方，营造"店面在发光"） -->
+  <ellipse cx="400" cy="330" rx="240" ry="150" fill="url(#warmglow)"/>
+
+  <!-- 粒子层 -->
+  ${particles(ch)}
+</svg>`;
+}
+
+/* 3 个标识物：用最简几何，保证 6 套形状互不相同且一眼能认出"这章不一样" */
+function buildMarks(ch){
+  const c = ch.acc, w = ch.warm;
+  switch(ch.i){
+    case 1: return `
+      <g opacity=".9">
+        <g stroke="${c}" stroke-width="3" fill="none">
+          <circle cx="120" cy="372" r="15"/><circle cx="168" cy="372" r="15"/>
+          <path d="M120 372 L146 344 L168 372"/>
+        </g>
+        <g stroke="${c}" stroke-width="3"><line x1="690" y1="400" x2="690" y2="300"/></g>
+        <circle cx="690" cy="294" r="9" fill="${w}" filter="url(#none)" opacity=".9"/>
+        <g fill="${c}" opacity=".8">
+          <rect x="664" y="330" width="52" height="6" rx="3"/>
+        </g>
+      </g>`;
+    case 2: return `
+      <g opacity=".95">
+        <g fill="${w}">
+          <ellipse cx="110" cy="300" rx="13" ry="17"/><rect x="104" y="312" width="12" height="4" rx="2"/>
+          <ellipse cx="160" cy="318" rx="11" ry="14"/><rect x="155" y="328" width="10" height="3" rx="2"/>
+        </g>
+        <g stroke="${c}" stroke-width="2" opacity=".8">
+          <line x1="110" y1="283" x2="110" y2="270"/><line x1="160" y1="304" x2="160" y2="292"/>
+        </g>
+        <g fill="${c}" opacity=".9">
+          <rect x="660" y="352" width="96" height="8" rx="3"/>
+          <rect x="668" y="360" width="6" height="40"/><rect x="742" y="360" width="6" height="40"/>
+          <rect x="688" y="330" width="40" height="18" rx="3" fill="${w}" opacity=".75"/>
+        </g>
+      </g>`;
+    case 3: return `
+      <g opacity=".85">
+        <g fill="${c}" opacity=".55">
+          <rect x="70" y="230" width="120" height="170"/>
+          <rect x="96" y="252" width="68" height="126" fill="${w}" opacity=".35"/>
+        </g>
+        <g fill="${c}" opacity=".55">
+          <rect x="630" y="200" width="140" height="200"/>
+          <rect x="652" y="226" width="96" height="60" fill="${w}" opacity=".45"/>
+        </g>
+        <g stroke="${c}" stroke-width="2" opacity=".7">
+          <line x1="70" y1="230" x2="190" y2="230"/><line x1="630" y1="200" x2="770" y2="200"/>
+        </g>
+      </g>`;
+    case 4: return `
+      <g opacity=".95">
+        <g fill="${c}">
+          <circle cx="120" cy="322" r="46" opacity=".85"/>
+          <rect x="114" y="352" width="12" height="48"/>
+          <circle cx="700" cy="336" r="34" opacity=".8"/>
+          <rect x="695" y="360" width="10" height="40"/>
+        </g>
+        <g fill="${w}" opacity=".9">
+          <rect x="640" y="300" width="70" height="46" rx="3"/>
+        </g>
+        <g stroke="${c}" stroke-width="2" opacity=".8">
+          <line x1="648" y1="314" x2="702" y2="314"/><line x1="648" y1="326" x2="692" y2="326"/>
+        </g>
+      </g>`;
+    case 5: return `
+      <g opacity=".9">
+        <g fill="${c}" opacity=".85">
+          <rect x="76" y="356" width="120" height="10" rx="4"/>
+          <rect x="82" y="366" width="8" height="34"/><rect x="182" y="366" width="8" height="34"/>
+          <rect x="96" y="330" width="80" height="24" rx="5" opacity=".7"/>
+        </g>
+        <g fill="${c}" opacity=".8">
+          <rect x="660" y="360" width="44" height="40" rx="5"/>
+          <rect x="668" y="342" width="28" height="20" rx="4"/>
+          <line x1="682" y1="342" x2="682" y2="362" stroke="${ch.ground}" stroke-width="3"/>
+        </g>
+        <g fill="${w}" opacity=".9">
+          <circle cx="704" cy="286" r="24"/><circle cx="704" cy="286" r="19" fill="${ch.sky[0]}"/>
+          <line x1="704" y1="286" x2="704" y2="274" stroke="${w}" stroke-width="2.5"/>
+          <line x1="704" y1="286" x2="713" y2="290" stroke="${w}" stroke-width="2.5"/>
+        </g>
+      </g>`;
+    default: return `
+      <g opacity=".95">
+        <g fill="${c}" opacity=".9">
+          <rect x="54" y="240" width="150" height="160" rx="6"/>
+          <rect x="66" y="254" width="126" height="80" rx="4" fill="${w}" opacity=".6"/>
+        </g>
+        <g fill="${c}" opacity=".5">
+          <rect x="620" y="270" width="150" height="130" rx="6"/>
+        </g>
+        <g fill="#b4364f" opacity=".9">
+          <rect x="330" y="400" width="140" height="10" rx="5"/>
+        </g>
+        <g stroke="${c}" stroke-width="3" fill="none" opacity=".8">
+          <path d="M604 400 L604 330 M604 330 L640 330"/>
+          <path d="M604 360 L640 360"/>
+        </g>
+      </g>`;
+  }
+}
+
+function particles(ch){
+  if (ch.dust === 'none') return '';
+  const n = 10;
+  let out = '';
+  for (let i = 0; i < n; i++){
+    const x = 40 + (i * 73) % 720;
+    const y = 200 + (i * 137) % 220;
+    const dur = (6 + (i % 4)) + 's';
+    const dx = ((i % 2 ? 1 : -1) * (10 + i * 3)) + 'px';
+    const r = ch.dust === 'steam' ? 5 + (i % 3) : 2 + (i % 2);
+    const col = ch.dust === 'petal' ? '#ffd1e3' : ch.warm;
+    out += `<circle class="pt" cx="${x}" cy="${y}" r="${r}" fill="${col}" opacity=".5"
+      style="--dx:${dx};--dur:${dur};animation-delay:${(i * 0.7).toFixed(1)}s"/>`;
+  }
+  return `<g>${out}</g>`;
+}
+
+/* ============================================================
+   3. 店铺层（玩家养出来的那家店 —— 换章不变）
+   ============================================================ */
+const SLOTS = [
+  { id:'sign',   name:'门头', emoji:'🪧', max:3, base:380,  rep:2.0 },
+  { id:'awning', name:'雨棚', emoji:'⛱️', max:2, base:260,  rep:1.2 },
+  { id:'seat',   name:'桌椅', emoji:'🪑', max:2, base:300,  rep:1.5 },
+  { id:'plant',  name:'绿植', emoji:'🪴', max:2, base:180,  rep:0.9 },
+  { id:'light',  name:'照明', emoji:'💡', max:2, base:220,  rep:1.1 },
+  { id:'upper',  name:'二层', emoji:'🏠', max:1, base:1200, rep:3.0 },
+];
+const WALLS = ['#3a3050','#463a5e','#544668','#6b5a7a','#8a7080','#a8848a','#c39a8c','#dcb08f'];
+
+function shopSvg(lv, warm){
+  const tot = SLOTS.reduce((a, s) => a + lv[s.id], 0);
+  const max = SLOTS.reduce((a, s) => a + s.max, 0);
+  const p = tot / max;
+  const wall = WALLS[Math.min(WALLS.length - 1, Math.round(p * (WALLS.length - 1)))];
+  const glow = 0.3 + p * 0.55;
+
+  return `
+<svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".10"/><stop offset="1" stop-color="#000" stop-opacity=".16"/>
+    </linearGradient>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${warm}"/><stop offset="1" stop-color="#ff4d9d"/>
+    </linearGradient>
+    <filter id="g" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- 二层阁楼 -->
+  <g class="part ${lv.upper ? '' : 'off'}" data-part="upper">
+    <rect x="272" y="118" width="256" height="74" rx="5" fill="#2c1d44"/>
+    <rect x="272" y="118" width="256" height="7" rx="3" fill="#3b2759"/>
+    <rect x="298" y="138" width="62" height="40" rx="4" fill="${warm}" opacity=".9"/>
+    <rect x="440" y="138" width="62" height="40" rx="4" fill="${warm}" opacity=".82"/>
+    <g stroke="#2c1d44" stroke-width="4"><line x1="329" y1="138" x2="329" y2="178"/>
+      <line x1="471" y1="138" x2="471" y2="178"/></g>
+    <g stroke="#5b4380" stroke-width="2.5" opacity=".9">
+      <line x1="272" y1="192" x2="528" y2="192"/>
+      <line x1="292" y1="192" x2="292" y2="182"/><line x1="322" y1="192" x2="322" y2="182"/>
+      <line x1="478" y1="192" x2="478" y2="182"/><line x1="508" y1="192" x2="508" y2="182"/>
+    </g>
+  </g>
+
+  <!-- 墙 -->
+  <rect x="256" y="192" width="288" height="208" rx="4" fill="${wall}"/>
+  <rect x="256" y="192" width="288" height="208" rx="4" fill="url(#wg)"/>
+  <rect x="248" y="185" width="304" height="11" rx="4" fill="#2b1e42"/>
+
+  <!-- 门 -->
+  <rect x="364" y="292" width="92" height="108" rx="6" fill="#2a1c3e"/>
+  <rect x="370" y="298" width="80" height="96" rx="4" fill="#3a2856"/>
+  <rect x="378" y="306" width="64" height="64" rx="3" fill="${warm}" opacity=".5"/>
+  <circle cx="442" cy="348" r="3.2" fill="${warm}"/>
+
+  <!-- 窗 -->
+  <rect x="276" y="270" width="62" height="52" rx="4" fill="#221535"/>
+  <rect x="280" y="274" width="54" height="44" rx="3" fill="${warm}" opacity="${(0.3 + lv.light * 0.22 + p * 0.18).toFixed(2)}"/>
+  <rect x="462" y="270" width="62" height="52" rx="4" fill="#221535"/>
+  <rect x="466" y="274" width="54" height="44" rx="3" fill="${warm}" opacity="${(0.28 + lv.light * 0.22 + p * 0.18).toFixed(2)}"/>
+
+  <!-- 照明 -->
+  <g class="part ${lv.light ? '' : 'off'}" data-part="light">
+    <circle cx="304" cy="258" r="6" fill="${warm}" filter="url(#g)"/>
+    <circle cx="496" cy="258" r="6" fill="${warm}" filter="url(#g)"/>
+    <g class="lit">
+      <path d="M258 230 Q400 252 542 230" stroke="#3a2a55" stroke-width="2" fill="none"/>
+      <g fill="${warm}" filter="url(#g)">
+        <circle cx="288" cy="237" r="3"/><circle cx="334" cy="244" r="3"/>
+        <circle cx="380" cy="247" r="3"/><circle cx="426" cy="247" r="3"/>
+        <circle cx="472" cy="244" r="3"/><circle cx="518" cy="237" r="3"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- 招牌：4 级各一套，只亮当前级 -->
+  <g data-part="sign0" class="part ${lv.sign === 0 ? '' : 'off'}">
+    <rect x="332" y="214" width="136" height="32" rx="3" fill="#4a3a63"/>
+    <text x="400" y="236" text-anchor="middle" font-size="17" font-weight="700" fill="#cbb9e0">奶茶星球</text>
+  </g>
+  <g data-part="sign1" class="part ${lv.sign === 1 ? '' : 'off'}">
+    <rect x="324" y="206" width="152" height="42" rx="6" fill="#2a1a3d"/>
+    <rect x="328" y="210" width="144" height="34" rx="4" fill="${warm}"/>
+    <text x="400" y="234" text-anchor="middle" font-size="19" font-weight="800" fill="#7a3b1e">奶茶星球</text>
+  </g>
+  <g data-part="sign2" class="part ${lv.sign === 2 ? '' : 'off'}">
+    <rect x="320" y="202" width="160" height="50" rx="10" fill="#1e1130"/>
+    <rect x="320" y="202" width="160" height="50" rx="10" fill="none" stroke="url(#neon)" stroke-width="3" filter="url(#g)"/>
+    <text x="400" y="235" text-anchor="middle" font-size="21" font-weight="800" fill="#7defff">奶茶星球</text>
+  </g>
+  <g data-part="sign3" class="part ${lv.sign === 3 ? '' : 'off'}">
+    <rect x="314" y="196" width="172" height="62" rx="12" fill="#160c26"/>
+    <rect x="314" y="196" width="172" height="62" rx="12" fill="none" stroke="#ffd166" stroke-width="2.5" filter="url(#g)"/>
+    <text x="400" y="235" text-anchor="middle" font-size="23" font-weight="900" fill="#ffd166">奶茶星球</text>
+  </g>
+
+  <!-- 雨棚 -->
+  <g class="part ${lv.awning ? '' : 'off'}" data-part="awning">
+    <path d="M262 250 L538 250 L550 278 L250 278 Z" fill="#ff4d9d" opacity=".92"/>
+    <g fill="#ffe3ef" opacity=".9">
+      ${[0,1,2,3,4,5,6,7].map(function(i){
+        const x0 = 274 + i * 34;
+        return `<path d="M${x0} 250 L${x0+14} 250 L${x0} 278 L${x0-14} 278 Z"/>`;
+      }).join('')}
+    </g>
+    <rect x="250" y="278" width="300" height="4" fill="#c93a78"/>
+  </g>
+
+  <!-- 桌椅 -->
+  <g class="part ${lv.seat ? '' : 'off'}" data-part="seat">
+    ${[[196, 1], [604, lv.seat >= 2 ? 1 : 0]].map(function(t){
+      if (!t[1]) return '';
+      const cx = t[0];
+      return `<g>
+        <ellipse cx="${cx}" cy="386" rx="32" ry="8" fill="#2b1c42"/>
+        <rect x="${cx-3}" y="386" width="6" height="14" fill="#4a3566"/>
+        <ellipse cx="${cx}" cy="383" rx="32" ry="8" fill="#6b4f8f"/>
+        <ellipse cx="${cx}" cy="381" rx="28" ry="6" fill="#8a68b0"/>
+        <rect x="${cx-46}" y="390" width="11" height="11" rx="3" fill="#513a72"/>
+        <rect x="${cx+35}" y="390" width="11" height="11" rx="3" fill="#513a72"/>
+      </g>`;
+    }).join('')}
+  </g>
+
+  <!-- 绿植 -->
+  <g class="part ${lv.plant ? '' : 'off'}" data-part="plant">
+    <g>
+      <path d="M296 402 L296 380 L314 380 L314 402 Z" fill="#6b4a33"/>
+      <circle cx="305" cy="372" r="12" fill="#2f9e6b"/>
+      <circle cx="298" cy="379" r="8" fill="#38b87c"/>
+    </g>
+    <g>
+      <path d="M486 402 L486 380 L504 380 L504 402 Z" fill="#6b4a33"/>
+      <circle cx="495" cy="372" r="12" fill="#2f9e6b"/>
+      <circle cx="502" cy="379" r="8" fill="#2a8a5d"/>
+    </g>
+  </g>
+</svg>`;
+}
+
+/* ============================================================
+   4. 状态
+   ============================================================ */
+const state = {
+  levels: { sign:0, awning:0, seat:0, plant:0, light:0, upper:0 },
+  chapter: 1,
+  prevChapter: null,
+  cmp: 'none',
+  snapShop: null,   /* 改造前的店铺快照 */
+  snapEnv: null,    /* 上一章的环境快照 */
+};
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+let picked = null;
+
+function score(){
+  let a = 0, b = 0;
+  for (const s of SLOTS){ a += state.levels[s.id] / s.max; b++; }
+  return Math.round(a / b * 100);
+}
+
+/* ============================================================
+   5. 渲染
+   ============================================================ */
+function renderChapters(){
+  $('chapters').innerHTML = CH.map(c =>
+    `<button class="ch${c.i === state.chapter ? ' on' : ''}" data-ch="${c.i}">
+       <span class="dot"></span>${c.emoji} ${c.name}</button>`).join('');
+  $('chapters').querySelectorAll('.ch').forEach(b => {
+    b.onclick = () => switchChapter(+b.dataset.ch);
+  });
+}
+
+function renderEnv(){
+  const ch = CH[state.chapter - 1];
+  const host = $('envLayer');
+  host.innerHTML = envSvg(ch);
+  /* 把章节色写进 CSS 变量，供 UI 强调色使用 */
+  const root = document.documentElement.style;
+  root.setProperty('--sky-a', ch.sky[0]);
+  root.setProperty('--sky-b', ch.sky[1]);
+  root.setProperty('--warm', ch.warm);
+  root.setProperty('--accent', ch.acc);
+  $('chName').textContent = ch.emoji + ' ' + ch.name;
+}
+
+function renderShop(){
+  $('shopLayer').innerHTML = shopSvg(state.levels, CH[state.chapter - 1].warm);
+}
+
+function renderSlots(){
+  $('slots').innerHTML = SLOTS.map(s => {
+    const lv = state.levels[s.id];
+    const maxed = lv >= s.max;
+    const cost = Math.round(s.base * Math.pow(1.55, lv));
+    return `<button class="slot${picked === s.id ? ' on' : ''}${maxed ? ' maxed' : ''}"
+      data-id="${s.id}">
+      <div class="slot-h">${s.emoji} ${s.name}<span class="pr">${lv}/${s.max}</span></div>
+      <div class="pips">${Array.from({length:s.max},(_,i)=>
+        `<span class="pip${i<lv?' f':''}"></span>`).join('')}</div>
+      <div class="slot-b">${maxed ? '已满级' : `¥${cost} · 口碑+${s.rep}`}</div>
+    </button>`;
+  }).join('');
+  $('slots').querySelectorAll('.slot').forEach(b => {
+    b.onclick = () => {
+      const s = SLOTS.find(x => x.id === b.dataset.id);
+      if (state.levels[s.id] >= s.max) return;
+      picked = s.id;
+      renderSlots(); renderBar();
+    };
+  });
+}
+
+function renderBar(){
+  const btn = $('goBtn');
+  if (!picked){ $('barTitle').textContent = '选一个改造项'; btn.disabled = true; btn.textContent = '改造'; return; }
+  const s = SLOTS.find(x => x.id === picked);
+  const lv = state.levels[s.id];
+  const cost = Math.round(s.base * Math.pow(1.55, lv));
+  $('barTitle').innerHTML = `${s.emoji} ${s.name} → Lv.${lv + 1}`;
+  btn.disabled = false;
+  btn.textContent = `改造 ¥${cost}`;
+}
+
+/* ============================================================
+   6. 换章（环境交叉溶解，店铺不动）
+   ============================================================ */
+function switchChapter(i){
+  if (i === state.chapter) return;
+  state.prevChapter = state.chapter;
+  state.chapter = i;
+  renderChapters();
+  renderEnv();
+  renderShop();
+
+  /* 闪光提示"换地方了"，但比改造弱 */
+  const f = document.createElement('div');
+  f.className = 'flash';
+  f.style.background = `radial-gradient(circle at 50% 60%, ${CH[i-1].warm}55, transparent 60%)`;
+  stage.appendChild(f);
+  setTimeout(() => f.remove(), 520);
+
+  if (state.cmp === 'env') mountCompare();
+  if (state.cmp === 'shop') mountCompare();
+}
+
+/* ============================================================
+   7. 改造（四拍：退 → 进 → 闪 → 飘字）
+   ============================================================ */
+function doUpgrade(){
+  if (!picked) return;
+  const s = SLOTS.find(x => x.id === picked);
+  const lv = state.levels[s.id];
+  if (lv >= s.max) return;
+
+  state.snapShop = Object.assign({}, state.levels);   /* 记下改造前 */
+  const before = score();
+  state.levels[s.id] = lv + 1;
+
+  /* 重绘店铺层：新部件会带 .off 消失 → 下一帧去掉 class 触发弹入 */
+  renderShop();
+  const el = $('shopLayer').querySelector(`[data-part="${s.id}"]`);
+  if (el){
+    el.classList.add('off');
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('off')));
+  }
+
+  const r = stage.getBoundingClientRect();
+  const f = document.createElement('div');
+  f.className = 'flash';
+  stage.appendChild(f);
+  setTimeout(() => f.remove(), 520);
+  burst(r);
+  floatText(r, `+${s.rep} 口碑`, '#4ade80', .34);
+  floatText(r, `评分 +${score() - before}`, CH[state.chapter-1].acc, .58);
+  rollTo($('score'), before, score());
+
+  if (state.cmp === 'shop') mountCompare();
+  renderSlots(); renderBar();
+}
+
+function burst(r){
+  const cx = r.width * .5, cy = r.height * .6;
+  for (let i = 0; i < 15; i++){
+    const sp = document.createElement('span');
+    sp.className = 'spark';
+    const a = Math.PI * 2 * i / 15 + Math.random() * .4;
+    const d = 38 + Math.random() * 66;
+    sp.style.left = cx + 'px'; sp.style.top = cy + 'px';
+    sp.style.setProperty('--dx', Math.cos(a) * d + 'px');
+    sp.style.setProperty('--dy', (Math.sin(a) * d - 20) + 'px');
+    sp.style.background = i % 3 === 0 ? CH[state.chapter-1].warm
+      : (i % 3 === 1 ? '#ffc247' : '#ff4d9d');
+    sp.style.animationDelay = (Math.random() * .1).toFixed(2) + 's';
+    stage.appendChild(sp);
+    setTimeout(() => sp.remove(), 1100);
+  }
+}
+function floatText(r, text, color, y){
+  const f = document.createElement('div');
+  f.className = 'float'; f.textContent = text; f.style.color = color;
+  f.style.left = (r.width * .5) + 'px'; f.style.top = (r.height * y) + 'px';
+  stage.appendChild(f);
+  setTimeout(() => f.remove(), 1200);
+}
+function rollTo(el, from, to){
+  const t0 = performance.now(), dur = 620;
+  (function step(t){
+    const k = Math.min(1, (t - t0) / dur);
+    const e = 1 - Math.pow(1 - k, 3);
+    el.textContent = Math.round(from + (to - from) * e);
+    if (k < 1) requestAnimationFrame(step);
+  })(t0);
+}
+
+/* ============================================================
+   8. 对比（拖动分割）
+   ★ 三种模式共用一套分屏：左 = 旧的（改造前 / 上一章），右 = 现在
+   ============================================================ */
+function setCmp(mode){
+  state.cmp = mode;
+  document.querySelectorAll('#cmpbar button').forEach(b =>
+    b.classList.toggle('on', b.dataset.cmp === mode));
+  stage.classList.toggle('compare', mode !== 'none');
+  stage.querySelectorAll('.cmp-tag').forEach(n => n.remove());
+
+  if (mode === 'none'){ $('beforeLayer').innerHTML = ''; return; }
+
+  const tagL = document.createElement('div');
+  tagL.className = 'cmp-tag l';
+  tagL.textContent = mode === 'shop' ? '改造前' : '上一章';
+  const tagR = document.createElement('div');
+  tagR.className = 'cmp-tag r';
+  tagR.textContent = mode === 'shop' ? '改造后' : '现在';
+  stage.appendChild(tagL); stage.appendChild(tagR);
+
+  mountCompare();
+  setSplit(50);
+}
+
+function mountCompare(){
+  const chOld = state.cmp === 'shop'
+    ? state.chapter
+    : (state.prevChapter || state.chapter);
+  const lvOld = state.cmp === 'shop'
+    ? (state.snapShop || { sign:0, awning:0, seat:0, plant:0, light:0, upper:0 })
+    : state.levels;
+
+  $('beforeLayer').innerHTML =
+    `<div class="layer" style="inset:0;position:absolute">${envSvg(CH[chOld-1])}</div>` +
+    `<div class="layer" style="inset:0;position:absolute">${shopSvg(lvOld, CH[chOld-1].warm)}</div>`;
+}
+
+function setSplit(pct){
+  const v = Math.max(4, Math.min(96, pct));
+  stage.style.setProperty('--split', v + '%');
+}
+let dragging = false;
+$('hit').addEventListener('pointerdown', e => {
+  if (state.cmp === 'none') return;
+  dragging = true;
+  if ($('hit').setPointerCapture) $('hit').setPointerCapture(e.pointerId);
+  move(e);
+});
+$('hit').addEventListener('pointermove', e => { if (dragging) move(e); });
+$('hit').addEventListener('pointerup', () => { dragging = false; });
+$('hit').addEventListener('pointercancel', () => { dragging = false; });
+function move(e){
+  const r = stage.getBoundingClientRect();
+  setSplit(((e.clientX - r.left) / r.width) * 100);
+}
+
+/* ============================================================
+   9. 启动
+   ============================================================ */
+renderChapters();
+renderEnv();
+renderShop();
+renderSlots();
+renderBar();
+$('goBtn').onclick = doUpgrade;
+document.querySelectorAll('#cmpbar button').forEach(b => {
+  b.onclick = () => setCmp(b.dataset.cmp);
+});
+$('score').textContent = '0';
+
+/* 自检：模板与数据脱节时（改了 SLOTS 忘了改 SVG）会在控制台报出来 */
+(function selfCheck(){
+  const need = ['sign0','sign1','sign2','sign3','awning','seat','plant','light','upper'];
+  const miss = need.filter(k => !$('shopLayer').querySelector(`[data-part="${k}"]`));
+  if (miss.length) console.warn('店铺层缺部件：', miss.join(','));
+})();
+</script>
+</body>
+</html>
