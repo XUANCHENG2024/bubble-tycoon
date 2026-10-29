@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>奶茶星球 · 店铺即主界面 v3</title>
+<style>
+/* ============================================================
+   设计令牌（与游戏 styles.css 同名同值）
+   ============================================================ */
+:root{
+  --bg:#0f0719; --panel:#1b1030; --line:rgba(255,255,255,.09);
+  --cyan:#35e5f0; --pink:#ff4d9d; --amber:#ffc247; --purple:#8b5cff; --green:#4ade80;
+  --txt:#f4eeff; --txt2:#b3a6c9; --txt3:#7d7194;
+  --fs-xs:10px; --fs-sm:11px; --fs-md:12px; --fs-lg:14px; --fs-xl:17px;
+  --r-md:12px; --r-lg:18px; --r-pill:99px;
+  --sh:0 10px 30px rgba(0,0,0,.5);
+
+  --sky-a:#1b2a44; --sky-b:#3d5a80; --far:#22304a; --ground:#1a2438;
+  --warm:#cddbe8; --accent:#7aa7d6;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{margin:0;background:#08040f;color:var(--txt);
+  font:400 14px/1.5 system-ui,-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  overflow:hidden}
+
+/* 主界面就是一整块"店铺"，手机竖屏时上下各留一点 */
+.app{height:100%;max-width:600px;margin:0 auto;position:relative;
+  display:flex;flex-direction:column;background:#0a0514}
+
+/* ---------- 顶部极简 HUD（压在半透明条上，不抢画面） ---------- */
+.hud{position:absolute;top:0;left:0;right:0;z-index:20;
+  display:flex;align-items:flex-start;gap:10px;
+  padding:calc(8px + env(safe-area-inset-top)) 14px 10px;
+  background:linear-gradient(180deg,rgba(8,4,15,.82),rgba(8,4,15,0));
+  pointer-events:none}
+.hud .item{display:flex;flex-direction:column;gap:1px}
+.hud .k{font-size:var(--fs-xs);color:var(--txt3);letter-spacing:.05em}
+.hud .v{font-size:var(--fs-lg);font-weight:800;font-variant-numeric:tabular-nums}
+.hud .v.cash{color:var(--amber)}
+.hud .v.rep{color:var(--cyan)}
+.hud .spacer{flex:1;align-self:center}
+.hud .chap{pointer-events:auto;padding:4px 10px;border-radius:var(--r-pill);
+  background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);
+  font-size:var(--fs-sm);color:var(--txt2);white-space:nowrap}
+.hud .chap b{color:var(--accent)}
+
+/* ---------- 店铺（主视图，占满剩余空间） ---------- */
+.stage{position:absolute;inset:0;z-index:1;overflow:hidden}
+.stage .layer{position:absolute;inset:0}
+.stage .layer svg{display:block;width:100%;height:100%}
+#envLayer{z-index:1}
+#shopLayer{z-index:2}
+#hotLayer{z-index:3}
+#beforeLayer{z-index:5;clip-path:inset(0 calc(100% - var(--split,50%)) 0 0)}
+
+/* 热区：透明矩形，只负责接收点击 */
+.hot{fill:transparent;cursor:pointer;pointer-events:all}
+
+/* 改造模式：画面轻微压暗，可改物件发光 + 脉冲描边 */
+.stage.remodel #hotLayer .hot{fill:rgba(255,220,138,.06);
+  stroke:rgba(255,220,138,.55);stroke-width:2;stroke-dasharray:6 5;
+  animation:dash 1.4s linear infinite}
+@keyframes dash{to{stroke-dashoffset:-22}}
+/* 选中时描边变实、加光晕 */
+.hot.on{fill:rgba(255,220,138,.16)!important;stroke:#ffd166!important;
+  stroke-dasharray:none!important;filter:drop-shadow(0 0 10px rgba(255,209,102,.8))}
+
+/* 已满级的物件：不进入改造模式的可点态 */
+.hot.maxed{fill:transparent!important;stroke:rgba(255,255,255,.18)!important;stroke-dasharray:3 4}
+
+/* 对比分割线 */
+.split{position:absolute;top:0;bottom:0;left:var(--split,50%);width:2px;z-index:8;
+  background:linear-gradient(180deg,transparent,rgba(255,255,255,.9),transparent);
+  opacity:0;transition:opacity .2s;pointer-events:none}
+.split::after{content:'';position:absolute;top:50%;left:50%;translate:-50% -50%;
+  width:30px;height:30px;border-radius:50%;background:rgba(10,5,20,.92);
+  border:1.5px solid rgba(255,255,255,.75);box-shadow:0 0 16px rgba(53,229,240,.6)}
+.stage.compare .split{opacity:1}
+.stage.compare .hit{position:absolute;inset:0;z-index:9;cursor:ew-resize;touch-action:none}
+.cmp-tag{position:absolute;top:60px;z-index:10;padding:3px 9px;border-radius:var(--r-pill);
+  font-size:var(--fs-xs);font-weight:800;pointer-events:none;backdrop-filter:blur(4px)}
+.cmp-tag.l{left:12px;background:rgba(255,77,157,.85);color:#2a0512}
+.cmp-tag.r{right:12px;background:rgba(53,229,240,.85);color:#06222a}
+
+/* ---------- 底部抽屉：三种形态，高度联动 ---------- */
+.dock{position:absolute;left:0;right:0;bottom:0;z-index:20;
+  padding:12px 14px calc(14px + env(safe-area-inset-bottom));
+  background:linear-gradient(0deg,rgba(10,5,20,.97) 40%,rgba(10,5,20,.86));
+  border-top:1px solid var(--line);
+  backdrop-filter:blur(10px);
+  transition:transform .26s cubic-bezier(.34,1.3,.64,1)}
+
+/* 形态 A：空闲 —— 三个主入口 */
+.dock .idle{display:flex;gap:8px;align-items:stretch}
+.dock .idle .big{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:10px 6px;border-radius:var(--r-md);background:rgba(255,255,255,.06);
+  border:1px solid transparent;transition:all .18s}
+.dock .idle .big b{font-size:var(--fs-md)}
+.dock .idle .big span{font-size:var(--fs-xs);color:var(--txt3)}
+.dock .idle .big:active{transform:scale(.97)}
+.dock .idle .big.primary{background:linear-gradient(135deg,var(--accent),var(--purple));
+  color:#0a0514;box-shadow:0 6px 20px rgba(53,229,240,.24)}
+.dock .idle .big.primary span{color:rgba(10,5,20,.65)}
+
+/* 形态 B：选中某个物件 —— 改造卡 */
+.dock .item{display:none}
+.dock .item.show{display:block;animation:slideUp .24s cubic-bezier(.34,1.3,.64,1)}
+@keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.item-h{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.item-h .e{font-size:20px}
+.item-h .n{font-size:var(--fs-lg);font-weight:800}
+.item-h .lv{margin-left:auto;font-size:var(--fs-sm);color:var(--txt3)}
+.item-pips{display:flex;gap:3px;margin:6px 0 9px}
+.item-pips .p{flex:1;height:5px;border-radius:3px;background:rgba(255,255,255,.12)}
+.item-pips .p.f{background:linear-gradient(90deg,var(--accent),var(--purple))}
+.item-row{display:flex;align-items:center;gap:10px}
+.item-row .desc{flex:1;font-size:var(--fs-sm);color:var(--txt2);line-height:1.55}
+.item-row .desc b{color:var(--amber)}
+.btn{padding:11px 18px;border-radius:var(--r-md);font-weight:800;font-size:var(--fs-md);
+  background:linear-gradient(135deg,var(--accent),var(--purple));color:#0a0514;
+  box-shadow:0 6px 18px rgba(53,229,240,.24);transition:transform .12s;white-space:nowrap}
+.btn:active{transform:scale(.97)}
+.btn[disabled]{background:rgba(255,255,255,.08);color:var(--txt3);box-shadow:none}
+.btn.ghost{background:rgba(255,255,255,.07);color:var(--txt2);box-shadow:none}
+
+/* 形态 C：对比控制 */
+.dock .cmp{display:none}
+.dock .cmp.show{display:block;animation:slideUp .24s cubic-bezier(.34,1.3,.64,1)}
+.cmp-row{display:flex;gap:7px}
+.cmp-row button{flex:1;padding:9px 6px;border-radius:10px;font-size:var(--fs-sm);
+  background:rgba(255,255,255,.06);color:var(--txt2);border:1px solid transparent}
+.cmp-row button.on{background:rgba(53,229,240,.14);border-color:rgba(53,229,240,.5);color:var(--cyan)}
+
+/* ---------- 反馈 ---------- */
+.float{position:absolute;z-index:30;pointer-events:none;font-weight:800;font-size:var(--fs-lg);
+  text-shadow:0 2px 12px rgba(0,0,0,.8);animation:floatUp 1.15s ease-out forwards}
+@keyframes floatUp{0%{opacity:0;transform:translate(-50%,8px) scale(.9)}
+  16%{opacity:1;transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,-46px)}}
+.spark{position:absolute;z-index:29;width:6px;height:6px;border-radius:50%;pointer-events:none;
+  background:var(--amber);box-shadow:0 0 12px currentColor;animation:spark .95s ease-out forwards}
+@keyframes spark{0%{opacity:0;transform:translate(0,0) scale(.4)}20%{opacity:1}
+  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.2)}}
+.flash{position:absolute;inset:0;z-index:6;pointer-events:none;
+  background:radial-gradient(circle at 50% 60%,rgba(255,226,138,.5),transparent 62%);
+  animation:flash .5s ease-out forwards}
+@keyframes flash{0%{opacity:0}25%{opacity:1}100%{opacity:0}}
+/* 提示条（点错地方时用） */
+.toast{position:absolute;left:50%;bottom:120px;transform:translateX(-50%);z-index:40;
+  padding:8px 14px;border-radius:var(--r-pill);background:rgba(20,11,36,.95);
+  border:1px solid var(--line);font-size:var(--fs-sm);color:var(--txt2);
+  animation:toastIn .2s ease-out;pointer-events:none}
+@keyframes toastIn{from{opacity:0;transform:translate(-50%,6px)}to{opacity:1;transform:translate(-50%,0)}}
+
+/* 环境层换章交叉溶解 */
+#envLayer{animation:envIn .55s ease-out}
+@keyframes envIn{from{opacity:0;filter:brightness(1.5)}to{opacity:1;filter:none}}
+.part{transition:opacity .46s ease,transform .52s cubic-bezier(.34,1.56,.64,1);
+  transform-box:fill-box;transform-origin:50% 100%}
+.part.off{opacity:0;transform:scale(.82) translateY(6px)}
+@keyframes breathe{0%,100%{opacity:.55}50%{opacity:1}}
+.lit{animation:breathe 3.2s ease-in-out infinite}
+@keyframes twinkle{0%,100%{opacity:.2}50%{opacity:.85}}
+.star{animation:twinkle 4s ease-in-out infinite}
+@keyframes drift{0%{transform:translate(0,0);opacity:0}20%{opacity:.7}
+  100%{transform:translate(var(--dx),-60px);opacity:0}}
+.pt{animation:drift var(--dur,7s) linear infinite}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- 顶部：只留三个数字 + 章节。其余信息都进"点物件"里 -->
+  <div class="hud">
+    <div class="item"><div class="k">现金</div><div class="v cash" id="hCash">¥1,100</div></div>
+    <div class="item"><div class="k">口碑</div><div class="v rep" id="hRep">50</div></div>
+    <div class="item"><div class="k">Day</div><div class="v" id="hDay">3<span style="font-size:var(--fs-sm);color:var(--txt3)">/30</span></div></div>
+    <div class="spacer"></div>
+    <button class="chap" id="chapBtn">🏮 <b>夜市</b> · 第 2 章</button>
+  </div>
+
+  <!-- 主视图：店铺本身 -->
+  <div class="stage" id="stage">
+    <div class="layer" id="envLayer"></div>
+    <div class="layer" id="shopLayer"></div>
+    <div class="layer" id="hotLayer"></div>
+    <div class="layer" id="beforeLayer"></div>
+    <div class="split"></div>
+    <div class="hit" id="hit"></div>
+  </div>
+
+  <!-- 底部抽屉 -->
+  <div class="dock" id="dock">
+    <!-- A 空闲 -->
+    <div class="idle" id="dockIdle">
+      <button class="big primary" id="btnToday"><b>🔔</b><b>开门营业</b><span>今日 78 人 · 缺 36 人份</span></button>
+      <button class="big" id="btnRemodel"><b>🔨</b><b>改造</b><span>点店里的东西</span></button>
+      <button class="big" id="btnCmp"><b>⇆</b><b>对比</b><span>改造前后</span></button>
+    </div>
+    <!-- B 选中物件 -->
+    <div class="item" id="dockItem">
+      <div class="item-h"><span class="e" id="itE">🪧</span><span class="n" id="itN">门头招牌</span>
+        <span class="lv" id="itLv">Lv.1 / 3</span></div>
+      <div class="item-pips" id="itPips"></div>
+      <div class="item-row">
+        <div class="desc" id="itDesc"></div>
+        <button class="btn ghost" id="btnBack">返回</button>
+        <button class="btn" id="btnGo">改造 ¥580</button>
+      </div>
+    </div>
+    <!-- C 对比 -->
+    <div class="cmp" id="dockCmp">
+      <div class="cmp-row">
+        <button data-cmp="none" class="on">不对比</button>
+        <button data-cmp="shop">改造前后</button>
+        <button data-cmp="env">上一章</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   0. 这一版的核心改动：**店铺就是主界面**
+   ------------------------------------------------------------
+   旧格式：HUD + 六个 tab + 长列表页 —— 店铺只是其中一个"面板"。
+   新格式：店铺常驻占满屏幕，功能入口变成**店里的物件**。
+     · 点收银台   → 今日营业（占位）
+     · 点招牌/雨棚/桌椅/绿植/灯/二层 → 改造这一项
+     · 底部三个按钮只在"不知道怎么点"时提供退路
+   ★ 这样改的收益：改造从"列表里选一个"变成"戳店里那件东西"，
+     视觉反馈（换掉的样子）和操作对象是同一个东西，不需要"确认是哪个"。
+   ============================================================ */
+
+/* ---------- 章节环境（六套，零位图） ---------- */
+const CH = [
+  { i:1, name:'清晨街区', emoji:'🌅', sky:['#1b2a44','#3d5a80'], far:'#22304a', ground:'#1a2438',
+    warm:'#cddbe8', acc:'#7aa7d6', marks:['bike','lamp','tree'], dust:'fog' },
+  { i:2, name:'夜市', emoji:'🏮', sky:['#2a1630','#6b3a2a'], far:'#3a2030', ground:'#241226',
+    warm:'#ffd98a', acc:'#ffc247', marks:['lantern','stall','steam'], dust:'steam' },
+  { i:3, name:'商圈', emoji:'🏙️', sky:['#1a1030','#3b2260'], far:'#241640', ground:'#150c26',
+    warm:'#e0d4ff', acc:'#b18cff', marks:['glass','screen','escalator'], dust:'none' },
+  { i:4, name:'校园', emoji:'🎒', sky:['#12303a','#2f6f7a'], far:'#1b4048', ground:'#0f2730',
+    warm:'#d8fbff', acc:'#7defff', marks:['tree','board','bike'], dust:'petal' },
+  { i:5, name:'车站', emoji:'🚉', sky:['#232833','#4a5464'], far:'#2b323f', ground:'#1a1f28',
+    warm:'#c4ccd8', acc:'#c4ccd8', marks:['bench','luggage','clock'], dust:'dust' },
+  { i:6, name:'旗舰街', emoji:'🏆', sky:['#2a1e10','#6a4a1a'], far:'#3a2a12', ground:'#241a0c',
+    warm:'#fff3d0', acc:'#ffe08a', marks:['bigscreen','redcarpet','queue'], dust:'none' },
+];
+
+/* ---------- 改造项（含 SVG 热区位置，单位是 800×500 的 viewBox） ---------- */
+const SLOTS = [
+  { id:'sign',   name:'门头招牌', emoji:'🪧', max:3, base:380,  rep:2.0, box:[310,190,180,72],  hint:'店名亮不亮，客人远远就看得见' },
+  { id:'awning', name:'遮阳雨棚', emoji:'⛱️', max:2, base:260,  rep:1.2, box:[244,244,312,44],  hint:'下雨天不让客人淋着等' },
+  { id:'seat',   name:'户外桌椅', emoji:'🪑', max:2, base:300,  rep:1.5, box:[150,360,120,46],  hint:'能不能坐下喝，决定客人待多久' },
+  { id:'plant',  name:'绿植花箱', emoji:'🪴', max:2, base:180,  rep:0.9, box:[286,366,44,40],   hint:'最便宜的一眼"讲究"' },
+  { id:'light',  name:'灯串照明', emoji:'💡', max:2, base:220,  rep:1.1, box:[262,226,280,30],  hint:'晚上有光，才有人停下来' },
+  { id:'upper',  name:'二层阁楼', emoji:'🏠', max:1, base:1200, rep:3.0, box:[272,112,256,84],  hint:'面积翻倍，也是身份的象征' },
+];
+
+/* ---------- 环境层 ---------- */
+function envSvg(ch){
+  return `
+<svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${ch.sky[0]}"/><stop offset=".7" stop-color="${ch.sky[1]}"/></linearGradient>
+    <radialGradient id="wg" cx=".5" cy=".62" r=".55">
+      <stop offset="0" stop-color="${ch.warm}" stop-opacity=".38"/>
+      <stop offset="1" stop-color="${ch.warm}" stop-opacity="0"/></radialGradient>
+    <linearGradient id="gd" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="${ch.ground}"/><stop offset="1" stop-color="#0a0512"/></linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#sky)"/>
+  <g fill="#fff">
+    ${[[90,46],[210,28],[360,58],[520,34],[660,62],[740,26]].map(function(p,i){
+      return `<circle class="star" cx="${p[0]}" cy="${p[1]}" r="1.3" style="animation-delay:${i*0.5}s"/>`;
+    }).join('')}
+  </g>
+  <g fill="${ch.far}">
+    ${[[20,190,130],[150,150,90],[240,175,110],[355,140,120],[480,165,100],[590,145,105],[700,180,80]]
+      .map(function(b){ return `<rect x="${b[0]}" y="${b[1]}" width="${b[2]}" height="${420-b[1]}"/>`; }).join('')}
+    <g fill="${ch.warm}" opacity=".42">
+      <rect x="44" y="215" width="11" height="9"/><rect x="78" y="245" width="11" height="9"/>
+      <rect x="264" y="200" width="11" height="9"/><rect x="500" y="196" width="11" height="9"/>
+      <rect x="718" y="210" width="11" height="9"/>
+    </g>
+  </g>
+  <rect y="400" width="800" height="100" fill="url(#gd)"/>
+  <ellipse cx="400" cy="404" rx="260" ry="14" fill="${ch.warm}" opacity=".10"/>
+  ${marks(ch)}
+  <ellipse cx="400" cy="330" rx="240" ry="150" fill="url(#wg)"/>
+  ${particles(ch)}
+</svg>`;
+}
+function marks(ch){
+  const c = ch.acc, w = ch.warm;
+  if (ch.i === 1) return `<g opacity=".9">
+    <g stroke="${c}" stroke-width="3" fill="none" opacity=".85">
+      <circle cx="120" cy="372" r="15"/><circle cx="168" cy="372" r="15"/><path d="M120 372 L146 344 L168 372"/></g>
+    <g stroke="${c}" stroke-width="3" opacity=".85"><line x1="690" y1="400" x2="690" y2="300"/></g>
+    <circle cx="690" cy="294" r="9" fill="${w}" opacity=".9"/></g>`;
+  if (ch.i === 2) return `<g opacity=".95">
+    <g fill="${w}"><ellipse cx="110" cy="300" rx="13" ry="17"/><rect x="104" y="312" width="12" height="4" rx="2"/>
+      <ellipse cx="160" cy="318" rx="11" ry="14"/><rect x="155" y="328" width="10" height="3" rx="2"/></g>
+    <g fill="${c}" opacity=".9"><rect x="660" y="352" width="96" height="8" rx="3"/>
+      <rect x="668" y="360" width="6" height="40"/><rect x="742" y="360" width="6" height="40"/>
+      <rect x="688" y="330" width="40" height="18" rx="3" fill="${w}" opacity=".75"/></g></g>`;
+  if (ch.i === 3) return `<g opacity=".85">
+    <rect x="70" y="230" width="120" height="170" fill="${c}" opacity=".45"/>
+    <rect x="96" y="252" width="68" height="126" fill="${w}" opacity=".28"/>
+    <rect x="630" y="200" width="140" height="200" fill="${c}" opacity=".45"/>
+    <rect x="652" y="226" width="96" height="60" fill="${w}" opacity=".38"/></g>`;
+  if (ch.i === 4) return `<g opacity=".95">
+    <circle cx="120" cy="322" r="46" fill="${c}" opacity=".8"/><rect x="114" y="352" width="12" height="48" fill="${c}"/>
+    <circle cx="700" cy="336" r="34" fill="${c}" opacity=".75"/><rect x="695" y="360" width="10" height="40" fill="${c}"/>
+    <rect x="640" y="300" width="70" height="46" rx="3" fill="${w}" opacity=".85"/></g>`;
+  if (ch.i === 5) return `<g opacity=".9">
+    <g fill="${c}" opacity=".8"><rect x="76" y="356" width="120" height="10" rx="4"/>
+      <rect x="82" y="366" width="8" height="34"/><rect x="182" y="366" width="8" height="34"/>
+      <rect x="96" y="330" width="80" height="24" rx="5" opacity=".7"/></g>
+    <g fill="${c}" opacity=".8"><rect x="660" y="360" width="44" height="40" rx="5"/>
+      <rect x="668" y="342" width="28" height="20" rx="4"/></g>
+    <g fill="${w}"><circle cx="704" cy="286" r="24"/><circle cx="704" cy="286" r="19" fill="${ch.sky[0]}"/></g></g>`;
+  return `<g opacity=".95">
+    <rect x="54" y="240" width="150" height="160" rx="6" fill="${c}" opacity=".85"/>
+    <rect x="66" y="254" width="126" height="80" rx="4" fill="${w}" opacity=".55"/>
+    <rect x="620" y="270" width="150" height="130" rx="6" fill="${c}" opacity=".45"/>
+    <rect x="330" y="400" width="140" height="10" rx="5" fill="#b4364f" opacity=".9"/></g>`;
+}
+function particles(ch){
+  if (ch.dust === 'none') return '';
+  let out = '';
+  for (let i = 0; i < 9; i++){
+    const x = 40 + (i * 83) % 720, y = 210 + (i * 137) % 210;
+    const r = ch.dust === 'steam' ? 5 + (i % 3) : 2 + (i % 2);
+    const col = ch.dust === 'petal' ? '#ffd1e3' : ch.warm;
+    out += `<circle class="pt" cx="${x}" cy="${y}" r="${r}" fill="${col}" opacity=".5"
+      style="--dx:${(i%2?1:-1)*(10+i*3)}px;--dur:${6+i%4}s;animation-delay:${(i*0.7).toFixed(1)}s"/>`;
+  }
+  return `<g>${out}</g>`;
+}
+
+/* ---------- 店铺层（含 6 个可改造部件） ---------- */
+const WALLS = ['#3a3050','#463a5e','#544668','#6b5a7a','#8a7080','#a8848a','#c39a8c','#dcb08f'];
+function shopSvg(lv, warm){
+  const tot = SLOTS.reduce((a, s) => a + lv[s.id], 0);
+  const mx = SLOTS.reduce((a, s) => a + s.max, 0);
+  const p = tot / mx;
+  const wall = WALLS[Math.min(WALLS.length - 1, Math.round(p * (WALLS.length - 1)))];
+  return `
+<svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="wg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity=".10"/><stop offset="1" stop-color="#000" stop-opacity=".16"/></linearGradient>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="${warm}"/><stop offset="1" stop-color="#ff4d9d"/></linearGradient>
+    <filter id="bl" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+
+  <g class="part ${lv.upper ? '' : 'off'}" data-part="upper">
+    <rect x="272" y="118" width="256" height="74" rx="5" fill="#2c1d44"/>
+    <rect x="272" y="118" width="256" height="7" rx="3" fill="#3b2759"/>
+    <rect x="298" y="138" width="62" height="40" rx="4" fill="${warm}" opacity=".9"/>
+    <rect x="440" y="138" width="62" height="40" rx="4" fill="${warm}" opacity=".82"/>
+    <g stroke="#5b4380" stroke-width="2.5" opacity=".9"><line x1="272" y1="192" x2="528" y2="192"/>
+      <line x1="292" y1="192" x2="292" y2="182"/><line x1="322" y1="192" x2="322" y2="182"/>
+      <line x1="478" y1="192" x2="478" y2="182"/><line x1="508" y1="192" x2="508" y2="182"/></g>
+  </g>
+
+  <rect x="256" y="192" width="288" height="208" rx="4" fill="${wall}"/>
+  <rect x="256" y="192" width="288" height="208" rx="4" fill="url(#wg2)"/>
+  <rect x="248" y="185" width="304" height="11" rx="4" fill="#2b1e42"/>
+
+  <rect x="364" y="292" width="92" height="108" rx="6" fill="#2a1c3e"/>
+  <rect x="370" y="298" width="80" height="96" rx="4" fill="#3a2856"/>
+  <rect x="378" y="306" width="64" height="64" rx="3" fill="${warm}" opacity=".5"/>
+  <circle cx="442" cy="348" r="3.2" fill="${warm}"/>
+
+  <rect x="276" y="270" width="62" height="52" rx="4" fill="#221535"/>
+  <rect x="280" y="274" width="54" height="44" rx="3" fill="${warm}" opacity="${(0.3+lv.light*0.22+p*0.18).toFixed(2)}"/>
+  <rect x="462" y="270" width="62" height="52" rx="4" fill="#221535"/>
+  <rect x="466" y="274" width="54" height="44" rx="3" fill="${warm}" opacity="${(0.28+lv.light*0.22+p*0.18).toFixed(2)}"/>
+
+  <g class="part ${lv.light ? '' : 'off'}" data-part="light">
+    <circle cx="304" cy="258" r="6" fill="${warm}" filter="url(#bl)"/>
+    <circle cx="496" cy="258" r="6" fill="${warm}" filter="url(#bl)"/>
+    <g class="lit"><path d="M258 230 Q400 252 542 230" stroke="#3a2a55" stroke-width="2" fill="none"/>
+      <g fill="${warm}" filter="url(#bl)"><circle cx="288" cy="237" r="3"/><circle cx="334" cy="244" r="3"/>
+        <circle cx="380" cy="247" r="3"/><circle cx="426" cy="247" r="3"/>
+        <circle cx="472" cy="244" r="3"/><circle cx="518" cy="237" r="3"/></g></g>
+  </g>
+
+  <g data-part="sign0" class="part ${lv.sign===0?'':'off'}">
+    <rect x="332" y="214" width="136" height="32" rx="3" fill="#4a3a63"/>
+    <text x="400" y="236" text-anchor="middle" font-size="17" font-weight="700" fill="#cbb9e0">奶茶星球</text></g>
+  <g data-part="sign1" class="part ${lv.sign===1?'':'off'}">
+    <rect x="324" y="206" width="152" height="42" rx="6" fill="#2a1a3d"/>
+    <rect x="328" y="210" width="144" height="34" rx="4" fill="${warm}"/>
+    <text x="400" y="234" text-anchor="middle" font-size="19" font-weight="800" fill="#7a3b1e">奶茶星球</text></g>
+  <g data-part="sign2" class="part ${lv.sign===2?'':'off'}">
+    <rect x="320" y="202" width="160" height="50" rx="10" fill="#1e1130"/>
+    <rect x="320" y="202" width="160" height="50" rx="10" fill="none" stroke="url(#neon)" stroke-width="3" filter="url(#bl)"/>
+    <text x="400" y="235" text-anchor="middle" font-size="21" font-weight="800" fill="#7defff">奶茶星球</text></g>
+  <g data-part="sign3" class="part ${lv.sign===3?'':'off'}">
+    <rect x="314" y="196" width="172" height="62" rx="12" fill="#160c26"/>
+    <rect x="314" y="196" width="172" height="62" rx="12" fill="none" stroke="#ffd166" stroke-width="2.5" filter="url(#bl)"/>
+    <text x="400" y="235" text-anchor="middle" font-size="23" font-weight="900" fill="#ffd166">奶茶星球</text></g>
+
+  <g class="part ${lv.awning?'':'off'}" data-part="awning">
+    <path d="M262 250 L538 250 L550 278 L250 278 Z" fill="#ff4d9d" opacity=".92"/>
+    <g fill="#ffe3ef" opacity=".9">
+      ${[0,1,2,3,4,5,6,7].map(function(i){const x0=274+i*34;
+        return `<path d="M${x0} 250 L${x0+14} 250 L${x0} 278 L${x0-14} 278 Z"/>`;}).join('')}
+    </g>
+    <rect x="250" y="278" width="300" height="4" fill="#c93a78"/>
+  </g>
+
+  <g class="part ${lv.seat?'':'off'}" data-part="seat">
+    ${(lv.seat>=1?`
+      <g><ellipse cx="196" cy="386" rx="32" ry="8" fill="#2b1c42"/>
+        <rect x="193" y="386" width="6" height="14" fill="#4a3566"/>
+        <ellipse cx="196" cy="383" rx="32" ry="8" fill="#6b4f8f"/>
+        <ellipse cx="196" cy="381" rx="28" ry="6" fill="#8a68b0"/>
+        <rect x="150" y="390" width="11" height="11" rx="3" fill="#513a72"/>
+        <rect x="231" y="390" width="11" height="11" rx="3" fill="#513a72"/></g>`:'')}
+    ${(lv.seat>=2?`
+      <g><ellipse cx="604" cy="386" rx="32" ry="8" fill="#2b1c42"/>
+        <rect x="601" y="386" width="6" height="14" fill="#4a3566"/>
+        <ellipse cx="604" cy="383" rx="32" ry="8" fill="#6b4f8f"/>
+        <ellipse cx="604" cy="381" rx="28" ry="6" fill="#8a68b0"/>
+        <rect x="558" y="390" width="11" height="11" rx="3" fill="#513a72"/>
+        <rect x="639" y="390" width="11" height="11" rx="3" fill="#513a72"/></g>`:'')}
+  </g>
+
+  <g class="part ${lv.plant?'':'off'}" data-part="plant">
+    <path d="M296 402 L296 380 L314 380 L314 402 Z" fill="#6b4a33"/>
+    <circle cx="305" cy="372" r="12" fill="#2f9e6b"/><circle cx="298" cy="379" r="8" fill="#38b87c"/>
+    ${(lv.plant>=2?`<path d="M486 402 L486 380 L504 380 L504 402 Z" fill="#6b4a33"/>
+      <circle cx="495" cy="372" r="12" fill="#2f9e6b"/><circle cx="502" cy="379" r="8" fill="#2a8a5d"/>`:'')}
+  </g>
+</svg>`;
+}
+
+/* ---------- 状态 ---------- */
+const state = {
+  lv: { sign:0, awning:0, seat:0, plant:0, light:0, upper:0 },
+  chapter: 2, prevChapter: 1,
+  mode: 'idle',          /* idle | remodel | item | cmp */
+  sel: null,
+  cmp: 'none',
+  snap: null,
+};
+const $ = id => document.getElementById(id);
+const stage = $('stage');
+
+/* ---------- 渲染 ---------- */
+function renderEnv(){
+  const ch = CH[state.chapter - 1];
+  $('envLayer').innerHTML = envSvg(ch);
+  const r = document.documentElement.style;
+  r.setProperty('--sky-a', ch.sky[0]); r.setProperty('--sky-b', ch.sky[1]);
+  r.setProperty('--warm', ch.warm); r.setProperty('--accent', ch.acc);
+  $('chapBtn').innerHTML = `${ch.emoji} <b>${ch.name}</b> · 第 ${ch.i} 章`;
+}
+function renderShop(){
+  $('shopLayer').innerHTML = shopSvg(state.lv, CH[state.chapter - 1].warm);
+}
+/* 热区层：改造模式下才挂上去，平时不拦截任何点击 */
+function renderHots(){
+  if (state.mode !== 'remodel' && state.mode !== 'item'){ $('hotLayer').innerHTML = ''; return; }
+  $('hotLayer').innerHTML = `
+<svg viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+  ${SLOTS.map(function(s){
+    const maxed = state.lv[s.id] >= s.max;
+    const on = state.sel === s.id;
+    return `<rect class="hot${maxed ? ' maxed' : ''}${on ? ' on' : ''}"
+      data-slot="${s.id}" x="${s.box[0]}" y="${s.box[1]}" width="${s.box[2]}" height="${s.box[3]}" rx="6"/>`;
+  }).join('')}
+</svg>`;
+  $('hotLayer').querySelectorAll('.hot').forEach(function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      pick(el.dataset.slot);
+    });
+  });
+}
+function renderDock(){
+  $('dockIdle').style.display = state.mode === 'idle' ? 'flex' : 'none';
+  $('dockItem').classList.toggle('show', state.mode === 'item');
+  $('dockCmp').classList.toggle('show', state.mode === 'cmp');
+  if (state.mode === 'item') renderItem();
+}
+function renderItem(){
+  const s = SLOTS.find(x => x.id === state.sel);
+  const lv = state.lv[s.id];
+  const maxed = lv >= s.max;
+  const cost = Math.round(s.base * Math.pow(1.55, lv));
+  $('itE').textContent = s.emoji;
+  $('itN').textContent = s.name;
+  $('itLv').textContent = `Lv.${lv} / ${s.max}`;
+  $('itPips').innerHTML = Array.from({length:s.max},(_,i)=>
+    `<span class="p ${i<lv?'f':''}"></span>`).join('');
+  $('itDesc').innerHTML = maxed
+    ? '已经做到头了 —— <b>满级</b>'
+    : `${s.hint}<br>花费 <b>¥${cost}</b> · 口碑 +${s.rep}`;
+  const go = $('btnGo');
+  go.disabled = maxed;
+  go.textContent = maxed ? '已满级' : `改造 ¥${cost}`;
+}
+
+/* ---------- 模式切换 ---------- */
+function setMode(m){
+  state.mode = m;
+  if (m !== 'item') state.sel = null;
+  stage.classList.toggle('remodel', m === 'remodel' || m === 'item');
+  renderHots(); renderDock();
+}
+function pick(id){
+  const s = SLOTS.find(x => x.id === id);
+  if (!s) return;
+  if (state.lv[id] >= s.max){
+    toast(`${s.name}已经是满级了`);
+    return;
+  }
+  state.sel = id;
+  state.mode = 'item';
+  renderHots(); renderDock();
+  /* 让被点的物件滚到视野中间（这里画面是铺满的，做个轻微缩放暗示） */
+  const el = $('shopLayer').querySelector(`[data-part="${id === 'sign' ? 'sign' + state.lv.sign : id}"]`);
+  if (el) el.classList.add('part');
+}
+function toast(msg){
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  stage.appendChild(t);
+  setTimeout(() => t.remove(), 1600);
+}
+
+/* ---------- 改造 ---------- */
+function doUpgrade(){
+  const s = SLOTS.find(x => x.id === state.sel);
+  if (!s) return;
+  const lv = state.lv[s.id];
+  if (lv >= s.max) return;
+
+  state.snap = Object.assign({}, state.lv);
+  state.lv[s.id] = lv + 1;
+  const before = score();
+
+  renderShop();
+  const key = s.id === 'sign' ? 'sign' + state.lv.sign : s.id;
+  const el = $('shopLayer').querySelector(`[data-part="${key}"]`);
+  if (el){
+    el.classList.add('off');
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove('off')));
+  }
+
+  const r = stage.getBoundingClientRect();
+  const f = document.createElement('div'); f.className = 'flash';
+  stage.appendChild(f); setTimeout(() => f.remove(), 520);
+  burst(r);
+  floatText(r, `+${s.rep} 口碑`, '#4ade80', .42);
+  floatText(r, `评分 +${score() - before}`, CH[state.chapter-1].acc, .52);
+
+  if (state.cmp === 'shop') mountCompare();
+  renderItem(); renderHots();
+  if (state.lv[s.id] >= s.max) setTimeout(function(){ setMode('idle'); }, 700);
+}
+function score(){
+  let a = 0, b = 0;
+  for (const s of SLOTS){ a += state.lv[s.id] / s.max; b++; }
+  return Math.round(a / b * 100);
+}
+function burst(r){
+  const cx = r.width * .5, cy = r.height * .55;
+  for (let i = 0; i < 16; i++){
+    const sp = document.createElement('span');
+    sp.className = 'spark';
+    const a = Math.PI * 2 * i / 16 + Math.random() * .4, d = 40 + Math.random() * 70;
+    sp.style.left = cx + 'px'; sp.style.top = cy + 'px';
+    sp.style.setProperty('--dx', Math.cos(a) * d + 'px');
+    sp.style.setProperty('--dy', (Math.sin(a) * d - 24) + 'px');
+    sp.style.background = i % 3 === 0 ? CH[state.chapter-1].warm : (i % 3 === 1 ? '#ffc247' : '#ff4d9d');
+    sp.style.animationDelay = (Math.random() * .1).toFixed(2) + 's';
+    stage.appendChild(sp);
+    setTimeout(() => sp.remove(), 1100);
+  }
+}
+function floatText(r, text, color, y){
+  const f = document.createElement('div');
+  f.className = 'float'; f.textContent = text; f.style.color = color;
+  f.style.left = (r.width * .5) + 'px'; f.style.top = (r.height * y) + 'px';
+  stage.appendChild(f);
+  setTimeout(() => f.remove(), 1250);
+}
+
+/* ---------- 对比 ---------- */
+function setCmp(mode){
+  state.cmp = mode;
+  stage.classList.toggle('compare', mode !== 'none');
+  document.querySelectorAll('#dockCmp button').forEach(function(b){
+    b.classList.toggle('on', b.dataset.cmp === mode);
+  });
+  stage.querySelectorAll('.cmp-tag').forEach(n => n.remove());
+  if (mode === 'none'){ $('beforeLayer').innerHTML = ''; return; }
+
+  const l = document.createElement('div'); l.className = 'cmp-tag l';
+  l.textContent = mode === 'shop' ? '改造前' : '上一章';
+  const rr = document.createElement('div'); rr.className = 'cmp-tag r';
+  rr.textContent = mode === 'shop' ? '改造后' : '现在';
+  stage.appendChild(l); stage.appendChild(rr);
+  mountCompare(); setSplit(50);
+}
+function mountCompare(){
+  const chOld = state.cmp === 'shop' ? state.chapter : (state.prevChapter || state.chapter);
+  const lvOld = state.cmp === 'shop'
+    ? (state.snap || { sign:0, awning:0, seat:0, plant:0, light:0, upper:0 })
+    : state.lv;
+  $('beforeLayer').innerHTML =
+    `<div style="position:absolute;inset:0">${envSvg(CH[chOld-1])}</div>` +
+    `<div style="position:absolute;inset:0">${shopSvg(lvOld, CH[chOld-1].warm)}</div>`;
+}
+function setSplit(pct){
+  stage.style.setProperty('--split', Math.max(4, Math.min(96, pct)) + '%');
+}
+let dragging = false;
+$('hit').addEventListener('pointerdown', function(e){
+  if (state.cmp === 'none') return;
+  dragging = true;
+  if ($('hit').setPointerCapture) $('hit').setPointerCapture(e.pointerId);
+  move(e);
+});
+$('hit').addEventListener('pointermove', function(e){ if (dragging) move(e); });
+$('hit').addEventListener('pointerup', function(){ dragging = false; });
+$('hit').addEventListener('pointercancel', function(){ dragging = false; });
+function move(e){
+  const r = stage.getBoundingClientRect();
+  setSplit(((e.clientX - r.left) / r.width) * 100);
+}
+
+/* ---------- 按钮 ---------- */
+$('btnRemodel').onclick = function(){
+  if (state.mode === 'remodel'){ setMode('idle'); return; }
+  setMode('remodel');
+  toast('点店里想改的东西');
+};
+$('btnCmp').onclick = function(){
+  setMode(state.mode === 'cmp' ? 'idle' : 'cmp');
+};
+$('btnToday').onclick = function(){
+  toast('这里是营业流程 —— 本原型只演示店铺与改造');
+};
+$('btnBack').onclick = function(){ setMode('idle'); };
+$('btnGo').onclick = doUpgrade;
+$('chapBtn').onclick = function(){
+  const next = state.chapter % CH.length + 1;
+  state.prevChapter = state.chapter;
+  state.chapter = next;
+  renderEnv(); renderShop();
+  if (state.cmp !== 'none') mountCompare();
+  toast(`搬到 ${CH[next-1].emoji} ${CH[next-1].name}`);
+};
+document.querySelectorAll('#dockCmp button').forEach(function(b){
+  b.onclick = function(){ setCmp(b.dataset.cmp); };
+});
+/* 点画面空白处 = 退出改造模式 */
+stage.addEventListener('click', function(e){
+  if (e.target.classList.contains('hot')) return;
+  if (state.mode === 'remodel' || state.mode === 'item') setMode('idle');
+});
+
+/* ---------- 启动 ---------- */
+renderEnv(); renderShop(); setMode('idle');
+$('hCash').textContent = '¥1,100';
+$('hRep').textContent = '50';
+</script>
+</body>
+</html>
