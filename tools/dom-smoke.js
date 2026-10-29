@@ -1053,4 +1053,28 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
   ok('G：店铺视窗（decor 八级各有可见变化 · 章节环境随天变 · 点击跳升级页）');
 }
 
+/* ============================================================
+ *  H 组：操作后滚动位置不丢（V22）
+ *  ★ 面板是整块 innerHTML 重建的，浏览器会把 scrollTop 归零。
+ *    玩家滚到第 8 个原料点「补足」被弹回顶部 —— 这是每次操作都会踩的手感问题，
+ *    而且修好之后**看不见**（没有任何报错，只是"感觉变顺了"），
+ *    所以必须有一条断言守着，否则下次重构很容易又丢掉。
+ * ============================================================ */
+{
+  const wrap = E.document.getElementById('panels');
+  wrap.scrollTop = 240;
+  E.UI.renderPanel('manage');
+  if (wrap.scrollTop !== 240) {
+    throw new Error('renderPanel 把滚动位置弄丢了（240 → ' + wrap.scrollTop + '）');
+  }
+  /* 反向：切 tab 必须回到顶部，否则玩家切页后停在上次的半截位置 */
+  wrap.scrollTop = 300;
+  E.UI.setTab('up');
+  if (wrap.scrollTop !== 0) {
+    throw new Error('setTab 没有把滚动位置归零（' + wrap.scrollTop + '）');
+  }
+  E.UI.setTab('manage');
+  ok('H：操作后滚动位置保持 · 切 tab 回到顶部');
+}
+
 console.log('\n✅ 全部冒烟测试通过，无运行时异常');

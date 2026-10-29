@@ -607,7 +607,25 @@ UI.renderPanel = function (t) {
   const fn = PANEL_RENDERERS[t];
   if (!fn) return;                 /* 未知 tab：不渲染，也不报错 */
   if (!window.S) return;           /* 未开局时任何面板都不该碰 DOM */
+
+  /* ★★ V22：保住滚动位置。
+     ★ 面板是整块 innerHTML 重建的 —— 每次「补足」「上架」「调价」都会把
+       整个 panel 换掉，而浏览器在新 DOM 上把 scrollTop 归零。
+       玩家滚到第 8 个原料、点一下补足，就被弹回顶部，得重新滚一遍。
+       这是**每一次操作**都会踩到的手感问题，比任何动效都值钱。
+     ★ 恢复放在 fn() 之后、且只在同一个 tab 内生效：
+       切 tab 仍然要回到顶部（setTab 在 renderPanel 之后又归了一次零）。
+     ★ 内容变短时浏览器会自动把 scrollTop 夹到合法范围，不需要手动 clamp。 */
+  const wrap = $('panels');
+  const keepTop = wrap ? wrap.scrollTop : 0;
+  const keepLeft = wrap ? wrap.scrollLeft : 0;
+
   fn();
+
+  if (wrap && (keepTop > 0 || keepLeft > 0)) {
+    wrap.scrollTop = keepTop;
+    wrap.scrollLeft = keepLeft;
+  }
 };
 UI.renderAll = function () { UI.renderHUD(); UI.renderPanel(UI.tab); };
 
@@ -701,10 +719,25 @@ UI.maybeShowChapter = function () {
    ★ 分层：环境层随章节换（CHAPTERS），店铺层随 decor 换。
      换章只换环境 —— 玩家花钱装的店不会因为换地方而重置。
    ============================================================ */
+/* ★★ V22：视窗 HTML 缓存。
+   ★ 为什么值得缓存：这块视窗约 4KB 字符串、40+ 个 SVG 元素，
+     而 renderManage 在每次操作（买料、调价、切页、开门）都会整块重建。
+     ★ 收益我只说能确定的：省掉的是「每帧重新拼 4KB 字符串 + 构建 40 个元素」，
+       没做真机耗时对比，所以不给具体毫秒数。
+   ★ key 只用两个变量：装修等级 + 章节。视窗的**全部**输入就是这两个
+     （颜色来自章节、部件显隐来自 decor）—— 加别的键会让缓存失效得太频繁，
+     漏掉任何一个都会渲染出过期画面，所以这里刻意保持"只依赖真实输入"。
+   ★ 缓存的是字符串，不是 DOM：panel 的 innerHTML 仍会整块替换，
+     省下的是"拼 4KB + 构建 40 个元素字符串"这部分。 */
+const SHOPWIN_CACHE = { key: '', html: '' };
+
 UI.shopWindowHtml = function (s) {
   const ch = (typeof chapterOf === 'function' && typeof CHAPTERS !== 'undefined')
     ? CHAPTERS[chapterOf(s) - 1] : null;
   const lv = s.up ? (s.up.decor || 0) : 0;
+
+  const cacheKey = lv + ':' + (ch ? ch.i : 0);
+  if (SHOPWIN_CACHE.key === cacheKey) return SHOPWIN_CACHE.html;
   const look = (typeof decorLook === 'function') ? decorLook(lv)
     : { light:0, awning:0, seat:0, plant:0, sign:0, upper:0 };
   const skyA = ch ? ch.bg : '#241540';
@@ -728,7 +761,7 @@ UI.shopWindowHtml = function (s) {
        <rect x="312" y="80" width="176" height="60" rx="12" fill="none" stroke="#ffd166" stroke-width="2.5"/>
        <text x="400" y="117" text-anchor="middle" font-size="22" font-weight="900" fill="#ffd166">奶茶星球</text>`;
 
-  return `<div class="shopwin" data-act="gotoup">
+  const html = `<div class="shopwin" data-act="gotoup">
     <svg viewBox="0 0 800 330" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
       <defs>
         <linearGradient id="swSky" x1="0" y1="0" x2="0" y2="1">
@@ -807,6 +840,9 @@ UI.shopWindowHtml = function (s) {
       <span class="sw-lv">装修 Lv.${lv}${lv >= 8 ? ' · 顶配' : ' · 点此去升级'}</span>
     </div>
   </div>`;
+  SHOPWIN_CACHE.key = cacheKey;
+  SHOPWIN_CACHE.html = html;
+  return html;
 };
 
 UI.renderManage = function () {

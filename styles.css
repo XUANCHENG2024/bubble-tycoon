@@ -2162,3 +2162,13 @@ body, #app {
   pointer-events: none;
 }
 .shopwin-cap .sw-lv { color: var(--amber); }
+
+/* 小屏适配（V22）——店铺视窗占 143px，在 568 高的小屏上会把合同卡挤下去。
+   ★ 用 max-height 压到 104px 而不是 display:none：
+     视窗是这一版最重要的视觉卖点，小屏直接藏掉等于这台手机没有这个功能。
+     压缩后仍保留店铺主体（SVG 用 preserveAspectRatio="slice"，等比裁切上下留白）。
+   ★ 阈值取 max-height: 660px：iPhone SE(667) 不触发，568/640 触发。 */
+@media (max-height: 660px) {
+  .shopwin { max-height: 104px; }
+  .shopwin svg { width: 100%; height: 104px; }
+}

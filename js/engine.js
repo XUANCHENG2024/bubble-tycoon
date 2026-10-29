@@ -323,7 +323,9 @@ function trafficOf(s) {
        bp 0 → 94% 达标 / 破产 0/8，bp 74（第 5 局）→ 74% 达标 / 破产 7/8。
      所以声望不再动客流，改为折算「开局创业基金」（见 prestigeStartCash）：
      钱怎么变成产能（雇人 / 提速 / 开店）由玩家自己决定，不会单向推高需求。 */
-  t *= 1 + 0.01 * s.up.auto;
+  /* ★ V22：0.01 → 0.025（满级 +15%）。原来只有 +6%，
+     配上 450×1.85^n 的成本，实测 ROI -0.24 —— 买完没感觉。 */
+  t *= 1 + 0.025 * s.up.auto;
   t *= cardMul(s, 'traffic');     /* 🃏 策略卡：薄利多销 / 达人探店这类 */
   t *= chapterMul(s, 'traffic');  /* 🗺️ 章节：夜市人多、清晨街区人少 */
   for (const st of s.staff) if (st.trait === 'star') t *= 1.07;
