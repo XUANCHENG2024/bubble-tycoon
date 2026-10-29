@@ -2138,3 +2138,27 @@ body, #app {
   to   { opacity: 1; transform: translate(-50%, -50%) scale(1) }
 }
 @keyframes ccBlink { 0%,100% { opacity: .35 } 50% { opacity: .8 } }
+
+/* ============================================================
+   店铺视窗（V22）——经营页顶部
+   ------------------------------------------------------------
+   ★ 16:6.6 的扁比例（viewBox 800×330）。选扁的不选方的：
+     竖屏首屏高度很贵，143px 是"看得出是个店"又不挤压合同的极限。
+   ★ 用 SVG 不用位图：随章节换色不需要 6 张图，且任意 DPR 都清晰。
+   ============================================================ */
+.shopwin {
+  position: relative; margin-bottom: 10px; border-radius: var(--r-md);
+  overflow: hidden; border: 1px solid var(--line); background: #0c0714;
+  cursor: pointer; transition: border-color .18s;
+}
+.shopwin:active { border-color: rgba(53,229,240,.5); }
+.shopwin svg { display: block; width: 100%; height: auto; }
+.shopwin-cap {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; justify-content: space-between; align-items: flex-end;
+  gap: 8px; padding: 14px 10px 6px;
+  font-size: var(--fs-xs); color: rgba(255,255,255,.85);
+  background: linear-gradient(0deg, rgba(8,4,15,.9) 30%, transparent);
+  pointer-events: none;
+}
+.shopwin-cap .sw-lv { color: var(--amber); }

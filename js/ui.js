@@ -689,6 +689,126 @@ UI.maybeShowChapter = function () {
   document.addEventListener('pointerdown', close);
 };
 
+/* ============================================================
+   店铺视窗（V22）
+   ------------------------------------------------------------
+   ★ 这是「店铺改造视觉方案」的最小落地：
+     不改数值、不重排 tab，只在经营页顶部加一块 16:6 的视窗，
+     让「装修」这个升级第一次有画面。
+   ★ 与 v3 原型（店铺即主界面）的关系：v3 是目标形态，
+     但全面空间化要动 6 个 tab、5~7 天、且信息密度会下降。
+     这一版先回答一个更小的问题：**店铺视觉值不值得为它改结构**。
+   ★ 分层：环境层随章节换（CHAPTERS），店铺层随 decor 换。
+     换章只换环境 —— 玩家花钱装的店不会因为换地方而重置。
+   ============================================================ */
+UI.shopWindowHtml = function (s) {
+  const ch = (typeof chapterOf === 'function' && typeof CHAPTERS !== 'undefined')
+    ? CHAPTERS[chapterOf(s) - 1] : null;
+  const lv = s.up ? (s.up.decor || 0) : 0;
+  const look = (typeof decorLook === 'function') ? decorLook(lv)
+    : { light:0, awning:0, seat:0, plant:0, sign:0, upper:0 };
+  const skyA = ch ? ch.bg : '#241540';
+  const warm = ch ? ch.warm : '#ffd98a';
+  const acc = ch ? ch.accent : '#35e5f0';
+  const wall = ['#3a3050','#463a5e','#544668','#6b5a7a','#8a7080','#a8848a','#c39a8c','#dcb08f'][Math.min(7, lv)];
+  const winOp = (0.34 + lv * 0.05).toFixed(2);
+
+  const signSvg = look.sign === 0
+    ? `<rect x="330" y="96" width="140" height="30" rx="3" fill="#4a3a63"/>
+       <text x="400" y="117" text-anchor="middle" font-size="16" font-weight="700" fill="#cbb9e0">奶茶星球</text>`
+    : look.sign === 1
+    ? `<rect x="322" y="90" width="156" height="40" rx="6" fill="#2a1a3d"/>
+       <rect x="326" y="94" width="148" height="32" rx="4" fill="${warm}"/>
+       <text x="400" y="116" text-anchor="middle" font-size="18" font-weight="800" fill="#7a3b1e">奶茶星球</text>`
+    : look.sign === 2
+    ? `<rect x="318" y="86" width="164" height="48" rx="10" fill="#1e1130"/>
+       <rect x="318" y="86" width="164" height="48" rx="10" fill="none" stroke="${acc}" stroke-width="3"/>
+       <text x="400" y="117" text-anchor="middle" font-size="20" font-weight="800" fill="${acc}">奶茶星球</text>`
+    : `<rect x="312" y="80" width="176" height="60" rx="12" fill="#160c26"/>
+       <rect x="312" y="80" width="176" height="60" rx="12" fill="none" stroke="#ffd166" stroke-width="2.5"/>
+       <text x="400" y="117" text-anchor="middle" font-size="22" font-weight="900" fill="#ffd166">奶茶星球</text>`;
+
+  return `<div class="shopwin" data-act="gotoup">
+    <svg viewBox="0 0 800 330" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="swSky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="${skyA}"/><stop offset="1" stop-color="#120a20"/></linearGradient>
+        <radialGradient id="swWarm" cx=".5" cy=".72" r=".5">
+          <stop offset="0" stop-color="${warm}" stop-opacity=".4"/>
+          <stop offset="1" stop-color="${warm}" stop-opacity="0"/></radialGradient>
+      </defs>
+      <rect width="800" height="330" fill="url(#swSky)"/>
+
+      <!-- 远景楼群（所有章节共用轮廓，只换颜色） -->
+      <g fill="#000" opacity=".22">
+        <rect x="30" y="120" width="110" height="120"/><rect x="160" y="96" width="80" height="144"/>
+        <rect x="600" y="104" width="120" height="136"/><rect x="700" y="130" width="80" height="110"/>
+      </g>
+      <rect y="240" width="800" height="90" fill="#0c0714"/>
+      <ellipse cx="400" cy="244" rx="240" ry="12" fill="${warm}" opacity=".10"/>
+
+      <!-- 二层（decor ≥ 7） -->
+      ${look.upper ? `<g>
+        <rect x="274" y="34" width="252" height="52" rx="5" fill="#2c1d44"/>
+        <rect x="298" y="46" width="60" height="28" rx="3" fill="${warm}" opacity=".85"/>
+        <rect x="442" y="46" width="60" height="28" rx="3" fill="${warm}" opacity=".8"/>
+      </g>` : ''}
+
+      <!-- 墙 / 门 / 窗 -->
+      <rect x="256" y="90" width="288" height="160" rx="4" fill="${wall}"/>
+      <rect x="248" y="84" width="304" height="9" rx="4" fill="#2b1e42"/>
+      <rect x="364" y="160" width="92" height="90" rx="6" fill="#2a1c3e"/>
+      <rect x="370" y="166" width="80" height="78" rx="4" fill="#3a2856"/>
+      <rect x="378" y="172" width="64" height="52" rx="3" fill="${warm}" opacity=".45"/>
+      <circle cx="442" cy="200" r="3" fill="${warm}"/>
+      <rect x="278" y="152" width="60" height="44" rx="4" fill="#221535"/>
+      <rect x="282" y="156" width="52" height="36" rx="3" fill="${warm}" opacity="${winOp}"/>
+      <rect x="462" y="152" width="60" height="44" rx="4" fill="#221535"/>
+      <rect x="466" y="156" width="52" height="36" rx="3" fill="${warm}" opacity="${winOp}"/>
+
+      ${signSvg}
+
+      <!-- 灯串（decor ≥ 1） -->
+      ${look.light ? `<g>
+        <path d="M258 130 Q400 148 542 130" stroke="#3a2a55" stroke-width="1.6" fill="none"/>
+        <g fill="${warm}">${[0,1,2,3,4,5].map(function(i){
+          return `<circle cx="${284 + i * 46}" cy="${136 + (i === 0 || i === 5 ? 0 : 6)}" r="2.6"/>`;}).join('')}
+        </g></g>` : ''}
+
+      <!-- 雨棚（decor ≥ 2） -->
+      ${look.awning ? `<g>
+        <path d="M262 138 L538 138 L548 158 L252 158 Z" fill="#ff4d9d" opacity=".9"/>
+        <g fill="#ffe3ef" opacity=".85">${[0,1,2,3,4,5,6,7].map(function(i){
+          const x0 = 272 + i * 34;
+          return `<path d="M${x0} 138 L${x0 + 12} 138 L${x0} 158 L${x0 - 12} 158 Z"/>`;}).join('')}
+        </g></g>` : ''}
+
+      <!-- 桌椅（decor ≥ 3） -->
+      ${look.seat ? `<g>
+        <ellipse cx="196" cy="234" rx="28" ry="7" fill="#6b4f8f"/>
+        <ellipse cx="196" cy="232" rx="24" ry="5" fill="#8a68b0"/>
+        <rect x="193" y="234" width="5" height="12" fill="#4a3566"/>
+        <rect x="154" y="238" width="10" height="10" rx="3" fill="#513a72"/>
+        <rect x="228" y="238" width="10" height="10" rx="3" fill="#513a72"/>
+      </g>` : ''}
+
+      <!-- 绿植（decor ≥ 4） -->
+      ${look.plant ? `<g>
+        <path d="M296 250 L296 232 L312 232 L312 250 Z" fill="#6b4a33"/>
+        <circle cx="304" cy="226" r="10" fill="#2f9e6b"/><circle cx="298" cy="232" r="7" fill="#38b87c"/>
+        <path d="M488 250 L488 232 L504 232 L504 250 Z" fill="#6b4a33"/>
+        <circle cx="496" cy="226" r="10" fill="#2f9e6b"/><circle cx="502" cy="232" r="7" fill="#2a8a5d"/>
+      </g>` : ''}
+
+      <ellipse cx="400" cy="210" rx="220" ry="110" fill="url(#swWarm)"/>
+    </svg>
+    <div class="shopwin-cap">
+      <span>${ch ? ch.emoji + ' ' + ch.name : '街角小店'}</span>
+      <span class="sw-lv">装修 Lv.${lv}${lv >= 8 ? ' · 顶配' : ' · 点此去升级'}</span>
+    </div>
+  </div>`;
+};
+
 UI.renderManage = function () {
   const s = window.S; if (!s) return;
   UI.applyChapterTheme(s);    /* 章节配色（幂等，每次都设） */
@@ -696,6 +816,10 @@ UI.renderManage = function () {
   const tag = TAGS[s.trend];
   const nextTag = TAGS[s.nextTrend];
   let h = '';
+
+  /* 店铺视窗放最前：它是"我在哪 / 我的店长什么样"的视觉锚点，
+     合同与今日信息紧随其后（那些是"今天要做什么"）。 */
+  h += UI.shopWindowHtml(s);
 
   /* ★ V16：从别处跳来时的来源条（统一的返回方式）。
      玩家从研发页点原料跳到市场，得知道「我在哪、怎么回去」——

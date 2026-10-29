@@ -1003,4 +1003,54 @@ ok('战绩卡片绘制 + 结局页（含曲线 + 无尽入口）');
   ok('F3：每日挑战日榜（只记当天最好一局 · 近 7 天 · 上报分数夹到 int32 · 存档清洗 · 两版入口）');
 }
 
+/* ============================================================
+ *  G 组：店铺视窗（V22）
+ *  ★ 为什么放在 DOM 冒烟里而不是单独脚本：jsdom 跑不起这套游戏
+ *    （缺 canvas / AudioContext 实现，脚本直接抛错）。这里的桩是
+ *    全项目唯一能真正加载并调用 UI 的环境，所以验证放这儿。
+ *  ★ 验的是「八级各有可见变化」：这是视窗存在的唯一理由 ——
+ *    如果 Lv.3 和 Lv.4 长得一样，那它就只是一张背景图。
+ * ============================================================ */
+{
+  const mk = (decor, day) => {
+    const st = E.newGame('normal', 0, null);
+    st.up.decor = decor;
+    if (day) st.day = day;
+    return E.UI.shopWindowHtml(st);
+  };
+  const has = (h, key) => {
+    if (key === 'awning') return h.indexOf('ff4d9d') >= 0;      /* 雨棚条纹粉 */
+    if (key === 'seat')   return h.indexOf('8a68b0') >= 0;      /* 桌面紫 */
+    if (key === 'plant')  return h.indexOf('2f9e6b') >= 0;      /* 叶绿 */
+    if (key === 'upper')  return h.indexOf('2c1d44') >= 0;      /* 二层墙 */
+    if (key === 'light')  return h.indexOf('Q400 148 542 130') >= 0;  /* 灯串弧线 */
+    if (key === 'sign1')  return h.indexOf('#7a3b1e') >= 0;     /* 灯箱深棕字 */
+    if (key === 'sign3')  return h.indexOf('#ffd166') >= 0;     /* 金字 */
+    return false;
+  };
+  const base = mk(0, 3);
+  checkHTML('店铺视窗(Lv.0)', base);
+  if (base.indexOf('class="shopwin"') < 0) throw new Error('店铺视窗没有输出容器');
+  if (base.indexOf('<svg') < 0) throw new Error('店铺视窗没有 SVG');
+
+  const steps = [
+    ['light',  1, 0, '灯串'],
+    ['awning', 2, 1, '雨棚'],
+    ['seat',   3, 2, '桌椅'],
+    ['plant',  4, 3, '绿植'],
+    ['sign1',  5, 4, '灯箱招牌'],
+    ['upper',  7, 6, '二层'],
+    ['sign3',  8, 7, '金字招牌'],
+  ];
+  for (const [key, onLv, offLv, name] of steps) {
+    if (!has(mk(onLv), key)) throw new Error(`装修 Lv.${onLv} 应该出现${name}`);
+    if (has(mk(offLv), key)) throw new Error(`装修 Lv.${offLv} 不该有${name}`);
+  }
+  /* 同一装修、不同章节 → 环境不同（天空色随章变） */
+  if (mk(4, 3) === mk(4, 13)) throw new Error('换章后店铺视窗没有变化（环境层没生效）');
+  if (mk(8).indexOf('顶配') < 0) throw new Error('满级没有显示「顶配」');
+  if (mk(3).indexOf('点此去升级') < 0) throw new Error('未满级没有提示去升级');
+  ok('G：店铺视窗（decor 八级各有可见变化 · 章节环境随天变 · 点击跳升级页）');
+}
+
 console.log('\n✅ 全部冒烟测试通过，无运行时异常');
