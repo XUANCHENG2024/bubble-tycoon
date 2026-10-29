@@ -853,7 +853,15 @@ const UPGRADES = [
     desc: '出杯速度 +20%/级', detail: l => `当前：出杯速度 +${l * 20}%` },
   { id: 'decor', name: '门店装修', emoji: '✨', max: 8, base: 280, mult: 1.62,
     desc: '客流 +15%、等位座 +1/级', detail: l => `当前：客流 +${l * 15}%，等位 ${CFG.BASE_QUEUE + l} 位` },
-  { id: 'menu', name: '招牌展位', emoji: '📋', max: 6, base: 260, mult: 1.5,
+  /* ★★ V22：菜单位 8 → 12 槽（max 6→10），同时把 mult 1.5 → 1.38。
+     ★ 为什么两个数必须一起改：menu 成本 = 260 × 1.5^lv，
+       后 4 级（7~10）合计 ¥24,060，占一局产出 40% —— 玩家不会买。
+       只改 max 的实际效果是「多了 4 个看得见但买不起的格子」。
+       降到 1.44 后后 4 级合计 ¥16,785 ≈ 单局产出 28%（要攒但够得着），
+       前 6 级只便宜 4%（噪声内）。1.38 试过，只有 21%，偏松、玩家会轻易买满。
+     ★ 背景：配方 57 款、槽位 8 个 → 内容触达率 14%，
+       49 款研发出来只为了"解锁"这个动作。详见 docs/design/菜单槽扩容-E1-规格.md */
+  { id: 'menu', name: '招牌展位', emoji: '📋', max: 10, base: 260, mult: 1.44,
     desc: '可上架配方 +1/级', detail: l => `当前：可上架 ${2 + l} 款` },
   { id: 'storage', name: '冷链仓库', emoji: '🧊', max: 6, base: 200, mult: 1.5,
     desc: '库存上限 +180/级', detail: l => `当前：上限 ${CFG.BASE_STORAGE + l * 180}` },
@@ -2311,12 +2319,17 @@ const DIFFICULTY = {
        用 random 当基线会把目标定得偏低（同一份代码，normal 过关率 33% vs 73%）。
      ★ 验收看**过关率**（过线局数/总局数），不看"平均净资产/目标"——
        后者是完成度，两者会给出相反的结论（旧 easy 完成度 81%、过关率却 0%）。
-     ★★ V22 定稿：目标**重新变成递增**（easy 65k / normal 56k / hard 51k）。
+     ★★ V22 定稿：目标**重新变成递增**（三档统一 54k）。
        上一版被迫统一成 55000，是因为三档产出极差只有 5.6%，递增目标会让过关率倒挂。
        这一版把库容起点做成难度（easy 570 / normal 420 / hard 300）之后，
        产出极差拉到 **50%**（77.8k / 64.5k / 51.9k），递增目标才重新成立。
        ★ 这一步的意义：**"越难目标越高"是玩家的默认预期**，值得为它改经济结构，
          而不是反过来让目标迁就一个扁平的经济。
+     ★★ V22-b：菜单位扩容后产出升到 78k / 58k / 49k，**递增目标又走不通了** ——
+        要让过关率递减，目标就得 66k / 55k / 47k，玩家会看到「地狱模式目标比简单模式还低」。
+        所以再回到统一目标 54000，语义回到最干净的一句：
+        **同样 52000，三种经营环境。**
+        代价是 easy 的过关率接近 100% —— 但那本来就是"佛系躺赢"该有的样子。
        ⚠️ 想让三档真正拉开差距，必须换杠杆（更小的库容 / 更高的经常性成本 / 抗封顶），
           不是继续调目标 —— 详见 docs/reports/内容优化-第四轮-专家协作.md。
      ★★ V22：换的就是「库容起点」。三档产出极差只有 5.6%，因为 costMult 只作用于
@@ -2330,11 +2343,11 @@ const DIFFICULTY = {
          manual  （手搓配额，比真人笨）：                          53% / 21% / 25%
        只要 autoFill 落在 85~95%、manual 不低于 20%，就认为目标可用。
        —— 上一版只按 manual 标定，等于拿一个偏弱的 bot 当基准，目标被系统性低估。 */
-  easy:   { key: 'easy',   name: '佛系躺赢', emoji: '🌱', cash: 1100, goal: 65000, traffic: 1.15, costMult: 0.88, rentMult: 0.8,
+  easy:   { key: 'easy',   name: '佛系躺赢', emoji: '🌱', cash: 1100, goal: 54000, traffic: 1.15, costMult: 0.88, rentMult: 0.8,
             storageBase: 570,
             contractGoal: 0.80, contractPenalty: 0, stageGoal: 0.85,
             desc: '现金流宽松，适合先熟悉玩法' },
-  normal: { key: 'normal', name: '标准创业', emoji: '🔥', cash: 700, goal: 56000, traffic: 1.0, costMult: 1.0, rentMult: 1.0,
+  normal: { key: 'normal', name: '标准创业', emoji: '🔥', cash: 700, goal: 54000, traffic: 1.0, costMult: 1.0, rentMult: 1.0,
             storageBase: 420,
             contractGoal: 1.0, contractPenalty: 0.6, stageGoal: 1.0,
             desc: '推荐首次挑战，需要认真经营' },
@@ -2350,7 +2363,7 @@ const DIFFICULTY = {
      实测 n=40：过关率 48% → 35%，掉 13pp。
      ⇒ 这里该调的是**合同门槛**（1.22 太苛刻），不是把目标从 54000 压到 52000 ——
        压目标只会掩盖问题，而合同失败的死循环还在。 */
-  hard:   { key: 'hard',   name: '地狱卷王', emoji: '💀', cash: 520, goal: 51000, traffic: 0.90, costMult: 1.15, rentMult: 1.22,
+  hard:   { key: 'hard',   name: '地狱卷王', emoji: '💀', cash: 520, goal: 54000, traffic: 0.90, costMult: 1.15, rentMult: 1.22,
             storageBase: 300,
             contractGoal: 1.10, contractPenalty: 0.35, stageGoal: 1.30,
             desc: '成本高、客流少，建议攒够声望再挑战' },
@@ -2484,9 +2497,9 @@ const MILESTONE_EVERY = 5;
  *        而「本档内锚点够得着」比「跨难度数字好看」重要得多。
  */
 const STAGE_GOALS = {
-  easy:   [5300, 10300, 19400, 30700, 49900, 65000],
-  normal: [4400, 8900, 16700, 26600, 43000, 56000],
-  hard:   [4000, 8100, 15200, 24100, 39200, 51000],
+  easy:   [4300, 8700, 16100, 25700, 41500, 54000],
+  normal: [4300, 8700, 16100, 25700, 41500, 54000],
+  hard:   [4300, 8700, 16100, 25700, 41500, 54000],
 };
 
 /* 兼容旧引用（UI 层用 MILESTONE_RATIO 画刻度）——
